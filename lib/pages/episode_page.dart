@@ -30,6 +30,7 @@ class _EpisodePageState extends State<EpisodePage> {
   String? _activeServer;
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
+  bool _autoPlayedNext = false;
 
   late final Player _player;
   late final VideoController _controller;
@@ -40,9 +41,12 @@ class _EpisodePageState extends State<EpisodePage> {
     _player = Player();
     _controller = VideoController(_player);
     _player.stream.playing.listen((_) { if (mounted) setState(() {}); });
-    _player.stream.duration.listen((_) { if (mounted) setState(() {}); });
-    _player.stream.position.listen((_) { if (mounted) setState(() {}); });
-    _player.stream.buffer.listen((_) { if (mounted) setState(() {}); });
+    _player.stream.completed.listen((completed) {
+      if (completed && mounted && !_autoPlayedNext) {
+        _autoPlayedNext = true;
+        _goNext();
+      }
+    });
     _player.stream.error.listen((err) {
       debugPrint('MEDIA_KIT ERROR: $err');
       if (mounted && err.isNotEmpty) setState(() => _videoError = true);
@@ -69,12 +73,16 @@ class _EpisodePageState extends State<EpisodePage> {
         _episode = ep;
         _animeDetail = detail;
         _loading = false;
+        _autoPlayedNext = false;
         _activeVariant = ep.variants.contains('DUB') ? 'DUB' : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
       });
       // Register in history
-      if (detail != null) {
-        ApiService.addHistory(detail.id, detail.slug, detail.title, ep.number);
-      }
+      ApiService.addHistory(
+        detail?.id ?? 0,
+        widget.animeSlug,
+        detail?.title ?? widget.animeTitle,
+        ep.number,
+      );
       _autoPlay();
     } catch (e) {
       debugPrint('LOAD ERROR: $e');
@@ -94,15 +102,13 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Future<void> _playServer(ServerMirror server) async {
-    setState(() { _videoReady = false; _videoError = false; _activeServer = server.server; });
+    setState(() { _videoReady = false; _videoError = false; _activeServer = server.server; _autoPlayedNext = false; });
 
     try {
       debugPrint('PLAY SERVER: ${server.server} → ${server.url}');
       final data = await ApiService.fetchVideoUrl(server.url);
       final videoUrl = data['url'] as String?;
       final videoType = data['type'] as String? ?? 'mp4';
-
-      debugPrint('VIDEO URL: $videoUrl (type: $videoType)');
 
       if (videoUrl == null || videoUrl.isEmpty) {
         setState(() => _videoError = true);
@@ -126,19 +132,33 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   void _retry() {
-    // Retry the current server without resetting variant/server selection
     final ep = _episode;
     if (ep == null) return;
     final currentServer = _activeServer;
     if (currentServer != null) {
       final server = ep.embeds.where((s) => s.server == currentServer && s.variant == _activeVariant).firstOrNull;
-      if (server != null) {
-        _playServer(server);
-        return;
-      }
+      if (server != null) { _playServer(server); return; }
     }
-    // Fallback: auto-select if no current server
     _autoPlay();
+  }
+
+  void _goNext() {
+    final detail = _animeDetail;
+    if (detail == null) return;
+    final nextEp = widget.episodeNumber + 1;
+    if (nextEp <= detail.episodes.length) {
+      Navigator.pushReplacement(context, MaterialPageRoute(
+        builder: (_) => EpisodePage(animeSlug: widget.animeSlug, episodeNumber: nextEp, animeTitle: widget.animeTitle),
+      ));
+    }
+  }
+
+  void _goPrev() {
+    if (widget.episodeNumber > 1) {
+      Navigator.pushReplacement(context, MaterialPageRoute(
+        builder: (_) => EpisodePage(animeSlug: widget.animeSlug, episodeNumber: widget.episodeNumber - 1, animeTitle: widget.animeTitle),
+      ));
+    }
   }
 
   void _toggleFullscreen() {
@@ -198,23 +218,20 @@ class _EpisodePageState extends State<EpisodePage> {
     );
   }
 
-  // ── Wide layout: video left, info right ──
   Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Left: video + controls
         Expanded(
           flex: 3,
           child: Column(
             children: [
               AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
-              if (_videoReady) _buildPlaybar(),
+              _buildNavButtons(ep),
               _buildVariantAndServers(ep, filteredEmbeds),
             ],
           ),
         ),
-        // Right: info + episodes
         Expanded(
           flex: 2,
           child: SingleChildScrollView(
@@ -226,14 +243,13 @@ class _EpisodePageState extends State<EpisodePage> {
     );
   }
 
-  // ── Narrow layout: video top, info bottom ──
   Widget _buildNarrowLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
-          if (_videoReady) _buildPlaybar(),
+          _buildNavButtons(ep),
           _buildVariantAndServers(ep, filteredEmbeds),
           Padding(padding: const EdgeInsets.all(16), child: _buildInfoSection(ep, anime)),
         ],
@@ -267,26 +283,49 @@ class _EpisodePageState extends State<EpisodePage> {
     );
   }
 
-  Widget _buildPlaybar() {
+  Widget _buildNavButtons(EpisodeDetail ep) {
+    final hasPrev = ep.number > 1;
+    final hasNext = _animeDetail != null && ep.number < _animeDetail!.episodes.length;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(_player.state.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
-            onPressed: () => _player.playOrPause(),
-          ),
           Expanded(
-            child: Slider(
-              value: _player.state.position.inSeconds.toDouble().clamp(0, _player.state.duration.inSeconds.toDouble().clamp(1, double.infinity)),
-              max: _player.state.duration.inSeconds.toDouble().clamp(1, double.infinity),
-              activeColor: const Color(0xFF8b5cf6),
-              inactiveColor: const Color(0xFF1e1832),
-              onChanged: (v) => _player.seek(Duration(seconds: v.toInt())),
+            child: SizedBox(
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: hasPrev ? _goPrev : null,
+                icon: const Icon(Icons.skip_previous_rounded, size: 20),
+                label: const Text('Anterior', style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: hasPrev ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
+                  foregroundColor: hasPrev ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: BorderSide(color: hasPrev ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                  elevation: 0,
+                ),
+              ),
             ),
           ),
-          Text('${_fmt(_player.state.position)} / ${_fmt(_player.state.duration)}',
-            style: const TextStyle(color: Color(0xFFa99fc0), fontSize: 12)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: hasNext ? _goNext : null,
+                icon: const Icon(Icons.skip_next_rounded, size: 20),
+                label: const Text('Siguiente', style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: hasNext ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
+                  foregroundColor: hasNext ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: BorderSide(color: hasNext ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -295,10 +334,9 @@ class _EpisodePageState extends State<EpisodePage> {
   Widget _buildVariantAndServers(EpisodeDetail ep, List<ServerMirror> filteredEmbeds) {
     return Column(
       children: [
-        // Variant selector
         if (ep.variants.length > 1)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(
               children: [
                 const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
@@ -322,10 +360,9 @@ class _EpisodePageState extends State<EpisodePage> {
               ],
             ),
           ),
-        // Server buttons
         if (filteredEmbeds.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
                 const Icon(Icons.dns_outlined, color: Color(0xFF6d6488), size: 18),
@@ -358,14 +395,12 @@ class _EpisodePageState extends State<EpisodePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Text(widget.animeTitle, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFFe8e4f0))),
         ),
         const SizedBox(height: 4),
         Text('Episodio ${ep.number}', style: const TextStyle(fontSize: 14, color: Color(0xFF6d6488))),
-        // Meta
         if (anime != null) ...[
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 4, children: [
@@ -374,12 +409,10 @@ class _EpisodePageState extends State<EpisodePage> {
             ...anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))),
           ]),
         ],
-        // Synopsis
         if (anime != null && anime.synopsis.isNotEmpty) ...[
           const SizedBox(height: 14),
           Text(anime.synopsis, style: const TextStyle(fontSize: 14, color: Color(0xFFa99fc0), height: 1.5)),
         ],
-        // Episode grid
         if (anime != null && anime.episodes.isNotEmpty) ...[
           const SizedBox(height: 20),
           const Text('Episodios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFe8e4f0))),
@@ -417,11 +450,5 @@ class _EpisodePageState extends State<EpisodePage> {
       decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
       child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
     );
-  }
-
-  String _fmt(Duration d) {
-    final h = d.inHours, m = d.inMinutes.remainder(60), s = d.inSeconds.remainder(60);
-    if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 }

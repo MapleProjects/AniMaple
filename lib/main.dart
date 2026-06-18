@@ -58,24 +58,33 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  final _pages = const [
-    HomePage(),
-    SearchPage(),
-    CalendarPage(),
-    HistoryPage(),
-    FollowingPage(),
-  ];
+  // Keys to access page state for refresh
+  final _historyKey = GlobalKey<HistoryPageState>();
+  final _followingKey = GlobalKey<FollowingPageState>();
+
+  void _onTabChanged(int index) {
+    setState(() => _currentIndex = index);
+    // Refresh pages that need fresh data when tab becomes active
+    if (index == 3) _historyKey.currentState?.refresh();
+    if (index == 4) _followingKey.currentState?.refresh();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: [
+          const HomePage(),
+          const SearchPage(),
+          const CalendarPage(),
+          HistoryPage(key: _historyKey),
+          FollowingPage(key: _followingKey),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        onDestinationSelected: _onTabChanged,
         backgroundColor: const Color(0xFF0a0812).withValues(alpha: 0.95),
         surfaceTintColor: Colors.transparent,
         indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.15),

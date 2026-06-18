@@ -7,10 +7,10 @@ class FollowingPage extends StatefulWidget {
   const FollowingPage({super.key});
 
   @override
-  State<FollowingPage> createState() => _FollowingPageState();
+  State<FollowingPage> createState() => FollowingPageState();
 }
 
-class _FollowingPageState extends State<FollowingPage> {
+class FollowingPageState extends State<FollowingPage> {
   List<FollowedAnime> _following = [];
   bool _loading = true;
 
@@ -19,6 +19,8 @@ class _FollowingPageState extends State<FollowingPage> {
     super.initState();
     _load();
   }
+
+  void refresh() => _load();
 
   Future<void> _load() async {
     try {

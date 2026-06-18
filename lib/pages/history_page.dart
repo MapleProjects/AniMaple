@@ -7,10 +7,10 @@ class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
   @override
-  State<HistoryPage> createState() => _HistoryPageState();
+  State<HistoryPage> createState() => HistoryPageState();
 }
 
-class _HistoryPageState extends State<HistoryPage> {
+class HistoryPageState extends State<HistoryPage> {
   List<HistoryEntry> _history = [];
   bool _loading = true;
 
@@ -19,6 +19,9 @@ class _HistoryPageState extends State<HistoryPage> {
     super.initState();
     _load();
   }
+
+  /// Called by parent when tab becomes active
+  void refresh() => _load();
 
   Future<void> _load() async {
     try {
