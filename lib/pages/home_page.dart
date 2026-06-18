@@ -47,14 +47,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // Navigate to search tab
-            },
-          ),
-        ],
       ),
       body: _loading
         ? const Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6)))
@@ -88,10 +80,10 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     sliver: SliverGrid(
                       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 180,
-                        childAspectRatio: 0.75,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
+                        maxCrossAxisExtent: 200,
+                        childAspectRatio: 0.6,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) => EpisodeCard(

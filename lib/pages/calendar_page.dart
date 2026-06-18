@@ -34,7 +34,7 @@ class _CalendarPageState extends State<CalendarPage> {
         if (a.startDate != null) {
           try {
             final dt = DateTime.parse(a.startDate!);
-            day = _dayNames[dt.weekday % 7]; // weekday 1=Mon, 7=Sun → index
+            day = _dayNames[dt.weekday % 7];
           } catch (_) {}
         }
         grouped.putIfAbsent(day, () => []).add(a);
@@ -82,8 +82,7 @@ class _CalendarPageState extends State<CalendarPage> {
                           backgroundColor: const Color(0xFF110e1a),
                           labelStyle: TextStyle(
                             color: isActive ? Colors.white : const Color(0xFFa99fc0),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                            fontWeight: FontWeight.w600, fontSize: 13,
                           ),
                           side: const BorderSide(color: Color(0xFF1e1832)),
                         ),
@@ -91,60 +90,56 @@ class _CalendarPageState extends State<CalendarPage> {
                     },
                   ),
                 ),
-                // Anime list for selected day
+                // Anime grid for selected day (mosaic format)
                 Expanded(
                   child: Builder(
                     builder: (ctx) {
                       final day = _days[_selectedDay];
                       final animeList = _grouped[day] ?? [];
-                      return ListView.builder(
+                      return GridView.builder(
                         padding: const EdgeInsets.all(12),
+                        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 200,
+                          childAspectRatio: 0.6,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                        ),
                         itemCount: animeList.length,
                         itemBuilder: (ctx, i) {
                           final a = animeList[i];
-                          return Card(
-                            color: const Color(0xFF110e1a),
-                            margin: const EdgeInsets.only(bottom: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () => Navigator.push(context, MaterialPageRoute(
-                                builder: (_) => DetailPage(slug: a.slug),
-                              )),
-                              child: Row(
-                                children: [
-                                  // Poster
-                                  ClipRRect(
-                                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
-                                    child: a.poster != null
-                                      ? Image.network(a.poster!, width: 80, height: 110, fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => Container(width: 80, height: 110, color: const Color(0xFF1a1530), child: const Icon(Icons.image, color: Color(0xFF4a4260))))
-                                      : Container(width: 80, height: 110, color: const Color(0xFF1a1530), child: const Icon(Icons.image, color: Color(0xFF4a4260))),
-                                  ),
-                                  // Info
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFFe8e4f0))),
-                                          const SizedBox(height: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
-                                              borderRadius: BorderRadius.circular(4),
-                                            ),
-                                            child: Text(a.category, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFa78bfa))),
-                                          ),
-                                        ],
-                                      ),
+                          return GestureDetector(
+                            onTap: () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => DetailPage(slug: a.slug),
+                            )),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF110e1a),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: a.poster != null
+                                      ? Image.network(a.poster!, fit: BoxFit.cover, width: double.infinity,
+                                          errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)))
+                                      : const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)),
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFFe8e4f0), height: 1.3)),
+                                Container(
+                                  margin: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(a.category, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFFa78bfa))),
+                                ),
+                              ],
                             ),
                           );
                         },

@@ -206,6 +206,8 @@ class HistoryEntry {
     required this.watchedAt,
   });
 
+  String get posterUrl => 'https://cdn.animeav1.com/covers/$animeId.jpg';
+
   factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
     animeId: j['anime_id'] ?? 0,
     animeSlug: j['anime_slug'] ?? '',
@@ -227,6 +229,8 @@ class FollowedAnime {
     required this.animeSlug,
     required this.followedAt,
   });
+
+  String get posterUrl => 'https://cdn.animeav1.com/covers/$animeId.jpg';
 
   factory FollowedAnime.fromJson(Map<String, dynamic> j) => FollowedAnime(
     animeId: j['anime_id'] ?? 0,
