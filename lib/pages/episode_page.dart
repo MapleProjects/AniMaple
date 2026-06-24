@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/hls_proxy.dart';
 
 class EpisodePage extends StatefulWidget {
   final String animeSlug;
@@ -34,6 +35,7 @@ class _EpisodePageState extends State<EpisodePage> {
   late int _currentEp;
 
   late final VideoController _player;
+  final _hlsProxy = HlsProxy();
 
   @override
   void initState() {
@@ -44,7 +46,9 @@ class _EpisodePageState extends State<EpisodePage> {
     _player.finishedTimes.addListener(_onFinished);
     _player.error.addListener(_onError);
     _player.loading.addListener(_onLoading);
-    _load();
+    _player.videoSize.addListener(_onVideoSize);
+    _player.mediaInfo.addListener(_onMediaInfo);
+    _hlsProxy.start().then((_) => _load());
   }
 
   void _onStateChanged() {
@@ -69,12 +73,25 @@ class _EpisodePageState extends State<EpisodePage> {
     if (mounted) setState(() {});
   }
 
+  void _onVideoSize() {
+    debugPrint('VIDEO_VIEW videoSize: ${_player.videoSize.value}');
+    if (mounted) setState(() {});
+  }
+
+  void _onMediaInfo() {
+    debugPrint('VIDEO_VIEW mediaInfo: ${_player.mediaInfo.value?.duration}');
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     _player.playbackState.removeListener(_onStateChanged);
     _player.finishedTimes.removeListener(_onFinished);
     _player.error.removeListener(_onError);
     _player.loading.removeListener(_onLoading);
+    _player.videoSize.removeListener(_onVideoSize);
+    _player.mediaInfo.removeListener(_onMediaInfo);
+    _hlsProxy.stop();
     _player.dispose();
     if (_isFullscreen) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -136,6 +153,7 @@ class _EpisodePageState extends State<EpisodePage> {
         debugPrint('PLAY SERVER: ${server.server} → ${server.url}');
         final data = await ApiService.fetchVideoUrl(server.url);
         final videoUrl = data['url'] as String?;
+        final videoType = data['type'] as String? ?? 'mp4';
 
         if (videoUrl == null || videoUrl.isEmpty) {
           await Future.delayed(const Duration(seconds: 3));
@@ -143,7 +161,12 @@ class _EpisodePageState extends State<EpisodePage> {
         }
 
         debugPrint('PLAYING: $videoUrl');
-        _player.open(videoUrl);
+        // Proxy HLS streams through local server to fix content-type
+        final playUrl = videoType == 'hls' && _hlsProxy.isRunning
+            ? _hlsProxy.proxyM3U8(videoUrl)
+            : videoUrl;
+        debugPrint('PLAY URL: $playUrl');
+        _player.open(playUrl);
         return;
       } catch (e) {
         debugPrint('PLAY RETRY: $e');
@@ -283,19 +306,16 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Widget _buildVideoPlayer() {
-    final bool isReady = _player.mediaInfo.value != null && !_player.loading.value;
     return Container(
       color: Colors.black,
-      child: isReady
-        ? VideoView(controller: _player)
-        : Stack(
-            alignment: Alignment.center,
-            children: [
-              VideoView(controller: _player),
-              if (_player.loading.value)
-                const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
-            ],
-          ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          VideoView(controller: _player),
+          if (_player.loading.value)
+            const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
+        ],
+      ),
     );
   }
 
