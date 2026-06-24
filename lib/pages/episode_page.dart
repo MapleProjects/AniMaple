@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 
@@ -25,37 +24,57 @@ class _EpisodePageState extends State<EpisodePage> {
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
-  bool _videoReady = false;
 
   String? _activeServer;
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
 
-  late final Player _player;
-  late final VideoController _controller;
+  // Mutable episode number — allows in-place episode switching
+  late int _currentEp;
+
+  late final VideoController _player;
 
   @override
   void initState() {
     super.initState();
-    _player = Player();
-    _controller = VideoController(_player);
-    _player.stream.playing.listen((_) { if (mounted) setState(() {}); });
-    _player.stream.completed.listen((completed) {
-      if (completed && mounted && !_autoPlayedNext) {
-        _autoPlayedNext = true;
-        _goNext();
-      }
-    });
-    _player.stream.error.listen((err) {
-      debugPrint('MEDIA_KIT ERROR: $err');
-      if (mounted && err.isNotEmpty) debugPrint('MEDIA_KIT STREAM ERROR: $err');
-    });
+    _currentEp = widget.episodeNumber;
+    _player = VideoController(autoPlay: true, cancelableNotification: true);
+    _player.playbackState.addListener(_onStateChanged);
+    _player.finishedTimes.addListener(_onFinished);
+    _player.error.addListener(_onError);
+    _player.loading.addListener(_onLoading);
     _load();
+  }
+
+  void _onStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onFinished() {
+    if (_player.finishedTimes.value > 0 && mounted && !_autoPlayedNext) {
+      _autoPlayedNext = true;
+      _goNext();
+    }
+  }
+
+  void _onError() {
+    final err = _player.error.value;
+    if (err != null && err.isNotEmpty) {
+      debugPrint('VIDEO_VIEW ERROR: $err');
+    }
+  }
+
+  void _onLoading() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _player.playbackState.removeListener(_onStateChanged);
+    _player.finishedTimes.removeListener(_onFinished);
+    _player.error.removeListener(_onError);
+    _player.loading.removeListener(_onLoading);
     _player.dispose();
     if (_isFullscreen) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -66,32 +85,35 @@ class _EpisodePageState extends State<EpisodePage> {
 
   Future<void> _load() async {
     while (mounted) {
-    try {
-      final ep = await ApiService.fetchEpisodeDetail(widget.animeSlug, widget.episodeNumber);
-      AnimeDetail? detail;
-      try { detail = await ApiService.fetchAnimeDetail(widget.animeSlug); } catch (_) {}
-      if (mounted) {
-      setState(() {
-        _episode = ep;
-        _animeDetail = detail;
-        _loading = false;
-        _autoPlayedNext = false;
-        _activeVariant = ep.variants.contains('DUB') ? 'DUB' : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
-      });
+      try {
+        final ep = await ApiService.fetchEpisodeDetail(widget.animeSlug, _currentEp);
+        // Only fetch anime detail on first load (not on episode switch)
+        AnimeDetail? detail = _animeDetail;
+        if (detail == null) {
+          try { detail = await ApiService.fetchAnimeDetail(widget.animeSlug); } catch (_) {}
+        }
+        if (mounted) {
+          setState(() {
+            _episode = ep;
+            _animeDetail = detail;
+            _loading = false;
+            _autoPlayedNext = false;
+            _activeVariant = ep.variants.contains('DUB') ? 'DUB' : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
+          });
+        }
+        // Register in history
+        ApiService.addHistory(
+          detail?.id ?? 0,
+          widget.animeSlug,
+          detail?.title ?? widget.animeTitle,
+          ep.number,
+        );
+        _autoPlay();
+        return;
+      } catch (e) {
+        debugPrint('EPISODE LOAD RETRY: $e');
+        await Future.delayed(const Duration(seconds: 3));
       }
-      // Register in history
-      ApiService.addHistory(
-        detail?.id ?? 0,
-        widget.animeSlug,
-        detail?.title ?? widget.animeTitle,
-        ep.number,
-      );
-      _autoPlay();
-      return;
-    } catch (e) {
-      debugPrint('EPISODE LOAD RETRY: $e');
-      await Future.delayed(const Duration(seconds: 3));
-    }
     }
   }
 
@@ -107,39 +129,21 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Future<void> _playServer(ServerMirror server) async {
-    if (mounted) setState(() { _videoReady = false; _activeServer = server.server; _autoPlayedNext = false; });
+    if (mounted) setState(() { _activeServer = server.server; _autoPlayedNext = false; });
 
     while (mounted) {
       try {
         debugPrint('PLAY SERVER: ${server.server} → ${server.url}');
         final data = await ApiService.fetchVideoUrl(server.url);
         final videoUrl = data['url'] as String?;
-        final videoType = data['type'] as String? ?? 'mp4';
 
         if (videoUrl == null || videoUrl.isEmpty) {
           await Future.delayed(const Duration(seconds: 3));
           continue;
         }
 
-        String playUrl;
-        Map<String, String> headers = {};
-
-        if (videoType == 'hls') {
-          playUrl = videoUrl;
-        } else {
-          // MP4: play directly with Referer header
-          playUrl = videoUrl;
-          headers = {
-            'Referer': 'https://www.mp4upload.com/',
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
-          };
-        }
-
-        debugPrint('PLAYING: $playUrl');
-        await _player.open(Media(playUrl, httpHeaders: headers));
-        // Force start from 0 — HLS segments may have non-zero PTS
-        await _player.seek(Duration.zero);
-        if (mounted) setState(() => _videoReady = true);
+        debugPrint('PLAYING: $videoUrl');
+        _player.open(videoUrl);
         return;
       } catch (e) {
         debugPrint('PLAY RETRY: $e');
@@ -148,26 +152,22 @@ class _EpisodePageState extends State<EpisodePage> {
     }
   }
 
-
-
-  void _goNext() {
+  // In-place episode switch — no Navigator, no widget rebuild, fullscreen persists
+  void _switchEpisode(int newEp) {
     final detail = _animeDetail;
     if (detail == null) return;
-    final nextEp = widget.episodeNumber + 1;
-    if (nextEp <= detail.episodes.length) {
-      Navigator.pushReplacement(context, MaterialPageRoute(
-        builder: (_) => EpisodePage(animeSlug: widget.animeSlug, episodeNumber: nextEp, animeTitle: widget.animeTitle),
-      ));
-    }
+    if (newEp < 1 || newEp > detail.episodes.length) return;
+    if (newEp == _currentEp) return;
+    setState(() {
+      _currentEp = newEp;
+      _loading = true;
+    });
+    _player.close();
+    _load();
   }
 
-  void _goPrev() {
-    if (widget.episodeNumber > 1) {
-      Navigator.pushReplacement(context, MaterialPageRoute(
-        builder: (_) => EpisodePage(animeSlug: widget.animeSlug, episodeNumber: widget.episodeNumber - 1, animeTitle: widget.animeTitle),
-      ));
-    }
-  }
+  void _goNext() => _switchEpisode(_currentEp + 1);
+  void _goPrev() => _switchEpisode(_currentEp - 1);
 
   void _toggleFullscreen() {
     setState(() => _isFullscreen = !_isFullscreen);
@@ -200,7 +200,7 @@ class _EpisodePageState extends State<EpisodePage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0a0812),
-      appBar: AppBar(
+      appBar: _isFullscreen ? null : AppBar(
         backgroundColor: const Color(0xFF0a0812),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -210,7 +210,7 @@ class _EpisodePageState extends State<EpisodePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.animeTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
-            Text('Episodio ${ep.number}', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
+            Text('Episodio $ep.number', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
           ],
         ),
         actions: [
@@ -220,9 +220,24 @@ class _EpisodePageState extends State<EpisodePage> {
           ),
         ],
       ),
-      body: isWide
-        ? _buildWideLayout(ep, filteredEmbeds, anime)
-        : _buildNarrowLayout(ep, filteredEmbeds, anime),
+      body: _isFullscreen
+        ? Stack(
+            children: [
+              Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer())),
+              Positioned(
+                top: 8, left: 8,
+                child: SafeArea(
+                  child: IconButton(
+                    icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 30),
+                    onPressed: _toggleFullscreen,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : isWide
+          ? _buildWideLayout(ep, filteredEmbeds, anime)
+          : _buildNarrowLayout(ep, filteredEmbeds, anime),
     );
   }
 
@@ -235,6 +250,7 @@ class _EpisodePageState extends State<EpisodePage> {
           child: Column(
             children: [
               AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
+              _buildProgressBar(),
               _buildNavButtons(ep),
               _buildVariantAndServers(ep, filteredEmbeds),
             ],
@@ -257,6 +273,7 @@ class _EpisodePageState extends State<EpisodePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
+          _buildProgressBar(),
           _buildNavButtons(ep),
           _buildVariantAndServers(ep, filteredEmbeds),
           Padding(padding: const EdgeInsets.all(16), child: _buildInfoSection(ep, anime)),
@@ -266,12 +283,61 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Widget _buildVideoPlayer() {
+    final bool isReady = _player.mediaInfo.value != null && !_player.loading.value;
     return Container(
       color: Colors.black,
-      child: _videoReady
-        ? Video(controller: _controller)
-        : const Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))),
+      child: isReady
+        ? VideoView(controller: _player)
+        : Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoView(controller: _player),
+              if (_player.loading.value)
+                const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
+            ],
+          ),
     );
+  }
+
+  Widget _buildProgressBar() {
+    final duration = _player.mediaInfo.value?.duration ?? 0;
+    final position = _player.position.value;
+    if (duration <= 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Text(_formatTime(position), style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
+          Expanded(
+            child: SliderTheme(
+              data: SliderThemeData(
+                activeTrackColor: const Color(0xFF8b5cf6),
+                inactiveTrackColor: const Color(0xFF1e1832),
+                thumbColor: const Color(0xFF8b5cf6),
+                overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              ),
+              child: Slider(
+                min: 0,
+                max: duration.toDouble(),
+                value: position.clamp(0, duration).toDouble(),
+                onChanged: (v) => _player.seekTo(v.toInt()),
+              ),
+            ),
+          ),
+          Text(_formatTime(duration), style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  static String _formatTime(int ms) {
+    final d = Duration(milliseconds: ms);
+    final h = d.inHours > 0 ? '${d.inHours}:' : '';
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h$m:$s';
   }
 
   Widget _buildNavButtons(EpisodeDetail ep) {
@@ -412,11 +478,7 @@ class _EpisodePageState extends State<EpisodePage> {
             final isCurrent = e.number == ep.number;
             return GestureDetector(
               onTap: () {
-                if (!isCurrent) {
-                  Navigator.pushReplacement(context, MaterialPageRoute(
-                    builder: (_) => EpisodePage(animeSlug: widget.animeSlug, episodeNumber: e.number, animeTitle: widget.animeTitle),
-                  ));
-                }
+                if (!isCurrent) _switchEpisode(e.number);
               },
               child: Container(
                 width: 44, height: 44,

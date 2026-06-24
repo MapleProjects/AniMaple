@@ -33,7 +33,7 @@ class ApiService {
       } catch (e) {
         debugPrint('Attempt $attempt/$maxAttempts failed: $e');
         if (attempt == maxAttempts) rethrow;
-        await Future.delayed(Duration(seconds: attempt));
+        await Future.delayed(const Duration(seconds: 3));
       }
     }
     throw StateError('unreachable');
