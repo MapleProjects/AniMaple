@@ -47,6 +47,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   int _countdownSeconds = 5;
   Timer? _countdownTimer;
 
+  // Position update timer (video_view doesn't auto-rebuild on position change)
+  Timer? _positionTimer;
+
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
 
@@ -58,7 +61,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _currentEp = widget.episodeNumber;
     _player = VideoController(autoPlay: true, cancelableNotification: true);
     _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
-    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _seekFadeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300), value: 1.0);
     _player.playbackState.addListener(_onStateChanged);
     _player.finishedTimes.addListener(_onFinished);
@@ -66,10 +69,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.loading.addListener(_onLoading);
     _player.videoSize.addListener(_onVideoSize);
     _player.mediaInfo.addListener(_onMediaInfo);
+    _startPositionTimer();
     _load();
   }
 
   void _onStateChanged() {
+    final playing = _player.playbackState.value == VideoControllerPlaybackState.playing;
+    if (playing) {
+      _startPositionTimer();
+    } else {
+      _positionTimer?.cancel();
+    }
     if (mounted) setState(() {});
   }
 
@@ -133,6 +143,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void dispose() {
     _hideTimer?.cancel();
     _countdownTimer?.cancel();
+    _positionTimer?.cancel();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
@@ -212,9 +223,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
         debugPrint('PLAYING: $videoUrl (type=$videoType)');
         // Pass raw URL directly — ExoPlayer handles HLS natively.
-        // The Dart proxy was corrupting binary segment data causing
-        // ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED / NoDeclaredBrand.
-        _player.open(videoUrl);
+        // For MP4Upload, pass Referer header (required or 403 Forbidden).
+        final headers = videoType == 'mp4'
+            ? {'Referer': 'https://www.mp4upload.com/'}
+            : null;
+        _player.open(videoUrl, headers: headers);
         return;
       } catch (e) {
         debugPrint('PLAY RETRY: $e');
@@ -344,6 +357,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
+  void _startPositionTimer() {
+    _positionTimer?.cancel();
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   void _showControlsTemporarily() {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
@@ -379,9 +399,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.seekTo(target);
     _seekDelta = deltaMs.toDouble();
     _seekAnimating = true;
-    _seekFadeAnim!.forward(from: 0);
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _seekAnim!.forward(from: 0).then((_) {
+    setState(() {});
+    // Fade in → hold 800ms → fade out → clean up
+    _seekFadeAnim!.forward(from: 0).then((_) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (!mounted) return;
         _seekFadeAnim!.reverse().then((_) {
           if (mounted) setState(() { _seekAnimating = false; _seekDelta = null; });
         });
@@ -424,30 +446,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           if (_seekAnimating && _seekDelta != null)
             FadeTransition(
               opacity: _seekFadeAnim!,
-              child: ScaleTransition(
-                scale: Tween<double>(begin: 1.4, end: 1.0).animate(
-                  CurvedAnimation(parent: _seekAnim!, curve: Curves.easeOutBack),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.75),
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
-                        color: Colors.white, size: 26,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_seekDelta! > 0 ? '+' : ''}${_seekDelta!.toInt()}s',
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                      color: Colors.white, size: 28,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -496,20 +513,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Skip button
-                        GestureDetector(
-                          onTap: _skipCountdown,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF8b5cf6),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Cancel button
+                        // Cancel button (left)
                         GestureDetector(
                           onTap: _cancelCountdown,
                           child: Container(
@@ -519,6 +523,19 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: const Text('Cancelar', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Skip button (right)
+                        GestureDetector(
+                          onTap: _skipCountdown,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8b5cf6),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                           ),
                         ),
                       ],
