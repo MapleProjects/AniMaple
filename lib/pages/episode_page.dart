@@ -442,29 +442,37 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               ),
             ),
 
-          // Double-tap seek indicator
+          // Double-tap seek indicator — right side for forward, left for rewind
           if (_seekAnimating && _seekDelta != null)
-            FadeTransition(
-              opacity: _seekFadeAnim!,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
-                      color: Colors.white, size: 28,
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: _seekDelta! > 0 ? 24 : null,
+              left: _seekDelta! < 0 ? 24 : null,
+              child: FadeTransition(
+                opacity: _seekFadeAnim!,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.75),
+                      borderRadius: BorderRadius.circular(24),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                          color: Colors.white, size: 28,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
+                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

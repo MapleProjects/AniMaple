@@ -8,8 +8,10 @@ import android.view.WindowManager.LayoutParams
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
@@ -92,7 +94,17 @@ class VideoController(
 				".ism/manifest" -> MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_SS).build()
 				else -> MediaItem.fromUri(url)
 			}
-			exoPlayer.setMediaItem(mediaItem)
+			// When custom headers are needed (e.g. MP4Upload Referer), use
+			// ProgressiveMediaSource with a DefaultHttpDataSource.Factory.
+			if (headers != null && headers.isNotEmpty() && ext.isEmpty()) {
+				val httpFactory = DefaultHttpDataSource.Factory()
+					.setDefaultRequestProperties(headers)
+				val mediaSource = ProgressiveMediaSource.Factory(httpFactory)
+					.createMediaSource(mediaItem)
+				exoPlayer.setMediaSource(mediaSource)
+			} else {
+				exoPlayer.setMediaItem(mediaItem)
+			}
 			exoPlayer.prepare()
 			state = 1U
 			this.source = source
