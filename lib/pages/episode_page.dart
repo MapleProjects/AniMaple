@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
@@ -30,6 +31,12 @@ class _EpisodePageState extends State<EpisodePage> {
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
+
+  // Video controls
+  bool _controlsVisible = true;
+  bool _showBigPlay = false;
+  bool _isDragging = false;
+  Timer? _hideTimer;
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -84,6 +91,7 @@ class _EpisodePageState extends State<EpisodePage> {
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     _player.playbackState.removeListener(_onStateChanged);
     _player.finishedTimes.removeListener(_onFinished);
     _player.error.removeListener(_onError);
@@ -232,12 +240,7 @@ class _EpisodePageState extends State<EpisodePage> {
             Text('Episodio $ep.number', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: Icon(_isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white),
-            onPressed: _toggleFullscreen,
-          ),
-        ],
+
       ),
       body: _isFullscreen
         ? Stack(
@@ -269,7 +272,6 @@ class _EpisodePageState extends State<EpisodePage> {
           child: Column(
             children: [
               AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
-              _buildProgressBar(),
               _buildNavButtons(ep),
               _buildVariantAndServers(ep, filteredEmbeds),
             ],
@@ -292,7 +294,6 @@ class _EpisodePageState extends State<EpisodePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
-          _buildProgressBar(),
           _buildNavButtons(ep),
           _buildVariantAndServers(ep, filteredEmbeds),
           Padding(padding: const EdgeInsets.all(16), child: _buildInfoSection(ep, anime)),
@@ -301,49 +302,159 @@ class _EpisodePageState extends State<EpisodePage> {
     );
   }
 
-  Widget _buildVideoPlayer() {
-    return Container(
-      color: Colors.black,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          VideoView(controller: _player),
-          if (_player.loading.value)
-            const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
-        ],
-      ),
-    );
+  void _toggleControls() {
+    setState(() {
+      _controlsVisible = !_controlsVisible;
+      if (_controlsVisible) {
+        _showBigPlay = false;
+        _startHideTimer();
+      } else {
+        _hideTimer?.cancel();
+      }
+    });
   }
 
-  Widget _buildProgressBar() {
+  void _startHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && !_isDragging) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _togglePlayPause() {
+    final ps = _player.playbackState.value;
+    if (ps == VideoControllerPlaybackState.playing) {
+      _player.pause();
+      setState(() {
+        _showBigPlay = true;
+        _controlsVisible = true;
+      });
+      _hideTimer?.cancel();
+    } else {
+      _player.play();
+      setState(() => _showBigPlay = false);
+      _startHideTimer();
+    }
+  }
+
+  // ── Video player with overlay controls ──
+
+  Widget _buildVideoPlayer() {
     final duration = _player.mediaInfo.value?.duration ?? 0;
     final position = _player.position.value;
-    if (duration <= 0) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          Text(_formatTime(position), style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
-          Expanded(
-            child: SliderTheme(
-              data: SliderThemeData(
-                activeTrackColor: const Color(0xFF8b5cf6),
-                inactiveTrackColor: const Color(0xFF1e1832),
-                thumbColor: const Color(0xFF8b5cf6),
-                overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+    final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+
+    return GestureDetector(
+      onTap: _toggleControls,
+      child: Container(
+        color: Colors.black,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Video surface
+            VideoView(controller: _player),
+
+            // Loading spinner
+            if (_player.loading.value && !_player.loading.value)
+              const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
+
+            // Big center play/pause (when paused)
+            if (_showBigPlay || (!isPlaying && !_player.loading.value))
+              GestureDetector(
+                onTap: _togglePlayPause,
+                child: Container(
+                  width: 64, height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    color: Colors.white, size: 40,
+                  ),
+                ),
               ),
-              child: Slider(
-                min: 0,
-                max: duration.toDouble(),
-                value: position.clamp(0, duration).toDouble(),
-                onChanged: (v) => _player.seekTo(v.toInt()),
+
+            // Bottom controls bar
+            if (_controlsVisible)
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.8)],
+                    ),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Seek slider
+                        if (duration > 0)
+                          SliderTheme(
+                            data: SliderThemeData(
+                              activeTrackColor: const Color(0xFF8b5cf6),
+                              inactiveTrackColor: Colors.white24,
+                              thumbColor: const Color(0xFF8b5cf6),
+                              overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                            ),
+                            child: Slider(
+                              min: 0,
+                              max: duration.toDouble(),
+                              value: position.clamp(0, duration).toDouble(),
+                              onChangeStart: (v) {
+                                _isDragging = true;
+                                _hideTimer?.cancel();
+                              },
+                              onChanged: (v) => setState(() {}),
+                              onChangeEnd: (v) {
+                                _player.seekTo(v.toInt());
+                                _isDragging = false;
+                                _startHideTimer();
+                              },
+                            ),
+                          ),
+                        // Bottom row: play/pause, time, fullscreen
+                        Row(
+                          children: [
+                            // Play/pause button
+                            GestureDetector(
+                              onTap: _togglePlayPause,
+                              child: Icon(
+                                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                color: Colors.white, size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Time labels
+                            Text(
+                              '${_formatTime(position)} / ${_formatTime(duration)}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                            const Spacer(),
+                            // Fullscreen button
+                            GestureDetector(
+                              onTap: _toggleFullscreen,
+                              child: Icon(
+                                _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                                color: Colors.white, size: 24,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-          Text(_formatTime(duration), style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
-        ],
+          ],
+        ),
       ),
     );
   }
