@@ -22,7 +22,7 @@ class EpisodePage extends StatefulWidget {
   State<EpisodePage> createState() => _EpisodePageState();
 }
 
-class _EpisodePageState extends State<EpisodePage> {
+class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
@@ -31,12 +31,13 @@ class _EpisodePageState extends State<EpisodePage> {
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
-
   // Video controls
   bool _controlsVisible = true;
-  bool _showBigPlay = false;
   bool _isDragging = false;
   Timer? _hideTimer;
+  AnimationController? _controlsAnim;
+  AnimationController? _seekAnim;
+  double? _seekDelta; // +5 or -5 seconds indicator
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -48,6 +49,8 @@ class _EpisodePageState extends State<EpisodePage> {
     super.initState();
     _currentEp = widget.episodeNumber;
     _player = VideoController(autoPlay: true, cancelableNotification: true);
+    _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
+    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _player.playbackState.addListener(_onStateChanged);
     _player.finishedTimes.addListener(_onFinished);
     _player.error.addListener(_onError);
@@ -92,6 +95,8 @@ class _EpisodePageState extends State<EpisodePage> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _controlsAnim?.dispose();
+    _seekAnim?.dispose();
     _player.playbackState.removeListener(_onStateChanged);
     _player.finishedTimes.removeListener(_onFinished);
     _player.error.removeListener(_onError);
@@ -243,20 +248,7 @@ class _EpisodePageState extends State<EpisodePage> {
 
       ),
       body: _isFullscreen
-        ? Stack(
-            children: [
-              Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer())),
-              Positioned(
-                top: 8, left: 8,
-                child: SafeArea(
-                  child: IconButton(
-                    icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 30),
-                    onPressed: _toggleFullscreen,
-                  ),
-                ),
-              ),
-            ],
-          )
+        ? Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()))
         : isWide
           ? _buildWideLayout(ep, filteredEmbeds, anime)
           : _buildNarrowLayout(ep, filteredEmbeds, anime),
@@ -303,21 +295,29 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   void _toggleControls() {
-    setState(() {
-      _controlsVisible = !_controlsVisible;
-      if (_controlsVisible) {
-        _showBigPlay = false;
-        _startHideTimer();
-      } else {
-        _hideTimer?.cancel();
-      }
-    });
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) {
+      _controlsAnim!.forward();
+      _startHideTimer();
+    } else {
+      _hideTimer?.cancel();
+      _controlsAnim!.reverse();
+    }
+  }
+
+  void _showControlsTemporarily() {
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+      _controlsAnim!.forward();
+    }
+    _startHideTimer();
   }
 
   void _startHideTimer() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
+    _hideTimer = Timer(const Duration(seconds: 2), () {
       if (mounted && !_isDragging) setState(() => _controlsVisible = false);
+      _controlsAnim?.reverse();
     });
   }
 
@@ -325,138 +325,208 @@ class _EpisodePageState extends State<EpisodePage> {
     final ps = _player.playbackState.value;
     if (ps == VideoControllerPlaybackState.playing) {
       _player.pause();
-      setState(() {
-        _showBigPlay = true;
-        _controlsVisible = true;
-      });
+      setState(() => _controlsVisible = true);
+      _controlsAnim!.forward();
       _hideTimer?.cancel();
     } else {
       _player.play();
-      setState(() => _showBigPlay = false);
       _startHideTimer();
     }
+  }
+  void _seekRelative(int deltaMs) {
+    final pos = _player.position.value;
+    final dur = _player.mediaInfo.value?.duration ?? 0;
+    final target = (pos + deltaMs).clamp(0, dur);
+    _player.seekTo(target);
+    setState(() => _seekDelta = deltaMs.toDouble());
+    _seekAnim!.forward(from: 0);
+    _showControlsTemporarily();
   }
 
   // ── Video player with overlay controls ──
 
   Widget _buildVideoPlayer() {
     final duration = _player.mediaInfo.value?.duration ?? 0;
-    final position = _player.position.value;
-    final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+      final position = _player.position.value;
+      final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          // Video surface
+          VideoView(controller: _player),
 
-    return GestureDetector(
-      onTap: _toggleControls,
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Video surface
-            VideoView(controller: _player),
+          // Loading spinner
+          if (_player.loading.value)
+            const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
 
-            // Loading spinner
-            if (_player.loading.value && !_player.loading.value)
-              const CircularProgressIndicator(color: Color(0xFF8b5cf6)),
-
-            // Big center play/pause (when paused)
-            if (_showBigPlay || (!isPlaying && !_player.loading.value))
-              GestureDetector(
-                onTap: _togglePlayPause,
-                child: Container(
-                  width: 64, height: 64,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    color: Colors.white, size: 40,
-                  ),
+          // Big center play/pause (when paused)
+          if (!isPlaying && !_player.loading.value)
+            GestureDetector(
+              onTap: _togglePlayPause,
+              child: Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
               ),
+            ),
 
-            // Bottom controls bar
-            if (_controlsVisible)
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.8)],
+          // Double-tap seek indicator (left = -5s, right = +5s)
+          if (_seekDelta != null)
+            AnimatedBuilder(
+              animation: _seekAnim!,
+              builder: (_, __) {
+                final t = _seekAnim!.value;
+                if (t == 0) return const SizedBox.shrink();
+                return Opacity(
+                  opacity: t > 0.5 ? (1 - t) * 2 : t * 2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: Column(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Seek slider
-                        if (duration > 0)
-                          SliderTheme(
-                            data: SliderThemeData(
-                              activeTrackColor: const Color(0xFF8b5cf6),
-                              inactiveTrackColor: Colors.white24,
-                              thumbColor: const Color(0xFF8b5cf6),
-                              overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                            ),
-                            child: Slider(
-                              min: 0,
-                              max: duration.toDouble(),
-                              value: position.clamp(0, duration).toDouble(),
-                              onChangeStart: (v) {
-                                _isDragging = true;
-                                _hideTimer?.cancel();
-                              },
-                              onChanged: (v) => setState(() {}),
-                              onChangeEnd: (v) {
-                                _player.seekTo(v.toInt());
-                                _isDragging = false;
-                                _startHideTimer();
-                              },
-                            ),
+                        Icon(
+                          _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                          color: Colors.white, size: 22,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_seekDelta! > 0 ? '+' : ''}${_seekDelta!.toInt()}s',
+                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
+          // Tap zones for play/pause + double-tap seek
+          Positioned.fill(
+            child: Row(
+              children: [
+                // Left third: double-tap rewind
+                Expanded(
+                  flex: 33,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: () => _seekRelative(-5000),
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+                // Center third: play/pause
+                Expanded(
+                  flex: 34,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: _togglePlayPause,
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+                // Right third: double-tap forward
+                Expanded(
+                  flex: 33,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: () => _seekRelative(5000),
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Bottom controls bar with fade animation
+          FadeTransition(
+            opacity: _controlsAnim!,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Seek slider
+                      if (duration > 0)
+                        SliderTheme(
+                          data: SliderThemeData(
+                            activeTrackColor: const Color(0xFF8b5cf6),
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: const Color(0xFF8b5cf6),
+                            overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+                            trackHeight: 2,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
                           ),
-                        // Bottom row: play/pause, time, fullscreen
-                        Row(
+                          child: Slider(
+                            min: 0,
+                            max: duration.toDouble(),
+                            value: position.clamp(0, duration).toDouble(),
+                            onChangeStart: (v) {
+                              _isDragging = true;
+                              _hideTimer?.cancel();
+                            },
+                            onChanged: (v) => setState(() {}),
+                            onChangeEnd: (v) {
+                              _player.seekTo(v.toInt());
+                              _isDragging = false;
+                              _startHideTimer();
+                            },
+                          ),
+                        ),
+                      // Compact row: play/pause · time · fullscreen
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Row(
                           children: [
-                            // Play/pause button
                             GestureDetector(
                               onTap: _togglePlayPause,
                               child: Icon(
                                 isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                color: Colors.white, size: 28,
+                                color: Colors.white, size: 26,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            // Time labels
+                            const SizedBox(width: 10),
                             Text(
                               '${_formatTime(position)} / ${_formatTime(duration)}',
                               style: const TextStyle(color: Colors.white70, fontSize: 12),
                             ),
                             const Spacer(),
-                            // Fullscreen button
                             GestureDetector(
                               onTap: _toggleFullscreen,
                               child: Icon(
-                                _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                                color: Colors.white, size: 24,
+                                _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                                color: Colors.white, size: 22,
                               ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    );
+            ),
+          ),
+        ],
+      );
   }
 
   static String _formatTime(int ms) {
