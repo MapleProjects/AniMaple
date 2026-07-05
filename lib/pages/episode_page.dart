@@ -242,7 +242,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.animeTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
-            Text('Episodio $ep.number', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
+            Text('Episodio ${ep.number}', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
           ],
         ),
 
