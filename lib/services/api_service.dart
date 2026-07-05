@@ -439,7 +439,9 @@ class ApiService {
     if (embedUrl.contains('zilla-networks.com/play/')) {
       final id = embedUrl.split('/').last;
       if (id.isNotEmpty) {
-        return {'url': 'https://player.zilla-networks.com/m3u8/$id', 'type': 'hls'};
+        // Append ?x.m3u8 so video_view's ExoPlayer regex detects HLS type.
+        // URL pattern: /m3u8/{id} lacks the dot that ExoPlayer needs (\.m3u8).
+        return {'url': 'https://player.zilla-networks.com/m3u8/$id?x.m3u8', 'type': 'hls'};
       }
     }
 

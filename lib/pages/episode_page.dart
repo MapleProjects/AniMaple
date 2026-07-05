@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
-import '../services/hls_proxy.dart';
+
 
 class EpisodePage extends StatefulWidget {
   final String animeSlug;
@@ -35,7 +35,6 @@ class _EpisodePageState extends State<EpisodePage> {
   late int _currentEp;
 
   late final VideoController _player;
-  final _hlsProxy = HlsProxy();
 
   @override
   void initState() {
@@ -48,7 +47,7 @@ class _EpisodePageState extends State<EpisodePage> {
     _player.loading.addListener(_onLoading);
     _player.videoSize.addListener(_onVideoSize);
     _player.mediaInfo.addListener(_onMediaInfo);
-    _hlsProxy.start().then((_) => _load());
+    _load();
   }
 
   void _onStateChanged() {
@@ -91,7 +90,6 @@ class _EpisodePageState extends State<EpisodePage> {
     _player.loading.removeListener(_onLoading);
     _player.videoSize.removeListener(_onVideoSize);
     _player.mediaInfo.removeListener(_onMediaInfo);
-    _hlsProxy.stop();
     _player.dispose();
     if (_isFullscreen) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -160,13 +158,11 @@ class _EpisodePageState extends State<EpisodePage> {
           continue;
         }
 
-        debugPrint('PLAYING: $videoUrl');
-        // Proxy HLS streams through local server to fix content-type
-        final playUrl = videoType == 'hls' && _hlsProxy.isRunning
-            ? _hlsProxy.proxyM3U8(videoUrl)
-            : videoUrl;
-        debugPrint('PLAY URL: $playUrl');
-        _player.open(playUrl);
+        debugPrint('PLAYING: $videoUrl (type=$videoType)');
+        // Pass raw URL directly — ExoPlayer handles HLS natively.
+        // The Dart proxy was corrupting binary segment data causing
+        // ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED / NoDeclaredBrand.
+        _player.open(videoUrl);
         return;
       } catch (e) {
         debugPrint('PLAY RETRY: $e');
