@@ -31,13 +31,21 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
+
   // Video controls
   bool _controlsVisible = true;
   bool _isDragging = false;
   Timer? _hideTimer;
   AnimationController? _controlsAnim;
   AnimationController? _seekAnim;
-  double? _seekDelta; // +5 or -5 seconds indicator
+  AnimationController? _seekFadeAnim;
+  double? _seekDelta;
+  bool _seekAnimating = false;
+
+  // End-of-episode countdown
+  bool _showCountdown = false;
+  int _countdownSeconds = 5;
+  Timer? _countdownTimer;
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -50,7 +58,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _currentEp = widget.episodeNumber;
     _player = VideoController(autoPlay: true, cancelableNotification: true);
     _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
-    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _seekFadeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300), value: 1.0);
     _player.playbackState.addListener(_onStateChanged);
     _player.finishedTimes.addListener(_onFinished);
     _player.error.addListener(_onError);
@@ -67,8 +76,36 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onFinished() {
     if (_player.finishedTimes.value > 0 && mounted && !_autoPlayedNext) {
       _autoPlayedNext = true;
-      _goNext();
+      final has = _animeDetail != null && _currentEp < _animeDetail!.episodes.length;
+      if (has) {
+        _startCountdown();
+      }
     }
+  }
+
+  void _startCountdown() {
+    setState(() { _showCountdown = true; _countdownSeconds = 5; });
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() => _countdownSeconds--);
+      if (_countdownSeconds <= 0) {
+        t.cancel();
+        setState(() => _showCountdown = false);
+        _goNext();
+      }
+    });
+  }
+
+  void _skipCountdown() {
+    _countdownTimer?.cancel();
+    setState(() => _showCountdown = false);
+    _goNext();
+  }
+
+  void _cancelCountdown() {
+    _countdownTimer?.cancel();
+    setState(() => _showCountdown = false);
   }
 
   void _onError() {
@@ -95,8 +132,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _countdownTimer?.cancel();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
+    _seekFadeAnim?.dispose();
     _player.playbackState.removeListener(_onStateChanged);
     _player.finishedTimes.removeListener(_onFinished);
     _player.error.removeListener(_onError);
@@ -338,8 +377,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final dur = _player.mediaInfo.value?.duration ?? 0;
     final target = (pos + deltaMs).clamp(0, dur);
     _player.seekTo(target);
-    setState(() => _seekDelta = deltaMs.toDouble());
-    _seekAnim!.forward(from: 0);
+    _seekDelta = deltaMs.toDouble();
+    _seekAnimating = true;
+    _seekFadeAnim!.forward(from: 0);
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _seekAnim!.forward(from: 0).then((_) {
+        _seekFadeAnim!.reverse().then((_) {
+          if (mounted) setState(() { _seekAnimating = false; _seekDelta = null; });
+        });
+      });
+    });
     _showControlsTemporarily();
   }
 
@@ -373,38 +420,112 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               ),
             ),
 
-          // Double-tap seek indicator (left = -5s, right = +5s)
-          if (_seekDelta != null)
-            AnimatedBuilder(
-              animation: _seekAnim!,
-              builder: (_, __) {
-                final t = _seekAnim!.value;
-                if (t == 0) return const SizedBox.shrink();
-                return Opacity(
-                  opacity: t > 0.5 ? (1 - t) * 2 : t * 2,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(20),
+          // Double-tap seek indicator
+          if (_seekAnimating && _seekDelta != null)
+            FadeTransition(
+              opacity: _seekFadeAnim!,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 1.4, end: 1.0).animate(
+                  CurvedAnimation(parent: _seekAnim!, curve: Curves.easeOutBack),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                        color: Colors.white, size: 26,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_seekDelta! > 0 ? '+' : ''}${_seekDelta!.toInt()}s',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // End-of-episode countdown overlay
+          if (_showCountdown)
+            Container(
+              color: Colors.black.withValues(alpha: 0.85),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Siguiente episodio en',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 14),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    const SizedBox(height: 8),
+                    // Countdown circle
+                    SizedBox(
+                      width: 80, height: 80,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 80, height: 80,
+                            child: CircularProgressIndicator(
+                              value: _countdownSeconds / 5,
+                              strokeWidth: 3,
+                              color: const Color(0xFF8b5cf6),
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                          Text(
+                            '$_countdownSeconds',
+                            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Episodio ${_currentEp + 1}',
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
-                          color: Colors.white, size: 22,
+                        // Skip button
+                        GestureDetector(
+                          onTap: _skipCountdown,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8b5cf6),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                          ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${_seekDelta! > 0 ? '+' : ''}${_seekDelta!.toInt()}s',
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        const SizedBox(width: 16),
+                        // Cancel button
+                        GestureDetector(
+                          onTap: _cancelCountdown,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white12,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text('Cancelar', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                );
-              },
+                  ],
+                ),
+              ),
             ),
 
           // Tap zones for play/pause + double-tap seek
