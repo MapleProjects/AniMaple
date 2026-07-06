@@ -758,85 +758,74 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // PiP mode is handled natively by Android — no Flutter overlay
         ], // end if (!_isPipMode)
 
-        // Bottom controls bar (hidden in PiP via _controlsVisible=false)
+        // Bottom controls bar with drag bubble
         IgnorePointer(
           ignoring: !_controlsVisible,
           child: FadeTransition(
             opacity: _controlsAnim!,
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
-                  ),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Seek slider with drag bubble
-                      if (duration > 0)
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final displayValue = _isDragging && _dragValue != null
-                                ? _dragValue!
-                                : position.clamp(0, duration).toDouble();
-                            final fraction = duration > 0
-                                ? (displayValue / duration).clamp(0.0, 1.0)
-                                : 0.0;
-                            final bubbleLeft = (fraction * constraints.maxWidth).clamp(
-                              20.0, // half bubble width clamped
-                              constraints.maxWidth - 20.0,
-                            );
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Bubble tooltip
-                                if (_isDragging)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 6),
-                                    child: Stack(
-                                      clipBehavior: Clip.none,
-                                      alignment: Alignment.bottomCenter,
-                                      children: [
-                                        Positioned(
-                                          bottom: 0,
-                                          left: bubbleLeft - 20,
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black.withValues(alpha: 0.85),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: Text(
-                                                  _formatTime(displayValue.toInt()),
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                              // Arrow
-                                              CustomPaint(
-                                                size: const Size(12, 6),
-                                                painter: _BubbleArrowPainter(),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                // Slider
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final dur = _player.mediaInfo.value?.duration ?? 0;
+                final pos = _player.position.value;
+                final dv = _isDragging && _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
+                final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
+                // Position bubble above thumb. Account for slider padding (16px each side).
+                final sliderWidth = constraints.maxWidth - 32;
+                final thumbX = 16 + (frac * sliderWidth);
+                final bubbleLeft = thumbX.clamp(30.0, constraints.maxWidth - 30.0);
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Bubble tooltip (above the controls)
+                    if (_isDragging)
+                      Positioned(
+                        bottom: 110,
+                        left: bubbleLeft - 28,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(6),
+                                boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
+                              ),
+                              child: Text(
+                                _formatTime(dv.toInt()),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            CustomPaint(
+                              size: const Size(12, 6),
+                              painter: _BubbleArrowPainter(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    // Controls bar
+                    Positioned(
+                      left: 0, right: 0, bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
+                          ),
+                        ),
+                        child: SafeArea(
+                          top: false,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Seek slider
+                              if (dur > 0)
                                 SliderTheme(
                                   data: SliderThemeData(
                                     activeTrackColor: const Color(0xFF8b5cf6),
@@ -848,8 +837,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                   ),
                                   child: Slider(
                                     min: 0,
-                                    max: duration.toDouble(),
-                                    value: displayValue,
+                                    max: dur.toDouble(),
+                                    value: dv,
                                     onChangeStart: (v) {
                                       setState(() {
                                         _isDragging = true;
@@ -870,51 +859,50 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                     },
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                      // Compact row: play/pause · time · pip · fullscreen
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Row(
-                          children: [
-                            GestureDetector(
-                              onTap: _togglePlayPause,
-                              child: Icon(
-                                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                color: Colors.white, size: 26,
+                              // Compact row: play/pause · time · pip · fullscreen
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Row(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: _togglePlayPause,
+                                      child: Icon(
+                                        isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                        color: Colors.white, size: 26,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '${_formatTime(pos)} / ${_formatTime(dur)}',
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
+                                    const Spacer(),
+                                    GestureDetector(
+                                      onTap: _enterPip,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    GestureDetector(
+                                      onTap: _toggleFullscreen,
+                                      child: Icon(
+                                        _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                                        color: Colors.white, size: 22,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              '${_formatTime(position)} / ${_formatTime(duration)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
-                            ),
-                            const Spacer(),
-                            // PiP button
-                            GestureDetector(
-                              onTap: _enterPip,
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            GestureDetector(
-                              onTap: _toggleFullscreen,
-                              child: Icon(
-                                _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                                color: Colors.white, size: 22,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
