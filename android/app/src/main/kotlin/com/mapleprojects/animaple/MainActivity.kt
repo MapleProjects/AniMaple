@@ -1,5 +1,8 @@
 package com.mapleprojects.animaple
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
@@ -9,39 +12,92 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.mapleprojects.animaple/pip"
-    private var methodChannel: MethodChannel? = null
-    private var isPipSupported = false
-    private var isPlaying = true
 
+    // ── Method Channels ──
+    private val PIP_CHANNEL = "com.mapleprojects.animaple/pip"
+    private val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
+
+    private var pipMethodChannel: MethodChannel? = null
+    private var mediaMethodChannel: MethodChannel? = null
+
+    // ── PiP State ──
+    private var isPipSupported = false
+    private var isPlaying = false
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingPip = false
+
+    // ── Media Session State ──
+    private var mediaSession: MediaSession? = null
+    private var notificationManager: NotificationManager? = null
+
+    companion object {
+        private const val TAG = "AniMaple"
+        private const val MEDIA_CHANNEL_ID = "animaple_media_playback"
+        private const val NOTIFICATION_ID = 1001
+        private const val ACTION_MEDIA_PLAY_PAUSE = "com.mapleprojects.animaple.MEDIA_PLAY_PAUSE"
+        private const val ACTION_MEDIA_STOP = "com.mapleprojects.animaple.MEDIA_STOP"
+    }
+
+    // ── Broadcast Receivers ──
     private val pipPauseReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             isPlaying = !isPlaying
-            methodChannel?.invokeMethod("pipTogglePlayPause", null)
+            pipMethodChannel?.invokeMethod("pipTogglePlayPause", null)
             updatePipParams()
         }
     }
 
+    private val mediaReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                ACTION_MEDIA_PLAY_PAUSE -> {
+                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
+                }
+                ACTION_MEDIA_STOP -> {
+                    dismissMediaNotification()
+                    mediaMethodChannel?.invokeMethod("mediaStop", null)
+                }
+            }
+        }
+    }
+
+    // ── Engine Configuration ──
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         isPipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
 
+        try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
+
         registerReceiver(pipPauseReceiver, IntentFilter("com.mapleprojects.animaple.PIP_PAUSE"), RECEIVER_EXPORTED)
 
-        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-        methodChannel?.setMethodCallHandler { call, result ->
+        val mediaFilter = IntentFilter().apply {
+            addAction(ACTION_MEDIA_PLAY_PAUSE)
+            addAction(ACTION_MEDIA_STOP)
+        }
+        registerReceiver(mediaReceiver, mediaFilter, RECEIVER_EXPORTED)
+
+        // ── PiP Channel ──
+        pipMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PIP_CHANNEL)
+        pipMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "enterPip" -> {
                     if (isPipSupported && !isInPictureInPictureMode) {
                         isPlaying = true
-                        val params = buildPipParams()
+                        val params = buildPipParams(autoEnter = true)
                         enterPictureInPictureMode(params)
                         result.success(true)
                     } else {
@@ -50,23 +106,165 @@ class MainActivity : FlutterActivity() {
                 }
                 "updatePipState" -> {
                     isPlaying = call.arguments as? Boolean ?: true
-                    if (isInPictureInPictureMode) updatePipParams()
+                    updatePipParams()
                     result.success(true)
                 }
-                "isPipSupported" -> {
-                    result.success(isPipSupported)
+                "isPipSupported" -> result.success(isPipSupported)
+                else -> result.notImplemented()
+            }
+        }
+
+        // ── Media Session Channel ──
+        mediaMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL)
+        mediaMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "updateMediaSession" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val episode = call.argument<Int>("episode") ?: 0
+                    val playing = call.argument<Boolean>("playing") ?: false
+                    showMediaNotification(title, episode, playing)
+                    result.success(true)
+                }
+                "dismissMediaNotification" -> {
+                    dismissMediaNotification()
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }
         }
+
+        setupMediaSession()
     }
 
-    private fun buildPipParams(): PictureInPictureParams {
+    // ══════════════════════════════════════════════
+    //  MEDIA SESSION (platform API, minSdk 21+)
+    // ══════════════════════════════════════════════
+
+    private fun setupMediaSession() {
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        createNotificationChannel()
+
+        mediaSession?.release()
+
+        mediaSession = MediaSession(this, "AniMapleMediaSession").apply {
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() {
+                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
+                }
+                override fun onPause() {
+                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
+                }
+                override fun onStop() {
+                    dismissMediaNotification()
+                    mediaMethodChannel?.invokeMethod("mediaStop", null)
+                }
+            })
+            isActive = true
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                MEDIA_CHANNEL_ID,
+                "Reproducción de video",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Controles de reproducción de AniMaple"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            notificationManager?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showMediaNotification(title: String, episode: Int, playing: Boolean) {
+        val session = mediaSession ?: return
+
+        // Update playback state
+        val state = PlaybackState.Builder()
+            .setActions(
+                PlaybackState.ACTION_PLAY or
+                PlaybackState.ACTION_PAUSE or
+                PlaybackState.ACTION_STOP
+            )
+            .setState(
+                if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                0, if (playing) 1.0f else 0.0f
+            )
+            .build()
+        session.setPlaybackState(state)
+
+        // Update metadata
+        val metadata = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Episodio $episode")
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, "AniMaple")
+            .build()
+        session.setMetadata(metadata)
+
+        val playPauseIcon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseLabel = if (playing) "Pausar" else "Reproducir"
+
+        val playPauseIntent = PendingIntent.getBroadcast(
+            this, NOTIFICATION_ID,
+            Intent(ACTION_MEDIA_PLAY_PAUSE).setPackage(packageName),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val stopIntent = PendingIntent.getBroadcast(
+            this, NOTIFICATION_ID + 1,
+            Intent(ACTION_MEDIA_STOP).setPackage(packageName),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Build notification with platform API
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, MEDIA_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle(title)
+            .setContentText("Episodio $episode")
+            .setOngoing(true)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopIntent)
+            .setStyle(
+                Notification.MediaStyle()
+                    .setMediaSession(session.getSessionToken())
+                    .setShowActionsInCompactView(0)
+            )
+            .setPriority(Notification.PRIORITY_LOW)
+            .build()
+
+        notificationManager?.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun dismissMediaNotification() {
+        notificationManager?.cancel(NOTIFICATION_ID)
+        mediaSession?.setPlaybackState(
+            PlaybackState.Builder()
+                .setState(PlaybackState.STATE_NONE, 0, 0.0f)
+                .build()
+        )
+    }
+
+    // ══════════════════════════════════════════════
+    //  PICTURE-IN-PICTURE
+    // ══════════════════════════════════════════════
+
+    private fun buildPipParams(autoEnter: Boolean = isPlaying): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16, 9))
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // ONLY play/pause action — no close button
             val pauseIcon = Icon.createWithResource(this,
                 if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
             val pauseIntent = PendingIntent.getBroadcast(
@@ -80,7 +278,6 @@ class MainActivity : FlutterActivity() {
                 if (isPlaying) "Pausar reproducción" else "Reanudar reproducción",
                 pauseIntent
             )
-
             builder.setActions(listOf(pauseAction))
         }
 
@@ -88,11 +285,48 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun updatePipParams() {
-        if (isInPictureInPictureMode && isPipSupported) {
-            // Clear activity title to prevent PiP header
+        if (isPipSupported) {
             title = ""
             setPictureInPictureParams(buildPipParams())
         }
+    }
+
+    private fun tryEnterPip(source: String) {
+        if (isPlaying && isPipSupported && !isInPictureInPictureMode && !isFinishing) {
+            try {
+                val params = buildPipParams(autoEnter = true)
+                val success = enterPictureInPictureMode(params)
+                Log.d(TAG, "tryEnterPip($source): success=$success")
+            } catch (e: Exception) {
+                Log.e(TAG, "tryEnterPip($source) FAILED: ${e.message}")
+            }
+        } else {
+            Log.d(TAG, "tryEnterPip($source): SKIPPED isPlaying=$isPlaying inPip=$isInPictureInPictureMode finishing=$isFinishing")
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        tryEnterPip("onUserLeaveHint")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isInPictureInPictureMode && !isFinishing && isPlaying) {
+            pendingPip = true
+            tryEnterPip("onPause-immediate")
+            handler.postDelayed({
+                if (pendingPip && !isInPictureInPictureMode && !isFinishing && isPlaying) {
+                    tryEnterPip("onPause-delayed")
+                }
+                pendingPip = false
+            }, 300)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pendingPip = false
     }
 
     override fun onPictureInPictureModeChanged(
@@ -100,19 +334,17 @@ class MainActivity : FlutterActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        methodChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+        Log.d(TAG, "onPictureInPictureModeChanged: $isInPictureInPictureMode")
+        pipMethodChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
         if (isInPictureInPictureMode) updatePipParams()
     }
 
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        methodChannel?.invokeMethod("onUserLeaveHint", null)
-    }
-
     override fun onDestroy() {
-        try {
-            unregisterReceiver(pipPauseReceiver)
-        } catch (_: Exception) {}
+        handler.removeCallbacksAndMessages(null)
+        try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
+        mediaSession?.release()
+        dismissMediaNotification()
         super.onDestroy()
     }
 

@@ -187,8 +187,15 @@ class RecentEpisode {
     episodeNumber: j['episode_number'] ?? 0,
     episodeId: j['episode_id'] ?? 0,
     thumbnail: j['thumbnail'],
-    timeAgo: j['time_ago'] ?? '',
+    timeAgo: _sanitizeTimeAgo(j['time_ago'] ?? ''),
   );
+
+  /// Fix API returning negative values like "Hace -92 min" → "Hace 92 min"
+  static String _sanitizeTimeAgo(String raw) {
+    if (raw.isEmpty) return raw;
+    // Replace "Hace -N" with "Hace N"
+    return raw.replaceAll(RegExp(r'Hace\s*-(\d+)'), 'Hace \$1');
+  }
 }
 
 class HistoryEntry {

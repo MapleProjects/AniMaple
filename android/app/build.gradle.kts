@@ -39,6 +39,11 @@ android {
     }
 }
 
+dependencies {
+    // MediaSessionCompat for media playback notification controls
+    implementation("androidx.media:media:1.7.0")
+}
+
 flutter {
     source = "../.."
 }

@@ -53,6 +53,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
   bool _isPipMode = false;
 
+  // Media notification
+  static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
+
   // End-of-episode countdown
   bool _showCountdown = false;
   int _countdownSeconds = 5;
@@ -83,6 +86,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _startPositionTimer();
     _load();
     _initPip();
+    _initMediaSession();
   }
 
   void _initPip() {
@@ -111,12 +115,30 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           // User tapped play/pause in PiP controls
           _togglePlayPause();
           break;
+        case 'mediaTogglePlayPause':
+          // User tapped play/pause in media notification
+          _togglePlayPause();
+          break;
+        case 'mediaStop':
+          // User tapped stop in media notification
+          _closePlayback();
+          break;
         case 'onUserLeaveHint':
-          // Auto-enter PiP when user presses home (if video is playing)
-          final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
-          if (isPlaying && mounted && !_showCountdown) {
-            _enterPip();
-          }
+          // Native handles auto-PiP entry — nothing to do here
+          break;
+      }
+    });
+  }
+
+  void _initMediaSession() {
+    _mediaChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'mediaTogglePlayPause':
+          _togglePlayPause();
+          break;
+        case 'mediaStop':
+          _player.pause();
+          _dismissMediaNotification();
           break;
       }
     });
@@ -133,6 +155,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _closePlayback() {
     _player.close();
     _positionTimer?.cancel();
+    _syncPipState(false);
+    _dismissMediaNotification();
     if (mounted) Navigator.pop(context);
   }
 
@@ -145,14 +169,34 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     } else {
       _positionTimer?.cancel();
     }
-    // Sync play state with native PiP controls
-    _syncPipState(playing);
+    // Only sync playing=true to native. Don't sync false —
+    // the player may report non-playing states (buffering, surface lost)
+    // before onPause fires on MIUI, which breaks auto-PiP.
+    if (playing) _syncPipState(true);
+    // Update media notification with current state
+    _updateMediaSession(playing);
     if (mounted) setState(() {});
   }
 
   void _syncPipState(bool playing) {
     try {
       _pipChannel.invokeMethod('updatePipState', playing);
+    } catch (_) {}
+  }
+
+  void _updateMediaSession(bool playing) {
+    try {
+      _mediaChannel.invokeMethod('updateMediaSession', {
+        'title': widget.animeTitle,
+        'episode': _currentEp,
+        'playing': playing,
+      });
+    } catch (_) {}
+  }
+
+  void _dismissMediaNotification() {
+    try {
+      _mediaChannel.invokeMethod('dismissMediaNotification');
     } catch (_) {}
   }
 
@@ -228,6 +272,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.videoSize.removeListener(_onVideoSize);
     _player.mediaInfo.removeListener(_onMediaInfo);
     _player.dispose();
+    _syncPipState(false);
+    _dismissMediaNotification();
     if (_isFullscreen) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
