@@ -1052,7 +1052,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 4, children: [
             _chip(anime.category, const Color(0xFF8b5cf6)),
-            _chip(anime.status, const Color(0xFF22c55e)),
+            if (int.tryParse(anime.status) == null)
+              _chip(anime.status, const Color(0xFF22c55e)),
             ...anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))),
           ]),
         ],
