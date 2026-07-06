@@ -55,6 +55,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   // Media notification
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
+  bool _notificationPermissionRequested = false;
 
   // End-of-episode countdown
   bool _showCountdown = false;
@@ -173,6 +174,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     // the player may report non-playing states (buffering, surface lost)
     // before onPause fires on MIUI, which breaks auto-PiP.
     if (playing) _syncPipState(true);
+    // Request notification permission on first play
+    if (playing) _requestNotificationPermission();
     // Update media notification with current state
     _updateMediaSession(playing);
     if (mounted) setState(() {});
@@ -203,6 +206,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _dismissMediaNotification() {
     try {
       _mediaChannel.invokeMethod('dismissMediaNotification');
+    } catch (_) {}
+  }
+
+  void _requestNotificationPermission() {
+    if (_notificationPermissionRequested) return;
+    _notificationPermissionRequested = true;
+    try {
+      _mediaChannel.invokeMethod('requestNotificationPermission');
     } catch (_) {}
   }
 

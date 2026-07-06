@@ -132,6 +132,12 @@ class MainActivity : FlutterActivity() {
                     dismissMediaNotification()
                     result.success(true)
                 }
+                "requestNotificationPermission" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+                    }
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
