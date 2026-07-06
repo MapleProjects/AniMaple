@@ -150,13 +150,16 @@ class ApiService {
     if (dtStr.isEmpty) return '';
     final clean = dtStr.split('+').first.split('.').first;
     try {
-      final dt = DateTime.parse(clean);
+      final dt = DateTime.parse(clean).toUtc();
       final now = DateTime.now().toUtc();
       final diff = now.difference(dt);
-      if (diff.inMinutes < 60) return 'Hace ${diff.inMinutes} min';
-      if (diff.inHours < 24) return 'Hace ${diff.inHours}h';
-      if (diff.inDays < 7) return 'Hace ${diff.inDays} dia${diff.inDays > 1 ? 's' : ''}';
-      return 'Hace ${diff.inDays ~/ 7} sem';
+      final mins = diff.inMinutes.abs();
+      final hours = diff.inHours.abs();
+      final days = diff.inDays.abs();
+      if (mins < 60) return 'Hace ${mins} min';
+      if (hours < 24) return 'Hace ${hours}h';
+      if (days < 7) return 'Hace ${days} dia${days > 1 ? 's' : ''}';
+      return 'Hace ${days ~/ 7} sem';
     } catch (_) {
       return dtStr;
     }

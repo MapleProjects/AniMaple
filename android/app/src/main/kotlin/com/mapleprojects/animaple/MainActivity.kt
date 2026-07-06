@@ -122,7 +122,10 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: ""
                     val episode = call.argument<Int>("episode") ?: 0
                     val playing = call.argument<Boolean>("playing") ?: false
-                    showMediaNotification(title, episode, playing)
+                    val position = call.argument<Long>("position") ?: 0L
+                    val duration = call.argument<Long>("duration") ?: 0L
+                    val animeId = call.argument<Int>("animeId") ?: 0
+                    showMediaNotification(title, episode, playing, position, duration, animeId)
                     result.success(true)
                 }
                 "dismissMediaNotification" -> {
@@ -178,30 +181,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun showMediaNotification(title: String, episode: Int, playing: Boolean) {
+    private fun showMediaNotification(title: String, episode: Int, playing: Boolean, position: Long, duration: Long, animeId: Int) {
         val session = mediaSession ?: return
 
-        // Update playback state
+        // Update playback state with position for seekbar
         val state = PlaybackState.Builder()
             .setActions(
                 PlaybackState.ACTION_PLAY or
                 PlaybackState.ACTION_PAUSE or
-                PlaybackState.ACTION_STOP
+                PlaybackState.ACTION_STOP or
+                PlaybackState.ACTION_SEEK_TO
             )
             .setState(
                 if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                0, if (playing) 1.0f else 0.0f
+                position, if (playing) 1.0f else 0.0f
             )
+            .setActiveQueueItemId(0)
             .build()
         session.setPlaybackState(state)
 
-        // Update metadata
-        val metadata = MediaMetadata.Builder()
+        // Update metadata with big icon
+        val metadataBuilder = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title)
             .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Episodio $episode")
             .putString(MediaMetadata.METADATA_KEY_ARTIST, "AniMaple")
-            .build()
-        session.setMetadata(metadata)
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
+        // Load poster as big picture
+        val posterUrl = "https://cdn.animeav1.com/covers/$animeId.jpg"
+        try {
+            val bitmap = android.graphics.BitmapFactory.decodeStream(
+                java.net.URL(posterUrl).openStream()
+            )
+            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
+        } catch (_: Exception) {}
+        session.setMetadata(metadataBuilder.build())
 
         val playPauseIcon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val playPauseLabel = if (playing) "Pausar" else "Reproducir"

@@ -186,10 +186,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _updateMediaSession(bool playing) {
     try {
+      final duration = _player.mediaInfo.value?.duration ?? 0;
+      final position = _player.position.value;
+      final animeDetail = _animeDetail;
       _mediaChannel.invokeMethod('updateMediaSession', {
         'title': widget.animeTitle,
         'episode': _currentEp,
         'playing': playing,
+        'position': position,
+        'duration': duration,
+        'animeId': animeDetail?.id ?? 0,
       });
     } catch (_) {}
   }
