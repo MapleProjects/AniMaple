@@ -42,6 +42,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   double? _seekDelta;
   bool _seekAnimating = false;
 
+  // Double-tap seek accumulation
+  int _seekAccumulatorMs = 0;
+  DateTime? _lastSeekTapTime;
+  int _seekBasePosition = 0;
+  static const Duration _seekAccumulationWindow = Duration(milliseconds: 1500);
+  Timer? _seekResetTimer;
+
+  // PiP
+  static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
+  bool _isPipMode = false;
+
   // End-of-episode countdown
   bool _showCountdown = false;
   int _countdownSeconds = 5;
@@ -71,16 +82,78 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.mediaInfo.addListener(_onMediaInfo);
     _startPositionTimer();
     _load();
+    _initPip();
+  }
+
+  void _initPip() {
+    _pipChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onPipModeChanged':
+          final isInPip = call.arguments as bool;
+          if (mounted) {
+            setState(() {
+              _isPipMode = isInPip;
+              if (isInPip) {
+                // Hide all Flutter controls in PiP — system handles UI
+                _controlsVisible = false;
+                _controlsAnim!.value = 0;
+                _hideTimer?.cancel();
+              }
+            });
+            if (!isInPip) {
+              // Exiting PiP — restore UI
+              SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+            }
+          }
+          break;
+        case 'pipTogglePlayPause':
+          // User tapped play/pause in PiP controls
+          _togglePlayPause();
+          break;
+        case 'onUserLeaveHint':
+          // Auto-enter PiP when user presses home (if video is playing)
+          final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+          if (isPlaying && mounted && !_showCountdown) {
+            _enterPip();
+          }
+          break;
+      }
+    });
+  }
+
+  Future<void> _enterPip() async {
+    try {
+      await _pipChannel.invokeMethod('enterPip');
+    } catch (e) {
+      debugPrint('PiP enter error: $e');
+    }
+  }
+
+  void _closePlayback() {
+    _player.close();
+    _positionTimer?.cancel();
+    if (mounted) Navigator.pop(context);
   }
 
   void _onStateChanged() {
     final playing = _player.playbackState.value == VideoControllerPlaybackState.playing;
     if (playing) {
       _startPositionTimer();
+      // Auto-hide controls when video starts playing
+      _startHideTimer();
     } else {
       _positionTimer?.cancel();
     }
+    // Sync play state with native PiP controls
+    _syncPipState(playing);
     if (mounted) setState(() {});
+  }
+
+  void _syncPipState(bool playing) {
+    try {
+      _pipChannel.invokeMethod('updatePipState', playing);
+    } catch (_) {}
   }
 
   void _onFinished() {
@@ -144,6 +217,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _hideTimer?.cancel();
     _countdownTimer?.cancel();
     _positionTimer?.cancel();
+    _seekResetTimer?.cancel();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
@@ -284,7 +358,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
     return Scaffold(
       backgroundColor: const Color(0xFF0a0812),
-      appBar: _isFullscreen ? null : AppBar(
+      appBar: (_isFullscreen || _isPipMode) ? null : AppBar(
         backgroundColor: const Color(0xFF0a0812),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -374,7 +448,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _startHideTimer() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 2), () {
+    _hideTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && !_isDragging) setState(() => _controlsVisible = false);
       _controlsAnim?.reverse();
     });
@@ -384,31 +458,54 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final ps = _player.playbackState.value;
     if (ps == VideoControllerPlaybackState.playing) {
       _player.pause();
-      setState(() => _controlsVisible = true);
-      _controlsAnim!.forward();
+      if (!_isPipMode) {
+        setState(() => _controlsVisible = true);
+        _controlsAnim!.forward();
+      }
       _hideTimer?.cancel();
     } else {
       _player.play();
-      _startHideTimer();
+      if (!_isPipMode) _startHideTimer();
     }
   }
+
   void _seekRelative(int deltaMs) {
+    final now = DateTime.now();
     final pos = _player.position.value;
     final dur = _player.mediaInfo.value?.duration ?? 0;
-    final target = (pos + deltaMs).clamp(0, dur);
+
+    // Accumulate seeks within the time window
+    if (_lastSeekTapTime != null && now.difference(_lastSeekTapTime!) < _seekAccumulationWindow) {
+      _seekAccumulatorMs += deltaMs;
+    } else {
+      // New sequence — reset accumulator
+      _seekBasePosition = pos;
+      _seekAccumulatorMs = deltaMs;
+    }
+    _lastSeekTapTime = now;
+
+    final target = (_seekBasePosition + _seekAccumulatorMs).clamp(0, dur);
     _player.seekTo(target);
-    _seekDelta = deltaMs.toDouble();
+
+    _seekDelta = _seekAccumulatorMs.toDouble();
     _seekAnimating = true;
     setState(() {});
-    // Fade in → hold 800ms → fade out → clean up
-    _seekFadeAnim!.forward(from: 0).then((_) {
-      Future.delayed(const Duration(milliseconds: 800), () {
-        if (!mounted) return;
-        _seekFadeAnim!.reverse().then((_) {
-          if (mounted) setState(() { _seekAnimating = false; _seekDelta = null; });
+
+    // Restart fade animation on each tap
+    _seekFadeAnim!.forward(from: 0);
+
+    // Cancel previous reset timer, start new one
+    _seekResetTimer?.cancel();
+    _seekResetTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      _seekFadeAnim!.reverse().then((_) {
+        if (mounted) setState(() {
+          _seekAnimating = false;
+          _seekDelta = null;
         });
       });
     });
+
     _showControlsTemporarily();
   }
 
@@ -416,183 +513,191 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   Widget _buildVideoPlayer() {
     final duration = _player.mediaInfo.value?.duration ?? 0;
-      final position = _player.position.value;
-      final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          // Video surface
-          VideoView(controller: _player),
+    final position = _player.position.value;
+    final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Video surface
+        VideoView(controller: _player),
 
-          // Loading spinner
-          if (_player.loading.value)
-            const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+        // ── Everything below is hidden in PiP mode ──
+        if (!_isPipMode) ...[
 
-          // Big center play/pause (when paused)
-          if (!isPlaying && !_player.loading.value)
-            GestureDetector(
-              onTap: _togglePlayPause,
-              child: Container(
-                width: 56, height: 56,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+        // Loading spinner
+        if (_player.loading.value)
+          const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+
+        // Big center play/pause (when paused)
+        if (!isPlaying && !_player.loading.value)
+          GestureDetector(
+            onTap: _togglePlayPause,
+            child: Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
               ),
-            ),
-
-          // Double-tap seek indicator — right side for forward, left for rewind
-          if (_seekAnimating && _seekDelta != null)
-            Positioned(
-              top: 0,
-              bottom: 0,
-              right: _seekDelta! > 0 ? 24 : null,
-              left: _seekDelta! < 0 ? 24 : null,
-              child: FadeTransition(
-                opacity: _seekFadeAnim!,
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
-                          color: Colors.white, size: 28,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
-                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // End-of-episode countdown overlay
-          if (_showCountdown)
-            Container(
-              color: Colors.black.withValues(alpha: 0.85),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Siguiente episodio en',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    // Countdown circle
-                    SizedBox(
-                      width: 80, height: 80,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          SizedBox(
-                            width: 80, height: 80,
-                            child: CircularProgressIndicator(
-                              value: _countdownSeconds / 5,
-                              strokeWidth: 3,
-                              color: const Color(0xFF8b5cf6),
-                              backgroundColor: Colors.white24,
-                            ),
-                          ),
-                          Text(
-                            '$_countdownSeconds',
-                            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w700),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Episodio ${_currentEp + 1}',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Cancel button (left)
-                        GestureDetector(
-                          onTap: _cancelCountdown,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white12,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text('Cancelar', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Skip button (right)
-                        GestureDetector(
-                          onTap: _skipCountdown,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF8b5cf6),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // Tap zones for play/pause + double-tap seek
-          Positioned.fill(
-            child: Row(
-              children: [
-                // Left third: double-tap rewind
-                Expanded(
-                  flex: 33,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _toggleControls,
-                    onDoubleTap: () => _seekRelative(-5000),
-                    child: Container(color: Colors.transparent),
-                  ),
-                ),
-                // Center third: play/pause
-                Expanded(
-                  flex: 34,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _toggleControls,
-                    onDoubleTap: _togglePlayPause,
-                    child: Container(color: Colors.transparent),
-                  ),
-                ),
-                // Right third: double-tap forward
-                Expanded(
-                  flex: 33,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _toggleControls,
-                    onDoubleTap: () => _seekRelative(5000),
-                    child: Container(color: Colors.transparent),
-                  ),
-                ),
-              ],
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
             ),
           ),
 
-          // Bottom controls bar with fade animation
-          FadeTransition(
+        // Double-tap seek indicator — right side for forward, left for rewind
+        if (_seekAnimating && _seekDelta != null)
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: _seekDelta! > 0 ? 24 : null,
+            left: _seekDelta! < 0 ? 24 : null,
+            child: FadeTransition(
+              opacity: _seekFadeAnim!,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                        color: Colors.white, size: 28,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // End-of-episode countdown overlay
+        if (_showCountdown)
+          Container(
+            color: Colors.black.withValues(alpha: 0.85),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Siguiente episodio en',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  // Countdown circle
+                  SizedBox(
+                    width: 80, height: 80,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 80, height: 80,
+                          child: CircularProgressIndicator(
+                            value: _countdownSeconds / 5,
+                            strokeWidth: 3,
+                            color: const Color(0xFF8b5cf6),
+                            backgroundColor: Colors.white24,
+                          ),
+                        ),
+                        Text(
+                          '$_countdownSeconds',
+                          style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Episodio ${_currentEp + 1}',
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Cancel button (left)
+                      GestureDetector(
+                        onTap: _cancelCountdown,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white12,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text('Cancelar', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Skip button (right)
+                      GestureDetector(
+                        onTap: _skipCountdown,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8b5cf6),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Tap zones for play/pause + double-tap seek
+        Positioned.fill(
+          child: Row(
+            children: [
+              // Left third: double-tap rewind
+              Expanded(
+                flex: 33,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _toggleControls,
+                  onDoubleTap: () => _seekRelative(-2500),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+              // Center third: play/pause
+              Expanded(
+                flex: 34,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _toggleControls,
+                  onDoubleTap: _togglePlayPause,
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+              // Right third: double-tap forward
+              Expanded(
+                flex: 33,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _toggleControls,
+                  onDoubleTap: () => _seekRelative(2500),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // PiP mode is handled natively by Android — no Flutter overlay
+        ], // end if (!_isPipMode)
+
+        // Bottom controls bar (hidden in PiP via _controlsVisible=false)
+        IgnorePointer(
+          ignoring: !_controlsVisible,
+          child: FadeTransition(
             opacity: _controlsAnim!,
             child: Align(
               alignment: Alignment.bottomCenter,
@@ -637,7 +742,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                             },
                           ),
                         ),
-                      // Compact row: play/pause · time · fullscreen
+                      // Compact row: play/pause · time · pip · fullscreen
                       Padding(
                         padding: const EdgeInsets.only(bottom: 2),
                         child: Row(
@@ -655,6 +760,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               style: const TextStyle(color: Colors.white70, fontSize: 12),
                             ),
                             const Spacer(),
+                            // PiP button
+                            GestureDetector(
+                              onTap: _enterPip,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
                             GestureDetector(
                               onTap: _toggleFullscreen,
                               child: Icon(
@@ -671,8 +785,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               ),
             ),
           ),
-        ],
-      );
+        ),
+      ],
+    );
   }
 
   static String _formatTime(int ms) {
