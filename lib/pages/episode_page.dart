@@ -35,6 +35,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // Video controls
   bool _controlsVisible = true;
   bool _isDragging = false;
+  double? _dragValue;
   Timer? _hideTimer;
   AnimationController? _controlsAnim;
   AnimationController? _seekAnim;
@@ -778,32 +779,100 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Seek slider
+                      // Seek slider with drag bubble
                       if (duration > 0)
-                        SliderTheme(
-                          data: SliderThemeData(
-                            activeTrackColor: const Color(0xFF8b5cf6),
-                            inactiveTrackColor: Colors.white24,
-                            thumbColor: const Color(0xFF8b5cf6),
-                            overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
-                            trackHeight: 2,
-                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                          ),
-                          child: Slider(
-                            min: 0,
-                            max: duration.toDouble(),
-                            value: position.clamp(0, duration).toDouble(),
-                            onChangeStart: (v) {
-                              _isDragging = true;
-                              _hideTimer?.cancel();
-                            },
-                            onChanged: (v) => setState(() {}),
-                            onChangeEnd: (v) {
-                              _player.seekTo(v.toInt());
-                              _isDragging = false;
-                              _startHideTimer();
-                            },
-                          ),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final displayValue = _isDragging && _dragValue != null
+                                ? _dragValue!
+                                : position.clamp(0, duration).toDouble();
+                            final fraction = duration > 0
+                                ? (displayValue / duration).clamp(0.0, 1.0)
+                                : 0.0;
+                            final bubbleLeft = (fraction * constraints.maxWidth).clamp(
+                              20.0, // half bubble width clamped
+                              constraints.maxWidth - 20.0,
+                            );
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Bubble tooltip
+                                if (_isDragging)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      alignment: Alignment.bottomCenter,
+                                      children: [
+                                        Positioned(
+                                          bottom: 0,
+                                          left: bubbleLeft - 20,
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black.withValues(alpha: 0.85),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: Text(
+                                                  _formatTime(displayValue.toInt()),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              // Arrow
+                                              CustomPaint(
+                                                size: const Size(12, 6),
+                                                painter: _BubbleArrowPainter(),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                // Slider
+                                SliderTheme(
+                                  data: SliderThemeData(
+                                    activeTrackColor: const Color(0xFF8b5cf6),
+                                    inactiveTrackColor: Colors.white24,
+                                    thumbColor: const Color(0xFF8b5cf6),
+                                    overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+                                    trackHeight: 2,
+                                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                                  ),
+                                  child: Slider(
+                                    min: 0,
+                                    max: duration.toDouble(),
+                                    value: displayValue,
+                                    onChangeStart: (v) {
+                                      setState(() {
+                                        _isDragging = true;
+                                        _dragValue = v;
+                                      });
+                                      _hideTimer?.cancel();
+                                    },
+                                    onChanged: (v) {
+                                      setState(() => _dragValue = v);
+                                    },
+                                    onChangeEnd: (v) {
+                                      _player.seekTo(v.toInt());
+                                      setState(() {
+                                        _isDragging = false;
+                                        _dragValue = null;
+                                      });
+                                      _startHideTimer();
+                                    },
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       // Compact row: play/pause · time · pip · fullscreen
                       Padding(
@@ -1025,4 +1094,23 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
     );
   }
+}
+
+/// Small downward arrow for the seek bubble tooltip
+class _BubbleArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.85)
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
