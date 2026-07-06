@@ -177,7 +177,7 @@ class MainActivity : FlutterActivity() {
             val channel = NotificationChannel(
                 MEDIA_CHANNEL_ID,
                 "Reproducción de video",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Controles de reproducción de AniMaple"
                 setShowBadge(false)
@@ -259,7 +259,9 @@ class MainActivity : FlutterActivity() {
             .setPriority(Notification.PRIORITY_LOW)
             .build()
 
+        Log.d(TAG, "showMediaNotification: title=$title ep=$episode playing=$playing pos=$position dur=$duration animeId=$animeId")
         notificationManager?.notify(NOTIFICATION_ID, notification)
+        Log.d(TAG, "showMediaNotification: notification sent")
     }
 
     private fun dismissMediaNotification() {

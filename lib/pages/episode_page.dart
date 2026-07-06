@@ -731,12 +731,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   child: Container(color: Colors.transparent),
                 ),
               ),
-              // Center third: play/pause
+              // Center third: single tap = play/pause (always)
               Expanded(
                 flex: 34,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
+                  onTap: _togglePlayPause,
                   onDoubleTap: _togglePlayPause,
                   child: Container(color: Colors.transparent),
                 ),
