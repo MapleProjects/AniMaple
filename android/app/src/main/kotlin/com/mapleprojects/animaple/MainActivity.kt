@@ -350,6 +350,15 @@ class MainActivity : FlutterActivity() {
         pendingPip = false
     }
 
+    override fun onStop() {
+        super.onStop()
+        // If activity stops and we're NOT in PiP, the user dismissed PiP with X
+        if (!isInPictureInPictureMode && isPlaying) {
+            pipMethodChannel?.invokeMethod("mediaStop", null)
+            isPlaying = false
+        }
+    }
+
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: Configuration

@@ -107,11 +107,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         case 'onPipModeChanged':
           final isInPip = call.arguments as bool;
           if (mounted) {
-            if (!isInPip && _isPipMode) {
-              // Exiting PiP — close playback completely (user closed PiP window)
-              _closePlayback();
-              return;
-            }
             setState(() {
               _isPipMode = isInPip;
               if (isInPip) {
@@ -121,6 +116,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               }
             });
             if (!isInPip) {
+              // Exiting PiP — restore UI
               SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
             }
