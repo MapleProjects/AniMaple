@@ -900,9 +900,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                         onPointerDown: (e) {
                                           _isDragging = true;
                                           _hideTimer?.cancel();
-                                          final x = e.localPosition.dx.clamp(0.0, trackW);
-                                          final val = (x / trackW * dur).clamp(0.0, dur.toDouble());
-                                          setState(() { _dragValue = val; });
                                         },
                                         onPointerMove: (e) {
                                           final x = e.localPosition.dx.clamp(0.0, trackW);
