@@ -900,10 +900,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
                                       return GestureDetector(
                                         behavior: HitTestBehavior.opaque,
-                                        onTapDown: (d) {
+                                        onTapUp: (d) {
+                                          // Only fires if user tapped without dragging
                                           final val = _posToValue(d.localPosition);
                                           _player.seekTo(val.toInt());
-                                          setState(() { _dragValue = val; });
                                           _showControlsTemporarily();
                                         },
                                         onHorizontalDragStart: (d) {
