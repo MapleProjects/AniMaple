@@ -884,7 +884,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Custom seek bar
+                              // Custom seek bar — raw pointer events for reliable drag
                               if (dur > 0)
                                 SizedBox(
                                   height: 40,
@@ -893,38 +893,33 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       final trackW = constraints.maxWidth;
                                       final trackH = 4.0;
                                       final topY = (constraints.maxHeight - trackH) / 2;
-                                      double frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
+                                      final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
 
-                                      double _posToValue(Offset localPos) {
-                                        final x = localPos.dx.clamp(0.0, trackW);
-                                        return (x / trackW * dur).clamp(0.0, dur.toDouble());
-                                      }
-
-                                      return GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTapUp: (d) {
-                                          // Only fires if user tapped without dragging
-                                          final val = _posToValue(d.localPosition);
-                                          _player.seekTo(val.toInt());
-                                          _showControlsTemporarily();
-                                        },
-                                        onHorizontalDragStart: (d) {
+                                      return Listener(
+                                        onPointerDown: (e) {
                                           _isDragging = true;
                                           _hideTimer?.cancel();
-                                          final val = _posToValue(d.localPosition);
+                                          final x = e.localPosition.dx.clamp(0.0, trackW);
+                                          final val = (x / trackW * dur).clamp(0.0, dur.toDouble());
                                           setState(() { _dragValue = val; });
                                         },
-                                        onHorizontalDragUpdate: (d) {
-                                          final val = _posToValue(d.localPosition);
+                                        onPointerMove: (e) {
+                                          final x = e.localPosition.dx.clamp(0.0, trackW);
+                                          final val = (x / trackW * dur).clamp(0.0, dur.toDouble());
                                           setState(() { _dragValue = val; });
                                         },
-                                        onHorizontalDragEnd: (d) {
+                                        onPointerUp: (e) {
                                           final target = (_dragValue ?? dv).toInt().clamp(0, dur);
                                           _player.seekTo(target);
                                           _isDragging = false;
                                           _dragValue = null;
                                           setState(() {});
                                           _startHideTimer();
+                                        },
+                                        onPointerCancel: (e) {
+                                          _isDragging = false;
+                                          _dragValue = null;
+                                          setState(() {});
                                         },
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(horizontal: 10),
