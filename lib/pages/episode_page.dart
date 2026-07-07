@@ -882,37 +882,92 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Seek slider
+                              // Custom seek bar
                               if (dur > 0)
-                                SliderTheme(
-                                  data: SliderThemeData(
-                                    activeTrackColor: const Color(0xFF8b5cf6),
-                                    inactiveTrackColor: Colors.white24,
-                                    thumbColor: const Color(0xFF8b5cf6),
-                                    overlayColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
-                                    trackHeight: 2,
-                                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                                  ),
-                                  child: Slider(
-                                    min: 0,
-                                    max: dur.toDouble(),
-                                    value: dv,
-                                    onChangeStart: (v) {
-                                      setState(() {
-                                        _isDragging = true;
-                                        _dragValue = v;
-                                      });
-                                      _hideTimer?.cancel();
-                                    },
-                                    onChanged: (v) {
-                                      setState(() => _dragValue = v);
-                                    },
-                                    onChangeEnd: (v) {
-                                      _player.seekTo(v.toInt());
-                                      _isDragging = false;
-                                      // Don't clear _dragValue yet — let position timer catch up
-                                      setState(() {});
-                                      _startHideTimer();
+                                SizedBox(
+                                  height: 40,
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final trackW = constraints.maxWidth;
+                                      final trackH = 4.0;
+                                      final topY = (constraints.maxHeight - trackH) / 2;
+                                      double frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
+
+                                      double _posToValue(Offset localPos) {
+                                        final x = localPos.dx.clamp(0.0, trackW);
+                                        return (x / trackW * dur).clamp(0.0, dur.toDouble());
+                                      }
+
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTapDown: (d) {
+                                          final val = _posToValue(d.localPosition);
+                                          _player.seekTo(val.toInt());
+                                          setState(() { _dragValue = val; });
+                                          _showControlsTemporarily();
+                                        },
+                                        onHorizontalDragStart: (d) {
+                                          _isDragging = true;
+                                          _hideTimer?.cancel();
+                                          final val = _posToValue(d.localPosition);
+                                          setState(() { _dragValue = val; });
+                                        },
+                                        onHorizontalDragUpdate: (d) {
+                                          final val = _posToValue(d.localPosition);
+                                          setState(() { _dragValue = val; });
+                                        },
+                                        onHorizontalDragEnd: (d) {
+                                          final target = (_dragValue ?? dv).toInt().clamp(0, dur);
+                                          _player.seekTo(target);
+                                          _isDragging = false;
+                                          _dragValue = null;
+                                          setState(() {});
+                                          _startHideTimer();
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          child: Stack(
+                                            alignment: Alignment.centerLeft,
+                                            children: [
+                                              // Track bg
+                                              Positioned(
+                                                top: topY, left: 0, right: 0,
+                                                child: Container(
+                                                  height: trackH,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.white24,
+                                                    borderRadius: BorderRadius.circular(2),
+                                                  ),
+                                                ),
+                                              ),
+                                              // Active track
+                                              Positioned(
+                                                top: topY, left: 0,
+                                                width: trackW * frac,
+                                                child: Container(
+                                                  height: trackH,
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(0xFF8b5cf6),
+                                                    borderRadius: BorderRadius.circular(2),
+                                                  ),
+                                                ),
+                                              ),
+                                              // Thumb
+                                              Positioned(
+                                                left: (trackW * frac) - 7,
+                                                child: Container(
+                                                  width: 14, height: 14,
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(0xFF8b5cf6),
+                                                    shape: BoxShape.circle,
+                                                    boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
                                     },
                                   ),
                                 ),
