@@ -32,14 +32,37 @@ class _CalendarPageState extends State<CalendarPage> {
       final grouped = <String, List<AnimeBasic>>{};
       for (final a in sched) {
         String day = 'Proximamente';
-        if (a.startDate != null) {
+        // Use latestEpisodeCreatedAt for the actual airing day, fallback to startDate
+        final timeStr = a.latestEpisodeCreatedAt ?? a.startDate ?? '';
+        if (timeStr.isNotEmpty) {
           try {
-            final dt = DateTime.parse(a.startDate!);
+            final clean = timeStr.split('+').first.split('.').first;
+            final dt = DateTime.parse(clean).toUtc();
             day = _dayNames[dt.weekday % 7];
-          } catch (_) {}
+          } catch (_) {
+            if (a.startDate != null) {
+              try {
+                final dt = DateTime.parse(a.startDate!);
+                day = _dayNames[dt.weekday % 7];
+              } catch (_) {}
+            }
+          }
         }
         grouped.putIfAbsent(day, () => []).add(a);
       }
+
+      // Sort each day's list by latestEpisodeCreatedAt (newest first)
+      for (final entry in grouped.entries) {
+        entry.value.sort((a, b) {
+          final ca = a.latestEpisodeCreatedAt ?? '';
+          final cb = b.latestEpisodeCreatedAt ?? '';
+          if (ca.isEmpty && cb.isEmpty) return 0;
+          if (ca.isEmpty) return 1;
+          if (cb.isEmpty) return -1;
+          return cb.compareTo(ca);
+        });
+      }
+
       final days = _dayOrder.where((d) => grouped.containsKey(d)).toList();
       final today = _dayNames[DateTime.now().weekday % 7];
       final todayIdx = days.indexOf(today);
@@ -94,7 +117,7 @@ class _CalendarPageState extends State<CalendarPage> {
                     },
                   ),
                 ),
-                // Anime grid for selected day (mosaic format)
+                // Anime grid for selected day (vertical cards like animeav1)
                 Expanded(
                   child: Builder(
                     builder: (ctx) {
@@ -125,24 +148,33 @@ class _CalendarPageState extends State<CalendarPage> {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     clipBehavior: Clip.antiAlias,
-                                    child: a.poster != null
-                                      ? Image.network(a.poster!, fit: BoxFit.cover, width: double.infinity,
-                                          errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)))
-                                      : const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        a.poster != null
+                                          ? Image.network(a.poster!, fit: BoxFit.cover, width: double.infinity,
+                                              errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)))
+                                          : const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)),
+                                        // Episode number badge
+                                        if (a.latestEpisodeNumber != null)
+                                          Positioned(
+                                            top: 6, left: 6,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF8b5cf6).withValues(alpha: 0.9),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text('Ep ${a.latestEpisodeNumber}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 6),
                                 Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFFe8e4f0), height: 1.3)),
-                                Container(
-                                  margin: const EdgeInsets.only(top: 4),
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(a.category, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFFa78bfa))),
-                                ),
                               ],
                             ),
                           );

@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+
+bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
 
 
 class EpisodePage extends StatefulWidget {
@@ -65,6 +69,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   // Position update timer (video_view doesn't auto-rebuild on position change)
   Timer? _positionTimer;
+
+  // Mouse hover (desktop only)
+  bool _isHovering = false;
+
+  // Linux fullscreen via MethodChannel
+  static const _linuxChannel = MethodChannel('com.mapleprojects.animaple/linux_window');
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -144,6 +154,34 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           break;
       }
     });
+  }
+
+  // ── Desktop-only: keyboard shortcut F + mouse hover ──
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _onMouseEnter(PointerEvent event) {
+    _isHovering = true;
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+      _controlsAnim!.forward();
+    }
+    _startHideTimer();
+  }
+
+  void _onMouseExit(PointerEvent event) {
+    _isHovering = false;
+    if (!_isDragging && !_showCountdown) {
+      _hideTimer?.cancel();
+      setState(() => _controlsVisible = false);
+      _controlsAnim?.reverse();
+    }
   }
 
   Future<void> _enterPip() async {
@@ -391,12 +429,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _goNext() => _switchEpisode(_currentEp + 1);
   void _goPrev() => _switchEpisode(_currentEp - 1);
 
-  void _toggleFullscreen() {
+  void _toggleFullscreen() async {
+    if (_isDesktop) {
+      try { await _linuxChannel.invokeMethod('toggleFullScreen'); } catch (_) {}
+    }
     setState(() => _isFullscreen = !_isFullscreen);
-    if (_isFullscreen) {
+    if (_isFullscreen && !_isDesktop) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
+    } else if (!_isDesktop) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
@@ -420,7 +461,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final screenWidth = MediaQuery.of(context).size.width;
     final isWide = screenWidth > 900;
 
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: const Color(0xFF0a0812),
       appBar: (_isFullscreen || _isPipMode) ? null : AppBar(
         backgroundColor: const Color(0xFF0a0812),
@@ -443,6 +484,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ? _buildWideLayout(ep, filteredEmbeds, anime)
           : _buildNarrowLayout(ep, filteredEmbeds, anime),
     );
+
+    if (_isDesktop) {
+      return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: scaffold);
+    }
+    return scaffold;
   }
 
   Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
@@ -498,7 +544,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _startPositionTimer() {
     _positionTimer?.cancel();
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      // Clear _dragValue when player position catches up after seek
+      if (_dragValue != null && !_isDragging) {
+        final pos = _player.position.value;
+        if ((pos - _dragValue!).abs() < 1500) {
+          _dragValue = null;
+        }
+      }
+      setState(() {});
     });
   }
 
@@ -512,8 +566,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _startHideTimer() {
     _hideTimer?.cancel();
+    if (_isHovering) return; // Don't hide on desktop when mouse is over
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && !_isDragging) setState(() => _controlsVisible = false);
+      if (mounted && !_isDragging && !_isHovering) setState(() => _controlsVisible = false);
       _controlsAnim?.reverse();
     });
   }
@@ -579,7 +634,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final duration = _player.mediaInfo.value?.duration ?? 0;
     final position = _player.position.value;
     final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
-    return Stack(
+    final playerWidget = Stack(
       alignment: Alignment.center,
       children: [
         // Video surface
@@ -717,17 +772,19 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // Tap zones for play/pause + double-tap seek
+        // Tap zones for play/pause + double-tap seek (disabled during countdown)
         Positioned.fill(
-          child: Row(
+          child: IgnorePointer(
+            ignoring: _showCountdown,
+            child: Row(
             children: [
               // Left third: double-tap rewind
               Expanded(
                 flex: 33,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
-                  onDoubleTap: () => _seekRelative(-2500),
+                  onTap: _showCountdown ? null : _toggleControls,
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-2500),
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -736,8 +793,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 flex: 34,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTap: _togglePlayPause,
-                  onDoubleTap: _togglePlayPause,
+                  onTap: _showCountdown ? null : _togglePlayPause,
+                  onDoubleTap: _showCountdown ? null : _togglePlayPause,
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -746,12 +803,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 flex: 33,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
-                  onDoubleTap: () => _seekRelative(2500),
+                  onTap: _showCountdown ? null : _toggleControls,
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(2500),
                   child: Container(color: Colors.transparent),
                 ),
               ),
             ],
+          ),
           ),
         ),
 
@@ -767,7 +825,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               builder: (context, constraints) {
                 final dur = _player.mediaInfo.value?.duration ?? 0;
                 final pos = _player.position.value;
-                final dv = _isDragging && _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
+                final dv = _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
                 final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
                 // Position bubble above thumb. Account for slider padding (16px each side).
                 final sliderWidth = constraints.maxWidth - 32;
@@ -851,10 +909,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                     },
                                     onChangeEnd: (v) {
                                       _player.seekTo(v.toInt());
-                                      setState(() {
-                                        _isDragging = false;
-                                        _dragValue = null;
-                                      });
+                                      _isDragging = false;
+                                      // Don't clear _dragValue yet — let position timer catch up
+                                      setState(() {});
                                       _startHideTimer();
                                     },
                                   ),
@@ -908,6 +965,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         ),
       ],
     );
+
+    if (_isDesktop) {
+      return MouseRegion(onEnter: _onMouseEnter, onExit: _onMouseExit, child: playerWidget);
+    }
+    return playerWidget;
   }
 
   static String _formatTime(int ms) {

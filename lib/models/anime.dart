@@ -8,6 +8,7 @@ class AnimeBasic {
   final String category;
   final int? latestEpisodeId;
   final int? latestEpisodeNumber;
+  final String? latestEpisodeCreatedAt;
 
   AnimeBasic({
     required this.id,
@@ -19,6 +20,7 @@ class AnimeBasic {
     required this.category,
     this.latestEpisodeId,
     this.latestEpisodeNumber,
+    this.latestEpisodeCreatedAt,
   });
 
   factory AnimeBasic.fromJson(Map<String, dynamic> j) => AnimeBasic(
@@ -31,6 +33,7 @@ class AnimeBasic {
     category: j['category'] ?? '',
     latestEpisodeId: j['latest_episode_id'],
     latestEpisodeNumber: j['latest_episode_number'],
+    latestEpisodeCreatedAt: j['latest_episode_created_at'],
   );
 }
 

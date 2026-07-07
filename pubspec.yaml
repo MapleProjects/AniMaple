@@ -18,6 +18,7 @@ dependencies:
   url_launcher: ^6.3.1
   video_view:
     path: video_view
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

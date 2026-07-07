@@ -76,18 +76,18 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  // Episode grid
+                  // Episode grid — landscape 16:9 cards like animeav1
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 200,
-                        childAspectRatio: 0.6,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
+                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 300,
+                        childAspectRatio: 1.35,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
                       ),
                       delegate: SliverChildBuilderDelegate(
-                        (ctx, i) => EpisodeCard(
+                        (ctx, i) => EpisodeCardGrid(
                           episode: _episodes[i],
                           onTap: () => Navigator.push(context, MaterialPageRoute(
                             builder: (_) => DetailPage(slug: _episodes[i].animeSlug),

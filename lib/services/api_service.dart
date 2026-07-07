@@ -148,11 +148,22 @@ class ApiService {
 
   static String _relativeTime(String dtStr) {
     if (dtStr.isEmpty) return '';
-    final clean = dtStr.split('+').first.split('.').first;
     try {
-      final dt = DateTime.parse(clean).toUtc();
+      // Handle formats: "2026-07-07 18:03:41.307485+00" or "2026-07-07T18:03:41+00:00"
+      String clean = dtStr.trim();
+      // Normalize space to T for DateTime.parse
+      if (!clean.contains('T')) clean = clean.replaceFirst(' ', 'T');
+      // Fix timezone offset: "+00" → "+00:00", but "+00:00" stays
+      final tzMatch = RegExp(r'([+-]\d{2})$').firstMatch(clean);
+      if (tzMatch != null) {
+        clean = '${clean.substring(0, tzMatch.start)}${tzMatch.group(1)}:00';
+      }
+      // Remove microseconds (decimal part) if present before timezone
+      clean = clean.replaceFirst(RegExp(r'\.\d+'), '');
+      final dt = DateTime.parse(clean);
+      // DateTime.parse with timezone offset already gives correct UTC via .toUtc()
       final now = DateTime.now().toUtc();
-      final diff = now.difference(dt);
+      final diff = now.difference(dt.toUtc());
       final mins = diff.inMinutes.abs();
       final hours = diff.inHours.abs();
       final days = diff.inDays.abs();
@@ -623,10 +634,23 @@ class ApiService {
       final posterId = obj['poster'] as int? ?? id;
       final cat = obj['category'];
       final category = cat is Map ? (cat['name'] as String? ?? 'TV Anime') : 'TV Anime';
+
+      // Extract latestEpisode info
+      int? latestEpId;
+      int? latestEpNum;
+      String? latestEpCreatedAt;
+      final le = obj['latestEpisode'];
+      if (le is Map) {
+        latestEpId = le['id'] as int?;
+        latestEpNum = le['number'] as int?;
+        latestEpCreatedAt = '${le['createdAt'] ?? ''}';
+      }
+
       return AnimeBasic(
         id: id, title: title, synopsis: synopsis,
-        poster: _coverUrl(posterId),
-        slug: slug, startDate: startDate, category: category,
+        poster: _coverUrl(posterId), slug: slug, startDate: startDate, category: category,
+        latestEpisodeId: latestEpId, latestEpisodeNumber: latestEpNum,
+        latestEpisodeCreatedAt: latestEpCreatedAt,
       );
     }).whereType<AnimeBasic>().toList();
   }
