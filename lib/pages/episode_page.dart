@@ -950,6 +950,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                               // Thumb
                                               Positioned(
                                                 left: (trackW * frac) - 7,
+                                                top: topY - 5,
                                                 child: Container(
                                                   width: 14, height: 14,
                                                   decoration: BoxDecoration(
