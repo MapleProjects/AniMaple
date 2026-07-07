@@ -116,7 +116,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               }
             });
             if (!isInPip) {
-              // Exiting PiP — restore UI
+              // Exiting PiP — pause video so audio stops
+              _player.pause();
               SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
             }
