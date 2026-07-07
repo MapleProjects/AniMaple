@@ -107,17 +107,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         case 'onPipModeChanged':
           final isInPip = call.arguments as bool;
           if (mounted) {
+            if (!isInPip && _isPipMode) {
+              // Exiting PiP — close playback completely (user closed PiP window)
+              _closePlayback();
+              return;
+            }
             setState(() {
               _isPipMode = isInPip;
               if (isInPip) {
-                // Hide all Flutter controls in PiP — system handles UI
                 _controlsVisible = false;
                 _controlsAnim!.value = 0;
                 _hideTimer?.cancel();
               }
             });
             if (!isInPip) {
-              // Exiting PiP — restore UI
               SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
             }
@@ -478,11 +481,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         ),
 
       ),
-      body: _isFullscreen
-        ? Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()))
-        : isWide
-          ? _buildWideLayout(ep, filteredEmbeds, anime)
-          : _buildNarrowLayout(ep, filteredEmbeds, anime),
+      body: _isPipMode
+        ? _buildVideoPlayer()
+        : _isFullscreen
+          ? Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()))
+          : isWide
+            ? _buildWideLayout(ep, filteredEmbeds, anime)
+            : _buildNarrowLayout(ep, filteredEmbeds, anime),
     );
 
     if (_isDesktop) {
