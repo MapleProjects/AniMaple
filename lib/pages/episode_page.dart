@@ -887,7 +887,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               // Custom seek bar — raw pointer events for reliable drag
                               if (dur > 0)
                                 SizedBox(
-                                  height: 40,
+                                  height: 60,
                                   child: LayoutBuilder(
                                     builder: (context, constraints) {
                                       final trackW = constraints.maxWidth;
