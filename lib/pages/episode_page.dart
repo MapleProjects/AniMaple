@@ -837,7 +837,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   clipBehavior: Clip.none,
                   children: [
                     // Bubble tooltip (above the controls)
-                    if (_isDragging)
+                    if (_isDragging && _dragValue != null)
                       Positioned(
                         bottom: 110,
                         left: bubbleLeft - 28,
@@ -896,6 +896,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
 
                                       return Listener(
+                                        behavior: HitTestBehavior.opaque,
                                         onPointerDown: (e) {
                                           _isDragging = true;
                                           _hideTimer?.cancel();
