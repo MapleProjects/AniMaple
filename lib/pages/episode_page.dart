@@ -924,7 +924,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(horizontal: 10),
                                           child: Stack(
-                                            alignment: Alignment.centerLeft,
+                                            fit: StackFit.expand,
                                             children: [
                                               // Track bg
                                               Positioned(
