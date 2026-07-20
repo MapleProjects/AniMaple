@@ -700,12 +700,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _seekDelta! < 0 ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+                        _seekDelta! < 0 ? Icons.replay_10_rounded : Icons.forward_10_rounded,
                         color: Colors.white, size: 28,
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! ~/ 1000)}s',
+                        '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! / 1000).round()}s',
                         style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
                       ),
                     ],
@@ -803,7 +803,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-10000),
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-9900),
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -823,7 +823,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(10000),
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(9900),
                   child: Container(color: Colors.transparent),
                 ),
               ),
