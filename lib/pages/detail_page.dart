@@ -148,7 +148,7 @@ class _DetailPageState extends State<DetailPage> {
                             const SizedBox(height: 8),
                             Wrap(spacing: 6, runSpacing: 4, children: [
                               _chip(anime.category, const Color(0xFF8b5cf6)),
-                              _chip(anime.status, const Color(0xFF22c55e)),
+                              _chip(anime.status, anime.status.contains('Finalizado') ? const Color(0xFF22c55e) : const Color(0xFFf59e0b)),
                               _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
                             ]),
                           ],
@@ -268,7 +268,18 @@ class _DetailPageState extends State<DetailPage> {
         episodeNumber: episodeNumber,
         animeTitle: anime.title,
       ),
-    ));
+    )).then((_) => _refreshWatched());
+  }
+
+  Future<void> _refreshWatched() async {
+    try {
+      final history = await ApiService.fetchHistory();
+      final watched = history
+          .where((h) => h.animeSlug == widget.slug)
+          .map((h) => h.episodeNumber)
+          .toSet();
+      if (mounted) setState(() => _watchedEpisodes = watched);
+    } catch (_) {}
   }
 
   static Widget _chip(String text, Color color) {

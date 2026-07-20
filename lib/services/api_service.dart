@@ -334,7 +334,9 @@ class ApiService {
     final title = '${media['title'] ?? ''}';
     final slugVal = '${media['slug'] ?? slug}';
     final synopsis = '${media['synopsis'] ?? ''}';
-    final status = '${media['status'] ?? 'unknown'}';
+    final statusRaw = _asInt(media['status'], -1);
+    const statusMap = {0: 'Finalizado', 1: 'En emisión', 2: 'En emisión'};
+    final status = statusMap[statusRaw] ?? (statusRaw >= 0 ? 'Status $statusRaw' : 'unknown');
     final posterId = _asInt(media['poster'], id);
     final startDate = media['startDate'] as String?;
 

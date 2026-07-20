@@ -60,6 +60,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   bool _isPipMode = false;
   bool _userStartedPlayback = false;
 
+  // Watched episodes indicator
+  Set<int> _watchedEpisodes = {};
+
   // Media notification
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
   bool _notificationPermissionRequested = false;
@@ -362,6 +365,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           detail?.title ?? widget.animeTitle,
           ep.number,
         );
+        // Load watched episodes for indicator
+        try {
+          final history = await ApiService.fetchHistory();
+          _watchedEpisodes = history
+              .where((h) => h.animeSlug == widget.animeSlug)
+              .map((h) => h.episodeNumber)
+              .toSet();
+          _watchedEpisodes.add(ep.number); // Current episode is also "watched"
+        } catch (_) {}
         _autoPlay();
         return;
       } catch (e, st) {
@@ -1158,8 +1170,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 4, children: [
             _chip(anime.category, const Color(0xFF8b5cf6)),
-            if (int.tryParse(anime.status) == null)
-              _chip(anime.status, const Color(0xFF22c55e)),
+            if (anime.status.isNotEmpty && anime.status != 'unknown')
+              _chip(anime.status, anime.status.contains('Finalizado') ? const Color(0xFF22c55e) : const Color(0xFFf59e0b)),
             ...anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))),
           ]),
         ],
@@ -1173,6 +1185,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: anime.episodes.map((e) {
             final isCurrent = e.number == ep.number;
+            final isWatched = _watchedEpisodes.contains(e.number) && !isCurrent;
             return GestureDetector(
               onTap: () {
                 if (!isCurrent) _switchEpisode(e.number);
@@ -1182,9 +1195,28 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 decoration: BoxDecoration(
                   color: isCurrent ? const Color(0xFF8b5cf6) : const Color(0xFF110e1a),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: isCurrent ? const Color(0xFF8b5cf6) : const Color(0xFF1e1832)),
+                  border: Border.all(
+                    color: isCurrent ? const Color(0xFF8b5cf6) : isWatched ? const Color(0xFF8b5cf6) : const Color(0xFF1e1832),
+                    width: isWatched ? 2 : 1,
+                  ),
                 ),
-                child: Center(child: Text('${e.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isCurrent ? Colors.white : const Color(0xFFe8e4f0)))),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Text('${e.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isCurrent ? Colors.white : const Color(0xFFe8e4f0))),
+                    if (isWatched)
+                      Positioned(
+                        top: 2, right: 2,
+                        child: Container(
+                          width: 6, height: 6,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF8b5cf6),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             );
           }).toList()),
