@@ -15,6 +15,7 @@ class _DetailPageState extends State<DetailPage> {
   AnimeDetail? _anime;
   bool _loading = true;
   bool _followed = false;
+  Set<int> _watchedEpisodes = {};
 
   @override
   void initState() {
@@ -23,14 +24,21 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _load() async {
-    while (mounted) {
+    const maxRetries = 10;
+    for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
     try {
       final anime = await ApiService.fetchAnimeDetail(widget.slug);
       final followed = await ApiService.fetchFollowed();
+      final history = await ApiService.fetchHistory();
+      final watched = history
+          .where((h) => h.animeSlug == widget.slug)
+          .map((h) => h.episodeNumber)
+          .toSet();
       if (mounted) {
       setState(() {
         _anime = anime;
         _followed = followed.any((f) => f.animeId == anime.id);
+        _watchedEpisodes = watched;
         _loading = false;
       });
       }
@@ -40,6 +48,8 @@ class _DetailPageState extends State<DetailPage> {
       await Future.delayed(const Duration(seconds: 3));
     }
     }
+    // All retries failed — show error
+    if (mounted) setState(() { _loading = false; });
   }
 
   Future<void> _toggleFollow() async {
@@ -177,6 +187,7 @@ class _DetailPageState extends State<DetailPage> {
               delegate: SliverChildBuilderDelegate(
                 (ctx, i) {
                   final ep = anime.episodes[i];
+                  final isWatched = _watchedEpisodes.contains(ep.number);
                   return InkWell(
                     onTap: () => _playEpisode(anime, ep.number),
                     borderRadius: BorderRadius.circular(8),
@@ -184,10 +195,29 @@ class _DetailPageState extends State<DetailPage> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF110e1a),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF1e1832)),
+                        border: Border.all(
+                          color: isWatched
+                              ? const Color(0xFF8b5cf6)
+                              : const Color(0xFF1e1832),
+                          width: isWatched ? 2 : 1,
+                        ),
                       ),
-                      child: Center(
-                        child: Text('${ep.number}', style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Text('${ep.number}', style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
+                          if (isWatched)
+                            Positioned(
+                              top: 2, right: 2,
+                              child: Container(
+                                width: 8, height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF8b5cf6),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   );

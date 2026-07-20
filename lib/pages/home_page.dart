@@ -22,7 +22,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _load() async {
-    while (mounted) {
+    const maxRetries = 10;
+    for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
         final eps = await ApiService.fetchRecentEpisodes();
         if (mounted) setState(() { _episodes = eps; _loading = false; });
@@ -32,6 +33,7 @@ class _HomePageState extends State<HomePage> {
         await Future.delayed(const Duration(seconds: 3));
       }
     }
+    if (mounted) setState(() { _loading = false; });
   }
 
   @override

@@ -57,6 +57,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // PiP
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
   bool _isPipMode = false;
+  bool _userStartedPlayback = false;
 
   // Media notification
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
@@ -118,7 +119,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             if (!isInPip) {
               // Exiting PiP — pause video so audio stops
               _player.pause();
-              SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
             }
           }
@@ -209,10 +209,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     } else {
       _positionTimer?.cancel();
     }
-    // Only sync playing=true to native. Don't sync false —
-    // the player may report non-playing states (buffering, surface lost)
-    // before onPause fires on MIUI, which breaks auto-PiP.
-    if (playing) _syncPipState(true);
+    // Only sync playing=true to native AFTER user explicitly started playback.
+    // Prevents auto-PiP when video loads slowly in the background.
+    if (playing && _userStartedPlayback) _syncPipState(true);
     // Request notification permission on first play
     if (playing) _requestNotificationPermission();
     // Update media notification with current state
@@ -330,15 +329,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.dispose();
     _syncPipState(false);
     _dismissMediaNotification();
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    if (_isFullscreen && !_isDesktop) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     super.dispose();
   }
 
   Future<void> _load() async {
-    while (mounted) {
+    const maxRetries = 15;
+    for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
         final ep = await ApiService.fetchEpisodeDetail(widget.animeSlug, _currentEp);
         // Only fetch anime detail on first load (not on episode switch)
@@ -369,6 +368,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         await Future.delayed(const Duration(seconds: 3));
       }
     }
+    // All retries failed — show error state
+    if (mounted) setState(() { _loading = false; });
   }
 
   void _autoPlay() {
@@ -421,6 +422,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     setState(() {
       _currentEp = newEp;
       _loading = true;
+      _userStartedPlayback = false;
     });
     _player.close();
     _load();
@@ -435,12 +437,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
     setState(() => _isFullscreen = !_isFullscreen);
     if (_isFullscreen && !_isDesktop) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else if (!_isDesktop) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
+    // Orientation is always controlled by the device sensor — never forced.
   }
 
   @override
@@ -585,6 +586,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
       _hideTimer?.cancel();
     } else {
+      _userStartedPlayback = true;
       _player.play();
       if (!_isPipMode) _startHideTimer();
     }

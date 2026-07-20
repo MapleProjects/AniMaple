@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
-import 'detail_page.dart';
+import 'episode_page.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -79,7 +79,11 @@ class HistoryPageState extends State<HistoryPage> {
                 final h = _history[i];
                 return GestureDetector(
                   onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => DetailPage(slug: h.animeSlug),
+                    builder: (_) => EpisodePage(
+                      animeSlug: h.animeSlug,
+                      episodeNumber: h.episodeNumber,
+                      animeTitle: h.animeTitle,
+                    ),
                   )),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
