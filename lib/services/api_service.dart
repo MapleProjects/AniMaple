@@ -7,6 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
 
 class ApiService {
+  /// Safe int extraction — handles double/int/string from devalue format.
+  static int _asInt(dynamic v, [int fallback = 0]) {
+    if (v is int) return v;
+    if (v is double) return v.round();
+    if (v is String) return int.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
   static const _base = 'https://animeav1.com';
   static const _cdn = 'https://cdn.animeav1.com';
   static const _ua = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
@@ -76,7 +84,8 @@ class ApiService {
     if (idx < 0 || idx >= data.length) return null;
     final v = data[idx];
     if (v is String || v is bool || v == null) return v;
-    if (v is num) return v;
+    if (v is double) return v == v.roundToDouble() ? v.toInt() : v;
+    if (v is int) return v;
     if (v is List) {
       return v.map((item) {
         if (item is int) return _resolveVal(data, item);
@@ -192,7 +201,7 @@ class ApiService {
     final root = data[0] as Map<String, dynamic>?;
     if (root == null) return [];
 
-    final leIdx = root['latestEpisodes'] as int?;
+    final leIdx = (root['latestEpisodes'] as num?)?.toInt();
     if (leIdx == null || leIdx >= data.length) return [];
 
     final epIndices = data[leIdx] as List?;
@@ -207,8 +216,8 @@ class ApiService {
       if (resolved is! Map) continue;
       final epObj = resolved;
 
-      final number = epObj['number'] as int? ?? 0;
-      final episodeId = epObj['id'] as int? ?? 0;
+      final number = _asInt(epObj['number']);
+      final episodeId = _asInt(epObj['id']);
 
       final media = epObj['media'];
       final animeTitle = media is Map ? (media['title'] as String? ?? '') : '';
@@ -219,13 +228,13 @@ class ApiService {
       int? posterId;
       final rawEp = data[idx] as Map?;
       if (rawEp != null) {
-        final mediaIdx = rawEp['media'] as int?;
+        final mediaIdx = (rawEp['media'] as num?)?.toInt();
         if (mediaIdx != null && mediaIdx < data.length) {
           final rawMedia = data[mediaIdx] as Map?;
           if (rawMedia != null) {
-            final aidIdx = rawMedia['id'] as int?;
+            final aidIdx = (rawMedia['id'] as num?)?.toInt();
             if (aidIdx != null) animeId = _resolveNumberChain(data, aidIdx) ?? 0;
-            final pidIdx = rawMedia['poster'] as int?;
+            final pidIdx = (rawMedia['poster'] as num?)?.toInt();
             if (pidIdx != null) posterId = _resolveNumberChain(data, pidIdx);
             posterId ??= animeId;
           }
@@ -266,7 +275,7 @@ class ApiService {
     final root = data[0] as Map<String, dynamic>?;
     if (root == null) return [];
 
-    final resultsIdx = root['results'] as int?;
+    final resultsIdx = (root['results'] as num?)?.toInt();
     if (resultsIdx == null || resultsIdx >= data.length) return [];
 
     final indices = data[resultsIdx] as List?;
@@ -293,7 +302,7 @@ class ApiService {
 
       final allAnimes = <AnimeBasic>[];
       for (final key in root.keys) {
-        final idx = root[key] as int?;
+        final idx = (root[key] as num?)?.toInt();
         if (idx != null && idx < data.length) {
           final resolved = _resolveVal(data, idx);
           if (resolved is List) {
@@ -317,16 +326,16 @@ class ApiService {
     if (data == null) throw Exception('No data');
 
     final root = data[0] as Map<String, dynamic>;
-    final mediaIdx = root['media'] as int? ?? 1;
+    final mediaIdx = _asInt(root['media'], 1);
     final media = _resolveVal(data, mediaIdx);
     if (media is! Map) throw Exception('No media');
 
-    final id = media['id'] as int? ?? 0;
+    final id = _asInt(media['id']);
     final title = '${media['title'] ?? ''}';
     final slugVal = '${media['slug'] ?? slug}';
     final synopsis = '${media['synopsis'] ?? ''}';
     final status = '${media['status'] ?? 'unknown'}';
-    final posterId = media['poster'] as int? ?? id;
+    final posterId = _asInt(media['poster'], id);
     final startDate = media['startDate'] as String?;
 
     final cat = media['category'];
@@ -334,15 +343,15 @@ class ApiService {
 
     final genresList = media['genres'] as List? ?? [];
     final genres = genresList.whereType<Map>().map((g) => Genre(
-      id: g['id'] as int? ?? 0,
+      id: _asInt(g['id']),
       name: '${g['name'] ?? ''}',
       slug: '${g['slug'] ?? ''}',
     )).toList();
 
     final episodesList = media['episodes'] as List? ?? [];
     final episodes = episodesList.whereType<Map>().map((ep) => EpisodeBasic(
-      id: ep['id'] as int? ?? 0,
-      number: ep['number'] as int? ?? 0,
+      id: _asInt(ep['id']),
+      number: _asInt(ep['number']),
     )).toList();
 
     return AnimeDetail(
@@ -370,16 +379,16 @@ class ApiService {
     if (data == null) throw Exception('No data');
 
     final root = data[0] as Map<String, dynamic>;
-    final epIdx = root['episode'] as int? ?? 1;
-    final embedsRootIdx = root['embeds'] as int? ?? 0;
-    final downloadsRootIdx = root['downloads'] as int? ?? 0;
+    final epIdx = _asInt(root['episode'], 1);
+    final embedsRootIdx = _asInt(root['embeds']);
+    final downloadsRootIdx = _asInt(root['downloads']);
 
     final ep = _resolveVal(data, epIdx);
     if (ep is! Map) throw Exception('No episode');
 
-    final episodeId = ep['id'] as int? ?? 0;
-    final mediaId = ep['mediaId'] as int? ?? 0;
-    final number = ep['number'] as int? ?? episodeNumber;
+    final episodeId = _asInt(ep['id']);
+    final mediaId = _asInt(ep['mediaId']);
+    final number = _asInt(ep['number'], episodeNumber);
 
     final variants = <String>[];
     final embeds = <ServerMirror>[];
@@ -582,11 +591,11 @@ class ApiService {
       final obj = data[idx] as Map?;
       if (obj == null) continue;
 
-      final idIdx = obj['id'] as int? ?? 0;
-      final titleIdx = obj['title'] as int? ?? 0;
-      final slugIdx = obj['slug'] as int? ?? 0;
-      final synopsisIdx = obj['synopsis'] as int? ?? 0;
-      final startDateIdx = obj['startDate'] as int?;
+      final idIdx = _asInt(obj['id']);
+      final titleIdx = _asInt(obj['title']);
+      final slugIdx = _asInt(obj['slug']);
+      final synopsisIdx = _asInt(obj['synopsis']);
+      final startDateIdx = (obj['startDate'] as num?)?.toInt();
 
       final id = _resolveI64(data, idIdx);
       final title = _resolveStr(data, titleIdx);
@@ -595,16 +604,16 @@ class ApiService {
       final startDate = startDateIdx != null ? _resolveStr(data, startDateIdx) : null;
 
       String category = 'TV Anime';
-      final catIdx = obj['category'] as int?;
+      final catIdx = (obj['category'] as num?)?.toInt();
       if (catIdx != null && catIdx < data.length) {
         final catObj = data[catIdx] as Map?;
         if (catObj != null) {
-          final nameIdx = catObj['name'] as int? ?? 0;
+          final nameIdx = _asInt(catObj['name']);
           category = _resolveStr(data, nameIdx);
         }
       }
 
-      int? posterId = obj['poster'] as int?;
+      int? posterId = (obj['poster'] as num?)?.toInt();
       if (posterId != null) {
         posterId = _resolveI64(data, posterId);
         if (posterId <= 0) posterId = id;
@@ -625,13 +634,13 @@ class ApiService {
 
   static List<AnimeBasic> _resolveAnimeListFromResolved(List<dynamic> arr) {
     return arr.whereType<Map>().map((obj) {
-      final id = obj['id'] as int? ?? 0;
+      final id = _asInt(obj['id']);
       final title = obj['title'] as String? ?? '';
       final slug = obj['slug'] as String? ?? '';
       if (title.isEmpty || slug.isEmpty) return null;
       final synopsis = obj['synopsis'] as String? ?? '';
       final startDate = obj['startDate'] as String?;
-      final posterId = obj['poster'] as int? ?? id;
+      final posterId = _asInt(obj['poster'], id);
       final cat = obj['category'];
       final category = cat is Map ? (cat['name'] as String? ?? 'TV Anime') : 'TV Anime';
 
@@ -641,8 +650,8 @@ class ApiService {
       String? latestEpCreatedAt;
       final le = obj['latestEpisode'];
       if (le is Map) {
-        latestEpId = le['id'] as int?;
-        latestEpNum = le['number'] as int?;
+        latestEpId = (le['id'] as num?)?.toInt();
+        latestEpNum = (le['number'] as num?)?.toInt();
         latestEpCreatedAt = '${le['createdAt'] ?? ''}';
       }
 
