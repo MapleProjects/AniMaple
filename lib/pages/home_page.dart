@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
 import 'detail_page.dart';
+import 'episode_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -42,17 +43,19 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF8b5cf6), Color(0xFFec4899)]),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text('AniMaple', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.white)),
+        title: ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
+          ).createShader(bounds),
+          child: const Text(
+            'AniMaple',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 22,
+              color: Colors.white,
+              letterSpacing: 0.5,
             ),
-          ],
+          ),
         ),
       ),
       body: _loading
@@ -174,7 +177,13 @@ class _HeroBanner extends StatelessWidget {
                 ]),
                 const SizedBox(height: 12),
                 ElevatedButton(
-                  onPressed: () {},
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => EpisodePage(
+                      animeSlug: episode.animeSlug,
+                      episodeNumber: episode.episodeNumber,
+                      animeTitle: episode.animeTitle,
+                    ),
+                  )),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF8b5cf6),
                     foregroundColor: Colors.white,
