@@ -803,7 +803,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-2500),
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-10000),
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -823,7 +823,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(2500),
+                  onDoubleTap: _showCountdown ? null : () => _seekRelative(10000),
                   child: Container(color: Colors.transparent),
                 ),
               ),
