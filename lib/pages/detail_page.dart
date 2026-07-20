@@ -27,9 +27,13 @@ class _DetailPageState extends State<DetailPage> {
     const maxRetries = 10;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
     try {
+      debugPrint('DETAIL LOAD attempt=$attempt slug=${widget.slug}');
       final anime = await ApiService.fetchAnimeDetail(widget.slug);
+      debugPrint('DETAIL LOAD fetchAnimeDetail OK: ${anime.title}');
       final followed = await ApiService.fetchFollowed();
+      debugPrint('DETAIL LOAD fetchFollowed OK: ${followed.length} entries');
       final history = await ApiService.fetchHistory();
+      debugPrint('DETAIL LOAD fetchHistory OK: ${history.length} entries');
       final watched = history
           .where((h) => h.animeSlug == widget.slug)
           .map((h) => h.episodeNumber)
@@ -43,8 +47,9 @@ class _DetailPageState extends State<DetailPage> {
       });
       }
       return;
-    } catch (e) {
-      debugPrint('DETAIL RETRY: $e');
+    } catch (e, st) {
+      debugPrint('DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e');
+      debugPrint('DETAIL STACKTRACE: $st');
       await Future.delayed(const Duration(seconds: 3));
     }
     }
@@ -65,7 +70,28 @@ class _DetailPageState extends State<DetailPage> {
     }
     final anime = _anime;
     if (anime == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))));
+      return Scaffold(
+        appBar: AppBar(title: const Text('Error')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Color(0xFFef4444), size: 48),
+              const SizedBox(height: 16),
+              const Text('No se pudo cargar el anime', style: TextStyle(color: Color(0xFFe8e4f0), fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text('Slug: ${widget.slug}', style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () { setState(() { _loading = true; }); _load(); },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reintentar'),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8b5cf6), foregroundColor: Colors.white),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     return Scaffold(
