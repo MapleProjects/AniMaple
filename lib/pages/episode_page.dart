@@ -705,7 +705,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${_seekDelta! > 0 ? '+' : ''}${(_seekDelta! / 1000).round()}s',
+                        '${_seekDelta! > 0 ? '+' : ''}${_formatSeekDelta(_seekDelta!)}',
                         style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
                       ),
                     ],
@@ -1038,6 +1038,19 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       return MouseRegion(onEnter: _onMouseEnter, onExit: _onMouseExit, child: playerWidget);
     }
     return playerWidget;
+  }
+
+  /// Format seek delta for display: always clean multiples of 10s.
+  /// 9900→10s, 19800→20s, 59400→1:00, 69300→1:10
+  static String _formatSeekDelta(num deltaMs) {
+    final absMs = deltaMs.abs();
+    final totalSeconds = (absMs / 1000).round(); // 9900→10, 19800→20
+    final roundedSeconds = ((totalSeconds + 5) ~/ 10) * 10; // round to nearest 10
+    final secs = roundedSeconds.clamp(10, 9990);
+    if (secs < 60) return '${secs}s';
+    final m = secs ~/ 60;
+    final s = secs % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   static String _formatTime(int ms) {
