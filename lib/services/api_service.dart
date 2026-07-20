@@ -18,8 +18,8 @@ class ApiService {
   static http.Client get _http {
     if (_client != null) return _client!;
     final io = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15)
-      ..idleTimeout = const Duration(seconds: 30)
+      ..connectionTimeout = const Duration(seconds: 30)
+      ..idleTimeout = const Duration(seconds: 60)
       ..maxConnectionsPerHost = 6;
     _client = http_io.IOClient(io);
     return _client!;
