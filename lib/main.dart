@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/api_service.dart';
@@ -6,11 +7,19 @@ import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
 import 'pages/history_page.dart';
 import 'pages/following_page.dart';
+import 'widgets/error_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   ApiService.init();
-  runApp(const AniMapleApp());
+
+  // Global async error handler — catches errors outside the widget tree
+  runZonedGuarded((() {
+    runApp(const AniMapleApp());
+  }), (error, stackTrace) {
+    debugPrint('UNCAUGHT ERROR: $error');
+    debugPrint('$stackTrace');
+  });
 }
 
 class AniMapleApp extends StatelessWidget {
@@ -41,7 +50,7 @@ class AniMapleApp extends StatelessWidget {
           surfaceTintColor: Colors.transparent,
         ),
       ),
-      home: const MainShell(),
+      home: const ErrorBoundary(child: MainShell()),
     );
   }
 }

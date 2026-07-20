@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
 import 'detail_page.dart';
 
@@ -28,8 +29,9 @@ class _HomePageState extends State<HomePage> {
         final eps = await ApiService.fetchRecentEpisodes();
         if (mounted) setState(() { _episodes = eps; _loading = false; });
         return;
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('HOME RETRY: $e');
+        if (attempt == 0 && mounted) showErrorSheet(context, e, st);
         await Future.delayed(const Duration(seconds: 3));
       }
     }

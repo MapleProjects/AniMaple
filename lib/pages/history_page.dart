@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../widgets/error_dialog.dart';
 import 'episode_page.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -27,8 +28,9 @@ class HistoryPageState extends State<HistoryPage> {
     try {
       final h = await ApiService.fetchHistory();
       setState(() { _history = h; _loading = false; });
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('HISTORY ERROR: $e');
+      if (mounted) showErrorSheet(context, e, st);
       setState(() => _loading = false);
     }
   }

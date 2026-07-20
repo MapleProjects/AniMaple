@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../widgets/error_dialog.dart';
 import 'episode_page.dart';
 
 class DetailPage extends StatefulWidget {
@@ -50,6 +51,7 @@ class _DetailPageState extends State<DetailPage> {
     } catch (e, st) {
       debugPrint('DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e');
       debugPrint('DETAIL STACKTRACE: $st');
+      if (attempt == 0 && mounted) showErrorSheet(context, e, st, slug: widget.slug);
       await Future.delayed(const Duration(seconds: 3));
     }
     }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../widgets/error_dialog.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
 
@@ -363,8 +364,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         );
         _autoPlay();
         return;
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('EPISODE LOAD RETRY: $e');
+        if (attempt == 0 && mounted) showErrorSheet(context, e, st, slug: widget.animeSlug);
         await Future.delayed(const Duration(seconds: 3));
       }
     }
@@ -406,9 +408,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             : null;
         _player.open(videoUrl, headers: headers);
         return;
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
-        await Future.delayed(const Duration(seconds: 3));
+        if (mounted) showErrorSheet(context, e, st, title: 'Error de reproducción');
+        return;
       }
     }
   }
