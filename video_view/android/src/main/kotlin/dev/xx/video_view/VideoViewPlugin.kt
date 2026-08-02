@@ -381,10 +381,26 @@ class VideoController(
 	override fun onPlayerError(error: PlaybackException) {
 		super.onPlayerError(error)
 		if (state > 0U) {
+			// Enviar detalle completo: codeName + mensaje + causa raíz.
+			// El user (y la ventana de error con copiar) necesitan ver
+			// exactamente qué falló (ej. HTTP 403, content-type inválido).
+			var cause = error.cause?.message ?: ""
+			if (cause.isEmpty()) cause = error.cause?.toString() ?: ""
+			val detail = buildString {
+				append(error.errorCodeName)
+				if (!error.message.isNullOrEmpty()) {
+					append("\n")
+					append(error.message)
+				}
+				if (cause.isNotEmpty()) {
+					append("\nCausa: ")
+					append(cause)
+				}
+			}
 			close()
 			eventSink?.success(mapOf(
 				"event" to "error",
-				"value" to error.errorCodeName
+				"value" to detail
 			))
 		}
 	}

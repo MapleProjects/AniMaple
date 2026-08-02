@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/hls_proxy.dart';
 import '../widgets/error_dialog.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
@@ -85,6 +86,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   late int _currentEp;
 
   late final VideoController _player;
+  final HlsProxy _hlsProxy = HlsProxy();
 
   @override
   void initState() {
@@ -294,10 +296,23 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     setState(() => _showCountdown = false);
   }
 
+  bool _videoErrorShown = false;
+
   void _onError() {
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO_VIEW ERROR: $err');
+      // Mostrar el error al usuario con botón de copiar (patrón de la app:
+      // errores siempre visibles). Se muestra una sola vez por error.
+      if (mounted && !_videoErrorShown) {
+        _videoErrorShown = true;
+        showErrorSheet(
+          context,
+          Exception('Error del reproductor de video: $err'),
+          null,
+          title: 'Error de reproducción',
+        );
+      }
     }
   }
 
@@ -331,6 +346,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.videoSize.removeListener(_onVideoSize);
     _player.mediaInfo.removeListener(_onMediaInfo);
     _player.dispose();
+    _hlsProxy.stop(); // cerrar proxy local de HLS
     _syncPipState(false);
     _dismissMediaNotification();
     if (_isFullscreen && !_isDesktop) {
@@ -399,6 +415,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   Future<void> _playServer(ServerMirror server) async {
     if (mounted) setState(() { _activeServer = server.server; _autoPlayedNext = false; });
+    _videoErrorShown = false; // permitir mostrar un nuevo error
 
     while (mounted) {
       try {
@@ -413,12 +430,21 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
 
         debugPrint('PLAYING: $videoUrl (type=$videoType)');
-        // Pass raw URL directly — ExoPlayer handles HLS natively.
-        // For MP4Upload, pass Referer header (required or 403 Forbidden).
-        final headers = videoType == 'mp4'
-            ? {'Referer': 'https://www.mp4upload.com/'}
-            : null;
-        _player.open(videoUrl, headers: headers);
+        if (videoType == 'hls') {
+          // HLS (zilla-networks): los segmentos son .html con content-type
+          // text/html que ExoPlayer rechaza. Se enrutan por el proxy local
+          // que los sirve con content-type correcto y UA de navegador.
+          await _hlsProxy.start();
+          final localUrl = _hlsProxy.proxyM3U8(videoUrl);
+          debugPrint('HLS via proxy: $localUrl');
+          _player.open(localUrl);
+        } else {
+          // MP4Upload: Referer header (required or 403 Forbidden).
+          final headers = videoType == 'mp4'
+              ? {'Referer': 'https://www.mp4upload.com/'}
+              : null;
+          _player.open(videoUrl, headers: headers);
+        }
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
