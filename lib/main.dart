@@ -15,14 +15,23 @@ void main() {
   ApiService.init();
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
-  // No bloquea el arranque: si no hay sesión o red, se ignora silenciosamente.
+  // NO corre en main(): attemptLightweightAuthentication usa Credential
+  // Manager y requiere un contexto de Activity, que solo existe DESPUÉS del
+  // primer frame. Si se intenta antes, falla con NO_ACTIVITY y la sesión
+  // nunca se restaura al reabrir la app. Se reintenta varias veces.
   unawaited(() async {
     await SyncService.initialize();
-    final restored = await SyncService.tryRestoreSession();
-    if (restored) {
-      await SyncService.pull();
-      SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      for (var attempt = 0; attempt < 5; attempt++) {
+        final restored = await SyncService.tryRestoreSession();
+        if (restored) {
+          await SyncService.pull();
+          SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 400));
+      }
+    });
   }());
 
   // Global async error handler — catches errors outside the widget tree
