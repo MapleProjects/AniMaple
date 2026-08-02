@@ -94,12 +94,39 @@ class VideoController(
 				".ism/manifest" -> MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_SS).build()
 				else -> MediaItem.fromUri(url)
 			}
-			// When custom headers are needed (e.g. MP4Upload Referer), use
-			// ProgressiveMediaSource with a DefaultHttpDataSource.Factory.
-			if (headers != null && headers.isNotEmpty() && ext.isEmpty()) {
+			if (headers != null && headers.isNotEmpty()) {
+				// DataSource con User-Agent de navegador y headers de referer,
+				// aplicado a CUALQUIER tipo (MP4 y HLS). Cloudflare bloquea los
+				// clientes sin headers de navegador (Sec-Fetch-*, UA real, etc.),
+				// no por fingerprint TLS — por eso ExoPlayer puede reproducir HLS
+				// de zilla si se envían los headers correctos.
+				val effectiveHeaders = headers.toMutableMap()
+				if (!effectiveHeaders.containsKey("Sec-Fetch-Dest")) {
+					effectiveHeaders["Sec-Fetch-Dest"] = "empty"
+				}
+				if (!effectiveHeaders.containsKey("Sec-Fetch-Mode")) {
+					effectiveHeaders["Sec-Fetch-Mode"] = "cors"
+				}
+				if (!effectiveHeaders.containsKey("Sec-Fetch-Site")) {
+					effectiveHeaders["Sec-Fetch-Site"] = "same-origin"
+				}
+				if (!effectiveHeaders.containsKey("Accept")) {
+					effectiveHeaders["Accept"] = "*/*"
+				}
+				if (!effectiveHeaders.containsKey("Accept-Language")) {
+					effectiveHeaders["Accept-Language"] = "es-EC,es-419;q=0.9,es;q=0.8"
+				}
+				if (!effectiveHeaders.containsKey("User-Agent")) {
+					effectiveHeaders["User-Agent"] =
+						"Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 " +
+						"(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+				}
 				val httpFactory = DefaultHttpDataSource.Factory()
-					.setDefaultRequestProperties(headers)
-				val mediaSource = ProgressiveMediaSource.Factory(httpFactory)
+					.setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
+					.setDefaultRequestProperties(effectiveHeaders)
+				// DefaultMediaSourceFactory detecta el tipo (Progressive/HLS/DASH)
+				// y usa el DataSource con headers para m3u8 y mp4 por igual.
+				val mediaSource = DefaultMediaSourceFactory(httpFactory)
 					.createMediaSource(mediaItem)
 				exoPlayer.setMediaSource(mediaSource)
 			} else {

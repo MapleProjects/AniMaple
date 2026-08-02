@@ -562,14 +562,6 @@ class ApiService {
     });
   }
 
-  /// Devuelve la URL de la página del player HLS (para WebView).
-  /// La página del player (player.zilla-networks.com/play/{id}) se carga en
-  /// un WebView que es un navegador real → Cloudflare permite los segmentos
-  /// (los clientes HTTP puros dan 403 por fingerprint TLS).
-  static Future<String> fetchPlayerUrl(String embedUrl) async {
-    return embedUrl;
-  }
-
   // ── History (local) ─────────────────────────────────
 
   static Future<List<HistoryEntry>> fetchHistory() async {

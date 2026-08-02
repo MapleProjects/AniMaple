@@ -8,7 +8,6 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/hls_proxy.dart';
 import '../widgets/error_dialog.dart';
-import '../widgets/webview_player.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
 
@@ -35,9 +34,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   bool _loading = true;
 
   String? _activeServer;
-  String? _webviewUrl;
-
-  bool get _isWebviewActive => _webviewUrl != null;
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
@@ -421,17 +417,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() { _activeServer = server.server; _autoPlayedNext = false; });
     _videoErrorShown = false; // permitir mostrar un nuevo error
 
-    // Servidores HLS (zilla) requieren un navegador real: Cloudflare bloquea
-    // por fingerprint TLS a los clientes HTTP (curl/Dart/ExoPlayer directo).
-    // El WebView (Chromium) es un navegador auténtico → reproduce.
-    if (server.server.toLowerCase().contains('hls')) {
-      // Extraer la página del player (player.zilla-networks.com/play/{id}).
-      final playerUrl = await ApiService.fetchPlayerUrl(server.url);
-      if (mounted) setState(() { _webviewUrl = playerUrl; });
-      debugPrint('HLS via WebView: $playerUrl');
-      return;
-    }
-
     while (mounted) {
       try {
         debugPrint('PLAY SERVER: ${server.server} → ${server.url}');
@@ -445,10 +430,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
 
         debugPrint('PLAYING: $videoUrl (type=$videoType)');
-        // MP4Upload: Referer header (required or 403 Forbidden).
-        final headers = videoType == 'mp4'
-            ? {'Referer': 'https://www.mp4upload.com/'}
-            : null;
+        // HLS (zilla-networks): los segmentos requieren headers de navegador
+        // (UA real, Sec-Fetch-*, Accept-Language). ExoPlayer puede
+        // descargarlos si se envían — Cloudflare NO bloquea por fingerprint
+        // TLS (verificado: HTTP/1.1 con headers → 200).
+        final headers = videoType == 'hls'
+            ? <String, String>{
+                'Referer': 'https://player.zilla-networks.com/',
+              }
+            : videoType == 'mp4'
+                ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
+                : null;
         _player.open(videoUrl, headers: headers);
         return;
       } catch (e, st) {
@@ -469,7 +461,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _currentEp = newEp;
       _loading = true;
       _userStartedPlayback = false;
-      _webviewUrl = null; // salir de modo WebView al cambiar de episodio
     });
     _player.close();
     _load();
@@ -682,19 +673,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // ── Video player with overlay controls ──
 
   Widget _buildVideoPlayer() {
-    // Modo WebView (servidores HLS de zilla): Cloudflare exige navegador real.
-    if (_isWebviewActive && _webviewUrl != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: WebviewPlayer(
-          url: _webviewUrl!,
-          referer: 'https://animeav1.com/',
-        ),
-      );
-    }
-
-    final duration = _player.mediaInfo.value?.duration ?? 0;
-    final position = _player.position.value;
     final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
     final playerWidget = Stack(
       alignment: Alignment.center,
