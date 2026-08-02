@@ -58,7 +58,8 @@ class _SyncButtonState extends State<SyncButton> {
       final ok = await SyncService.signIn();
       if (!mounted) return;
       if (ok) {
-        await SyncService.pull();
+        // Sube el historial local existente y trae el remoto (una sola sync).
+        await SyncService.sync(forcePush: true);
         _refreshFromService();
         _showErrorOr(() {
           ScaffoldMessenger.of(context).showSnackBar(

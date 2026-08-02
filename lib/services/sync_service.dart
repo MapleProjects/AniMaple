@@ -168,14 +168,35 @@ class SyncService {
     }
   }
 
+  /// Sincronización completa bidireccional (se usa en arranque, polling y
+  /// tras cambios locales):
+  /// 1. pull: merge remoto → local (last-write-wins por registro)
+  /// 2. push: sube el resultado del merge a Drive para que el OTRO
+  ///    dispositivo lo vea — así la unión se propaga entre ambos.
+  /// [forcePush] sube aunque no haya cambios del merge (arranque / cambio
+  /// local) para publicar por primera vez el historial local existente.
+  static Future<void> sync({bool forcePush = false}) async {
+    if (_busy || !isSignedIn) return;
+    _busy = true;
+    try {
+      final changed = await _pullIntoLocal();
+      if (changed || forcePush) {
+        await _pushLocal();
+      }
+    } finally {
+      _busy = false;
+    }
+  }
+
   /// Punto de entrada: llama tras los cambios locales.
-  /// Debounce de 2s para no subir por cada tap.
+  /// Debounce de 2s para no subir por cada tap. Antes de subir hace un
+  /// pull-merge, así no pisa cambios remotos que otro dispositivo publicó.
   static Future<void> notifyLocalChanged() async {
     if (!isSignedIn) return;
     if (!await _ensureAuthHeaders()) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(seconds: 2), () {
-      push();
+      sync(forcePush: true);
     });
   }
 
@@ -201,7 +222,9 @@ class SyncService {
     if (_busy || !isSignedIn) return;
     if (_authHeaders == null && !await _ensureAuthHeaders()) return;
     try {
-      final fileId = _fileId ?? await _findFileId();
+      // Búsqueda fresca (sin cache) — además re-ejecuta el dedup de
+      // duplicados si dos dispositivos crearon el archivo a la vez.
+      final fileId = await _findFileId();
       if (fileId == null) return; // nada que sincronizar todavía
       _fileId = fileId;
 
@@ -212,10 +235,9 @@ class SyncService {
       // Sin cambio remoto → no tocar Drive de nuevo.
       if (v == null || v == _lastRemoteVersion) return;
 
-      final changed = await pull();
-      if (changed) {
-        debugPrint('Sync: auto-pull aplicó cambios (version $v)');
-      }
+      // Cambió → sync completo (merge + push para propagar la unión).
+      await sync();
+      debugPrint('Sync: auto-sync aplicó cambios (version $v)');
       // Marcar como vista aunque el merge no cambiara nada (mismo contenido).
       _lastRemoteVersion = v;
     } catch (e) {
@@ -262,9 +284,17 @@ class SyncService {
   /// Sube el estado local completo a Drive AppData.
   static Future<bool> push() async {
     if (_busy || !isSignedIn) return false;
+    _busy = true;
+    try {
+      return await _pushLocal();
+    } finally {
+      _busy = false;
+    }
+  }
+
+  static Future<bool> _pushLocal() async {
     if (kIsWeb) return false;
     if (!await _ensureAuthHeaders()) return false;
-    _busy = true;
     lastError = null;
     try {
       final state = await _collectLocalState();
@@ -296,19 +326,26 @@ class SyncService {
       lastError = 'Error al subir datos a Drive: $e';
       debugPrint('Sync push error: $e');
       return false;
-    } finally {
-      _busy = false;
     }
   }
 
   /// Descarga el estado remoto y hace merge contra el local.
   /// Devuelve true si hubo cambios aplicados en el dispositivo.
   static Future<bool> pull() async {
-    if (!isSignedIn) return false;
-    if (!await _ensureAuthHeaders()) return false;
+    if (_busy || !isSignedIn) return false;
     _busy = true;
+    try {
+      return await _pullIntoLocal();
+    } finally {
+      _busy = false;
+    }
+  }
+
+  static Future<bool> _pullIntoLocal() async {
+    if (!await _ensureAuthHeaders()) return false;
     lastError = null;
     try {
+      // Búsqueda fresca (sin cache) también re-ejecuta el dedup de duplicados.
       final fileId = await _findFileId();
       if (fileId == null) {
         debugPrint('Sync: no remote file yet');
@@ -342,8 +379,6 @@ class SyncService {
       lastError = 'Error al bajar datos de Drive: $e';
       debugPrint('Sync pull error: $e');
       return false;
-    } finally {
-      _busy = false;
     }
   }
 
@@ -450,6 +485,9 @@ class SyncService {
   }
 
   /// Busca el archivo en el appDataFolder por nombre.
+  /// Si hay múltiples copias (dos dispositivos crearon a la vez), borra los
+  /// duplicados y se queda con la primera — evita split-brain de "dos
+  /// archivos distintos con el mismo nombre que nunca convergen".
   static Future<String?> _findFileId() async {
     if (!isSignedIn || _authHeaders == null) return null;
     try {
@@ -458,8 +496,23 @@ class SyncService {
         'GET',
         '/files?spaces=appDataFolder&q=$q&fields=files(id,name)',
       );
-      final files = res?['files'] as List? ?? [];
-      return files.isNotEmpty ? (files.first as Map)['id'] as String? : null;
+      final files = (res?['files'] as List? ?? []).cast<Map>().toList();
+      if (files.isEmpty) return null;
+
+      final first = files.first['id'] as String?;
+      // Eliminar duplicados (mismo nombre) para mantener una sola fuente.
+      for (final dup in files.skip(1)) {
+        final dupId = dup['id'] as String?;
+        if (dupId != null && dupId != first) {
+          try {
+            await _driveRequest('DELETE', '/files/$dupId');
+            debugPrint('Sync: eliminado archivo duplicado $dupId');
+          } catch (e) {
+            debugPrint('Sync: no se pudo borrar duplicado $dupId: $e');
+          }
+        }
+      }
+      return first;
     } catch (e) {
       debugPrint('Sync _findFileId error: $e');
       return null;

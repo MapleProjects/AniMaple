@@ -24,7 +24,10 @@ void main() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SyncService.tryRestoreSession().then((restored) {
         if (restored == true) {
-          SyncService.pull();
+          // sync completo con forcePush: publica el historial/favoritos
+          // LOCAL existente (de versiones anteriores) y trae el remoto,
+          // luego arranca el polling en tiempo real.
+          SyncService.sync(forcePush: true);
           SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
         }
       });
