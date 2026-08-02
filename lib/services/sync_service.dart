@@ -30,6 +30,11 @@ class SyncService {
   static const _scopeDriveAppdata =
       'https://www.googleapis.com/auth/drive.appdata';
   static const _driveApiBase = 'https://www.googleapis.com/drive/v3';
+  // El endpoint de subida de contenido real es /upload/drive/v3 (no /drive/v3).
+  // Con uploadType=media, Google SOLO lo acepta en la URL con /upload/; si se
+  // llama al endpoint normal interpreta el body como metadata del recurso y
+  // rechaza los campos del archivo con 403 fieldNotWritable.
+  static const _driveUploadBase = 'https://www.googleapis.com/upload/drive/v3';
 
   static GoogleSignInAccount? _account;
   static Map<String, String>? _authHeaders;
@@ -547,6 +552,8 @@ class SyncService {
   }
 
   /// Llama genérica a la REST API de Drive v3 con los headers de autorización.
+  /// Si el path incluye `uploadType=media`, usa el endpoint de subida
+  /// (/upload/drive/v3) — el único donde Google acepta bodies de contenido.
   static Future<dynamic> _driveRequest(
     String method,
     String path, {
@@ -556,7 +563,10 @@ class SyncService {
     final auth = _authHeaders;
     if (auth == null) throw StateError('no auth');
 
-    final uri = Uri.parse('$_driveApiBase$path');
+    final base = path.contains('uploadType=media')
+        ? _driveUploadBase
+        : _driveApiBase;
+    final uri = Uri.parse('$base$path');
     final req = http.Request(method, uri)
       ..headers.addAll({...auth, if (headers != null) ...headers})
       ..body = body ?? '';
