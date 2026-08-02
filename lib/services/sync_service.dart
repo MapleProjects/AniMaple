@@ -34,8 +34,18 @@ class SyncService {
   static GoogleSignInAccount? _account;
   static Map<String, String>? _authHeaders;
   static String? _fileId; // id del archivo en Drive (se cachea)
+  static int? _lastRemoteVersion; // última versión remota vista
   static bool _busy = false;
   static Timer? _debounce;
+  static Timer? _autoSyncTimer;
+
+  /// Se incrementa cada vez que el estado local (historial/Mi lista) cambia.
+  /// Las páginas lo escuchan para refrescar en vivo sin resync manual.
+  static final ValueNotifier<int> stateVersion = ValueNotifier<int>(0);
+
+  /// Profile info (photo, nombre) para el avatar del AppBar.
+  static String? get accountDisplayName => _account?.displayName;
+  static String? get accountPhotoUrl => _account?.photoUrl;
 
   /// Último error visible para la UI (patrón de la app: errores siempre visibles).
   static String? lastError;
@@ -84,10 +94,12 @@ class SyncService {
         scopeHint: const [_scopeDriveAppdata],
       );
       _account = account;
+      _lastRemoteVersion = null;
       if (!await _cacheAuthHeaders(prompt: true)) {
         lastError = 'No se pudo obtener el token de acceso de Google Drive.';
         return false;
       }
+      startAutoSync(); // arrancar sincronización automática
       debugPrint('Sync: signed in as ${account.email}');
       return true;
     } on GoogleSignInException catch (e) {
@@ -102,11 +114,14 @@ class SyncService {
   }
 
   static Future<void> signOut() async {
+    stopAutoSync();
     await GoogleSignIn.instance.signOut();
     _account = null;
     _authHeaders = null;
     _fileId = null;
+    _lastRemoteVersion = null;
     lastError = null;
+    stateVersion.value++;
   }
 
   /// Obtiene (o refresca) los headers de autorización para drive.appdata.
@@ -137,6 +152,54 @@ class SyncService {
       push();
     });
   }
+
+  /// Arranca el polling de cambios remotos (≈ tiempo real, sin resync manual).
+  /// Un GET ligero de `version` cada 10s; descarga solo si el remoto cambió.
+  static void startAutoSync() {
+    if (_autoSyncTimer != null) return; // ya activo
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _pollRemote();
+    });
+    // Verificación inmediata al arrancar.
+    _pollRemote();
+  }
+
+  static void stopAutoSync() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = null;
+  }
+
+  /// Revisa la versión remota y hace pull si cambió desde la última vista.
+  /// Respeta límites de Drive: nunca descarga si `version` no cambió.
+  static Future<void> _pollRemote() async {
+    if (_busy || !isSignedIn || _authHeaders == null) return;
+    try {
+      final fileId = _fileId ?? await _findFileId();
+      if (fileId == null) return; // nada que sincronizar todavía
+      _fileId = fileId;
+
+      final res = await _driveRequest('GET', '/files/$fileId?fields=version');
+      final version = res is Map<String, dynamic> ? res['version'] : null;
+      final v = version is int ? version : int.tryParse('$version');
+
+      // Sin cambio remoto → no tocar Drive de nuevo.
+      if (v == null || v == _lastRemoteVersion) return;
+
+      final changed = await pull();
+      if (changed) {
+        debugPrint('Sync: auto-pull aplicó cambios (version $v)');
+      }
+      // Marcar como vista aunque el merge no cambiara nada (mismo contenido).
+      _lastRemoteVersion = v;
+    } catch (e) {
+      // Sin red / auth caducado: se reintentará en el siguiente ciclo.
+      if (_isAuthError(e)) _authHeaders = null;
+      debugPrint('Sync: poll skip: $e');
+    }
+  }
+
+  static bool _isAuthError(Object e) =>
+      e.toString().contains('401') || e.toString().contains('403');
 
   /// Serializa el estado local (historial + favoritos) a un Map.
   static Future<Map<String, dynamic>> _collectLocalState() async {
@@ -196,6 +259,8 @@ class SyncService {
           body: body,
         );
       }
+      // Registrar la versión recién publicada para no re-pull de nosotros mismos.
+      await _cacheRemoteVersion();
       debugPrint('Sync: push OK, ${utf8.encode(body).length} bytes');
       return true;
     } catch (e) {
@@ -209,6 +274,7 @@ class SyncService {
   }
 
   /// Descarga el estado remoto y hace merge contra el local.
+  /// Devuelve true si hubo cambios aplicados en el dispositivo.
   static Future<bool> pull() async {
     if (!isSignedIn || _authHeaders == null) return false;
     _busy = true;
@@ -236,7 +302,12 @@ class SyncService {
           )
           .toList();
 
-      return await _mergeIntoLocal(remoteHistory, remoteFollowed);
+      final changed = await _mergeIntoLocal(remoteHistory, remoteFollowed);
+      if (changed) {
+        // Los datos locales cambiaron → avisar a las páginas para refresh en vivo.
+        stateVersion.value++;
+      }
+      return changed;
     } catch (e) {
       _authHeaders = null;
       lastError = 'Error al bajar datos de Drive: $e';
@@ -244,6 +315,20 @@ class SyncService {
       return false;
     } finally {
       _busy = false;
+    }
+  }
+
+  /// Marca _lastRemoteVersion con la versión actual del archivo (tras push).
+  static Future<void> _cacheRemoteVersion() async {
+    try {
+      final fileId = _fileId;
+      if (fileId == null) return;
+      final res = await _driveRequest('GET', '/files/$fileId?fields=version');
+      if (res is Map<String, dynamic> && res['version'] != null) {
+        _lastRemoteVersion = res['version'] as int;
+      }
+    } catch (e) {
+      debugPrint('Sync cache version skip: $e');
     }
   }
 

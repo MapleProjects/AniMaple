@@ -21,6 +21,7 @@ void main() {
     final restored = await SyncService.tryRestoreSession();
     if (restored) {
       await SyncService.pull();
+      SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
     }
   }());
 
@@ -82,6 +83,26 @@ class _MainShellState extends State<MainShell> {
   // Keys to access page state for refresh
   final _historyKey = GlobalKey<HistoryPageState>();
   final _followingKey = GlobalKey<FollowingPageState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Reaccionar a cambios del estado local (merge desde la nube o logout)
+    // para reflejarlos en vivo sin resync manual.
+    SyncService.stateVersion.addListener(_onSyncStateChanged);
+  }
+
+  @override
+  void dispose() {
+    SyncService.stateVersion.removeListener(_onSyncStateChanged);
+    super.dispose();
+  }
+
+  void _onSyncStateChanged() {
+    if (!mounted) return;
+    _historyKey.currentState?.refresh();
+    _followingKey.currentState?.refresh();
+  }
 
   void _onTabChanged(int index) {
     setState(() => _currentIndex = index);
