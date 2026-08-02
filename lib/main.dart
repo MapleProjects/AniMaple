@@ -15,22 +15,19 @@ void main() {
   ApiService.init();
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
-  // NO corre en main(): attemptLightweightAuthentication usa Credential
-  // Manager y requiere un contexto de Activity, que solo existe DESPUÉS del
-  // primer frame. Si se intenta antes, falla con NO_ACTIVITY y la sesión
-  // nunca se restaura al reabrir la app. Se reintenta varias veces.
+  // Patrón oficial google_sign_in v7: initialize() → attemptLightweightAuthentication()
+  // UNA sola vez (tras el primer frame, cuando existe contexto de Activity).
+  // NO en bucle: cada llamada en Android puede abrir el selector de cuentas.
+  // El estado real (login/logout) se refleja vía authenticationEvents en la UI.
   unawaited(() async {
     await SyncService.initialize();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      for (var attempt = 0; attempt < 5; attempt++) {
-        final restored = await SyncService.tryRestoreSession();
-        if (restored) {
-          await SyncService.pull();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      SyncService.tryRestoreSession().then((restored) {
+        if (restored == true) {
+          SyncService.pull();
           SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
-          break;
         }
-        await Future.delayed(const Duration(milliseconds: 400));
-      }
+      });
     });
   }());
 

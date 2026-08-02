@@ -68,21 +68,46 @@ class SyncService {
     );
   }
 
-  /// Reintenta restaurar una sesión previa (silencioso, sin UI).
-  /// Devuelve true si quedó autenticado con token usable.
+  /// Restaura una sesión previa (silencioso, sin UI). Patrón oficial v7:
+  /// attemptLightweightAuthentication() UNA vez. Devuelve true si hay sesión.
+  /// No depende de obtener el token de acceso al instante: la sesión se
+  /// considera restaurada aunque el token no esté cacheado todavía (se
+  /// obtiene bajo demanda en el primer sync). Si requiere UI (usuario no
+  /// autorizó aún, múltiples cuentas), se resuelve por authenticationEvents.
   static Future<bool> tryRestoreSession() async {
     try {
       final restored = await GoogleSignIn.instance
           .attemptLightweightAuthentication();
       if (restored == null) return false;
-      if (!await _cacheAuthHeaders(prompt: false)) return false;
       _account = restored;
+      _lastRemoteVersion = null;
+      // Token opcional en el arranque: si no está disponible sin UI,
+      // se cacheará en el primer pull/push (con prompt si hace falta).
+      await _cacheAuthHeaders(prompt: false);
+      _notifySessionChanged();
       return true;
+    } on GoogleSignInException catch (e) {
+      // Falla silenciosa esperada si no hay sesión guardada aún.
+      debugPrint('Sync: restore skipped: ${e.code} ${e.description}');
+      return false;
     } catch (e) {
       // Sin red o sin sesión aún — no es un error fatal.
       debugPrint('Sync: restore session skipped: $e');
       return false;
     }
+  }
+
+  /// Fuerza recalcular auth headers si la sesión existe pero no hay token.
+  /// Se usa en pull/push cuando _authHeaders == null.
+  static Future<bool> _ensureAuthHeaders({bool prompt = true}) async {
+    if (!isSignedIn) return false;
+    if (_authHeaders != null) return true;
+    return _cacheAuthHeaders(prompt: prompt);
+  }
+
+  /// Avisa a la UI de que cambió el estado de sesión (login/logout/restore).
+  static void _notifySessionChanged() {
+    stateVersion.value++;
   }
 
   /// Login interactivo con la cuenta Google del usuario.
@@ -146,7 +171,8 @@ class SyncService {
   /// Punto de entrada: llama tras los cambios locales.
   /// Debounce de 2s para no subir por cada tap.
   static Future<void> notifyLocalChanged() async {
-    if (!isSignedIn || _authHeaders == null) return;
+    if (!isSignedIn) return;
+    if (!await _ensureAuthHeaders()) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(seconds: 2), () {
       push();
@@ -172,7 +198,8 @@ class SyncService {
   /// Revisa la versión remota y hace pull si cambió desde la última vista.
   /// Respeta límites de Drive: nunca descarga si `version` no cambió.
   static Future<void> _pollRemote() async {
-    if (_busy || !isSignedIn || _authHeaders == null) return;
+    if (_busy || !isSignedIn) return;
+    if (_authHeaders == null && !await _ensureAuthHeaders()) return;
     try {
       final fileId = _fileId ?? await _findFileId();
       if (fileId == null) return; // nada que sincronizar todavía
@@ -234,8 +261,9 @@ class SyncService {
 
   /// Sube el estado local completo a Drive AppData.
   static Future<bool> push() async {
-    if (_busy || !isSignedIn || _authHeaders == null) return false;
+    if (_busy || !isSignedIn) return false;
     if (kIsWeb) return false;
+    if (!await _ensureAuthHeaders()) return false;
     _busy = true;
     lastError = null;
     try {
@@ -276,7 +304,8 @@ class SyncService {
   /// Descarga el estado remoto y hace merge contra el local.
   /// Devuelve true si hubo cambios aplicados en el dispositivo.
   static Future<bool> pull() async {
-    if (!isSignedIn || _authHeaders == null) return false;
+    if (!isSignedIn) return false;
+    if (!await _ensureAuthHeaders()) return false;
     _busy = true;
     lastError = null;
     try {
