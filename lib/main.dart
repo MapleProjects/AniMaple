@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/api_service.dart';
+import 'services/sync_service.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
@@ -13,13 +14,26 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   ApiService.init();
 
+  // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
+  // No bloquea el arranque: si no hay sesión o red, se ignora silenciosamente.
+  unawaited(() async {
+    await SyncService.initialize();
+    final restored = await SyncService.tryRestoreSession();
+    if (restored) {
+      await SyncService.pull();
+    }
+  }());
+
   // Global async error handler — catches errors outside the widget tree
-  runZonedGuarded((() {
-    runApp(const AniMapleApp());
-  }), (error, stackTrace) {
-    debugPrint('UNCAUGHT ERROR: $error');
-    debugPrint('$stackTrace');
-  });
+  runZonedGuarded(
+    (() {
+      runApp(const AniMapleApp());
+    }),
+    (error, stackTrace) {
+      debugPrint('UNCAUGHT ERROR: $error');
+      debugPrint('$stackTrace');
+    },
+  );
 }
 
 class AniMapleApp extends StatelessWidget {

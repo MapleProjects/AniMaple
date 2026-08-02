@@ -3,6 +3,7 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
+import '../widgets/sync_button.dart';
 import 'detail_page.dart';
 import 'episode_page.dart';
 
@@ -28,7 +29,11 @@ class _HomePageState extends State<HomePage> {
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
         final eps = await ApiService.fetchRecentEpisodes();
-        if (mounted) setState(() { _episodes = eps; _loading = false; });
+        if (mounted)
+          setState(() {
+            _episodes = eps;
+            _loading = false;
+          });
         return;
       } catch (e, st) {
         debugPrint('HOME RETRY: $e');
@@ -36,7 +41,10 @@ class _HomePageState extends State<HomePage> {
         await Future.delayed(const Duration(seconds: 3));
       }
     }
-    if (mounted) setState(() { _loading = false; });
+    if (mounted)
+      setState(() {
+        _loading = false;
+      });
   }
 
   @override
@@ -57,18 +65,27 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: Center(child: SyncButton()),
+          ),
+        ],
       ),
       body: _loading
-        ? const Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6)))
-        : RefreshIndicator(
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF8b5cf6)),
+            )
+          : RefreshIndicator(
               color: const Color(0xFF8b5cf6),
               onRefresh: _load,
               child: CustomScrollView(
                 slivers: [
                   // Hero banner
-                  if (_episodes.isNotEmpty) SliverToBoxAdapter(
-                    child: _HeroBanner(episode: _episodes.first),
-                  ),
+                  if (_episodes.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: _HeroBanner(episode: _episodes.first),
+                    ),
                   // Section header
                   const SliverToBoxAdapter(
                     child: Padding(
@@ -76,9 +93,24 @@ class _HomePageState extends State<HomePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Episodios', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFe8e4f0))),
+                          Text(
+                            'Episodios',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFe8e4f0),
+                            ),
+                          ),
                           SizedBox(height: 4),
-                          Text('RECIENTEMENTE ACTUALIZADO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF6d6488), letterSpacing: 1)),
+                          Text(
+                            'RECIENTEMENTE ACTUALIZADO',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF6d6488),
+                              letterSpacing: 1,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -96,9 +128,13 @@ class _HomePageState extends State<HomePage> {
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) => EpisodeCardGrid(
                           episode: _episodes[i],
-                          onTap: () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => DetailPage(slug: _episodes[i].animeSlug),
-                          )),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  DetailPage(slug: _episodes[i].animeSlug),
+                            ),
+                          ),
                         ),
                         childCount: _episodes.length,
                       ),
@@ -155,41 +191,73 @@ class _HeroBanner extends StatelessWidget {
             ),
           ),
           Positioned(
-            left: 20, bottom: 20, right: 20,
+            left: 20,
+            bottom: 20,
+            right: 20,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF8b5cf6).withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('Nuevo episodio', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFa78bfa))),
+                  child: const Text(
+                    'Nuevo episodio',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFa78bfa),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
-                Text(episode.animeTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
+                Text(
+                  episode.animeTitle,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                Row(children: [
-                  _badge('Episodio ${episode.episodeNumber}', const Color(0xFF8b5cf6)),
-                  const SizedBox(width: 8),
-                  _badge(episode.timeAgo, const Color(0xFF3b82f6)),
-                ]),
+                Row(
+                  children: [
+                    _badge(
+                      'Episodio ${episode.episodeNumber}',
+                      const Color(0xFF8b5cf6),
+                    ),
+                    const SizedBox(width: 8),
+                    _badge(episode.timeAgo, const Color(0xFF3b82f6)),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 ElevatedButton(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => EpisodePage(
-                      animeSlug: episode.animeSlug,
-                      episodeNumber: episode.episodeNumber,
-                      animeTitle: episode.animeTitle,
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EpisodePage(
+                        animeSlug: episode.animeSlug,
+                        episodeNumber: episode.episodeNumber,
+                        animeTitle: episode.animeTitle,
+                      ),
                     ),
-                  )),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF8b5cf6),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  child: const Text('Ver ahora', style: TextStyle(fontWeight: FontWeight.w700)),
+                  child: const Text(
+                    'Ver ahora',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ],
             ),
@@ -206,7 +274,14 @@ class _HeroBanner extends StatelessWidget {
         color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
     );
   }
 }

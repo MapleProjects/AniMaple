@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
+import 'sync_service.dart';
 
 class ApiService {
   /// Safe int extraction — handles double/int/string from devalue format.
@@ -17,7 +18,8 @@ class ApiService {
 
   static const _base = 'https://animeav1.com';
   static const _cdn = 'https://cdn.animeav1.com';
-  static const _ua = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
+  static const _ua =
+      'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
   static SharedPreferences? _prefs;
 
@@ -34,7 +36,10 @@ class ApiService {
   }
 
   /// Retry wrapper for flaky connections (Android/mobile).
-  static Future<T> _retry<T>(Future<T> Function() fn, {int maxAttempts = 3}) async {
+  static Future<T> _retry<T>(
+    Future<T> Function() fn, {
+    int maxAttempts = 3,
+  }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         return await fn();
@@ -193,70 +198,80 @@ class ApiService {
 
   static Future<List<RecentEpisode>> fetchRecentEpisodes() async {
     return _retry(() async {
-    final resp = await _http.get(Uri.parse('$_base/__data.json'), headers: _headers);
-    final json = jsonDecode(resp.body) as Map<String, dynamic>;
-    final data = _getMainData(json);
-    if (data == null) return [];
+      final resp = await _http.get(
+        Uri.parse('$_base/__data.json'),
+        headers: _headers,
+      );
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = _getMainData(json);
+      if (data == null) return [];
 
-    final root = data[0] as Map<String, dynamic>?;
-    if (root == null) return [];
+      final root = data[0] as Map<String, dynamic>?;
+      if (root == null) return [];
 
-    final leIdx = (root['latestEpisodes'] as num?)?.toInt();
-    if (leIdx == null || leIdx >= data.length) return [];
+      final leIdx = (root['latestEpisodes'] as num?)?.toInt();
+      if (leIdx == null || leIdx >= data.length) return [];
 
-    final epIndices = data[leIdx] as List?;
-    if (epIndices == null) return [];
+      final epIndices = data[leIdx] as List?;
+      if (epIndices == null) return [];
 
-    final episodes = <RecentEpisode>[];
-    for (final idxVal in epIndices) {
-      final idx = idxVal is int ? idxVal : (idxVal is double ? idxVal.toInt() : -1);
-      if (idx < 0 || idx >= data.length) continue;
+      final episodes = <RecentEpisode>[];
+      for (final idxVal in epIndices) {
+        final idx = idxVal is int
+            ? idxVal
+            : (idxVal is double ? idxVal.toInt() : -1);
+        if (idx < 0 || idx >= data.length) continue;
 
-      final resolved = _resolveVal(data, idx);
-      if (resolved is! Map) continue;
-      final epObj = resolved;
+        final resolved = _resolveVal(data, idx);
+        if (resolved is! Map) continue;
+        final epObj = resolved;
 
-      final number = _asInt(epObj['number']);
-      final episodeId = _asInt(epObj['id']);
+        final number = _asInt(epObj['number']);
+        final episodeId = _asInt(epObj['id']);
 
-      final media = epObj['media'];
-      final animeTitle = media is Map ? (media['title'] as String? ?? '') : '';
-      final animeSlug = media is Map ? (media['slug'] as String? ?? '') : '';
+        final media = epObj['media'];
+        final animeTitle = media is Map
+            ? (media['title'] as String? ?? '')
+            : '';
+        final animeSlug = media is Map ? (media['slug'] as String? ?? '') : '';
 
-      // Resolve IDs from raw data
-      int animeId = 0;
-      int? posterId;
-      final rawEp = data[idx] as Map?;
-      if (rawEp != null) {
-        final mediaIdx = (rawEp['media'] as num?)?.toInt();
-        if (mediaIdx != null && mediaIdx < data.length) {
-          final rawMedia = data[mediaIdx] as Map?;
-          if (rawMedia != null) {
-            final aidIdx = (rawMedia['id'] as num?)?.toInt();
-            if (aidIdx != null) animeId = _resolveNumberChain(data, aidIdx) ?? 0;
-            final pidIdx = (rawMedia['poster'] as num?)?.toInt();
-            if (pidIdx != null) posterId = _resolveNumberChain(data, pidIdx);
-            posterId ??= animeId;
+        // Resolve IDs from raw data
+        int animeId = 0;
+        int? posterId;
+        final rawEp = data[idx] as Map?;
+        if (rawEp != null) {
+          final mediaIdx = (rawEp['media'] as num?)?.toInt();
+          if (mediaIdx != null && mediaIdx < data.length) {
+            final rawMedia = data[mediaIdx] as Map?;
+            if (rawMedia != null) {
+              final aidIdx = (rawMedia['id'] as num?)?.toInt();
+              if (aidIdx != null)
+                animeId = _resolveNumberChain(data, aidIdx) ?? 0;
+              final pidIdx = (rawMedia['poster'] as num?)?.toInt();
+              if (pidIdx != null) posterId = _resolveNumberChain(data, pidIdx);
+              posterId ??= animeId;
+            }
           }
         }
-      }
 
-      final createdAt = epObj['createdAt'] as String? ?? '';
-      final timeAgo = _relativeTime(createdAt);
+        final createdAt = epObj['createdAt'] as String? ?? '';
+        final timeAgo = _relativeTime(createdAt);
 
-      if (animeTitle.isNotEmpty && number > 0) {
-        episodes.add(RecentEpisode(
-          animeId: animeId,
-          animeTitle: animeTitle,
-          animeSlug: animeSlug,
-          episodeNumber: number,
-          episodeId: episodeId,
-          thumbnail: posterId != null ? _thumbnailUrl(posterId) : null,
-          timeAgo: timeAgo,
-        ));
+        if (animeTitle.isNotEmpty && number > 0) {
+          episodes.add(
+            RecentEpisode(
+              animeId: animeId,
+              animeTitle: animeTitle,
+              animeSlug: animeSlug,
+              episodeNumber: number,
+              episodeId: episodeId,
+              thumbnail: posterId != null ? _thumbnailUrl(posterId) : null,
+              timeAgo: timeAgo,
+            ),
+          );
+        }
       }
-    }
-    return episodes;
+      return episodes;
     });
   }
 
@@ -264,24 +279,26 @@ class ApiService {
 
   static Future<List<AnimeBasic>> search(String query) async {
     return _retry(() async {
-    final resp = await _http.get(
-      Uri.parse('$_base/catalogo/__data.json').replace(queryParameters: {'search': query}),
-      headers: _headers,
-    );
-    final json = jsonDecode(resp.body) as Map<String, dynamic>;
-    final data = _getMainData(json);
-    if (data == null) return [];
+      final resp = await _http.get(
+        Uri.parse(
+          '$_base/catalogo/__data.json',
+        ).replace(queryParameters: {'search': query}),
+        headers: _headers,
+      );
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = _getMainData(json);
+      if (data == null) return [];
 
-    final root = data[0] as Map<String, dynamic>?;
-    if (root == null) return [];
+      final root = data[0] as Map<String, dynamic>?;
+      if (root == null) return [];
 
-    final resultsIdx = (root['results'] as num?)?.toInt();
-    if (resultsIdx == null || resultsIdx >= data.length) return [];
+      final resultsIdx = (root['results'] as num?)?.toInt();
+      if (resultsIdx == null || resultsIdx >= data.length) return [];
 
-    final indices = data[resultsIdx] as List?;
-    if (indices == null) return [];
+      final indices = data[resultsIdx] as List?;
+      if (indices == null) return [];
 
-    return _resolveAnimeList(data, indices);
+      return _resolveAnimeList(data, indices);
     });
   }
 
@@ -289,30 +306,33 @@ class ApiService {
 
   static Future<List<AnimeBasic>> fetchSchedule() async {
     return _retry(() async {
-    final resp = await _http.get(Uri.parse('$_base/horario/__data.json'), headers: _headers);
-    final json = jsonDecode(resp.body) as Map<String, dynamic>;
-    final nodes = json['nodes'] as List? ?? [];
+      final resp = await _http.get(
+        Uri.parse('$_base/horario/__data.json'),
+        headers: _headers,
+      );
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final nodes = json['nodes'] as List? ?? [];
 
-    for (final node in nodes) {
-      if (node == null) continue;
-      final data = node['data'] as List?;
-      if (data == null || data.length < 10) continue;
-      final root = data[0] as Map<String, dynamic>?;
-      if (root == null) continue;
+      for (final node in nodes) {
+        if (node == null) continue;
+        final data = node['data'] as List?;
+        if (data == null || data.length < 10) continue;
+        final root = data[0] as Map<String, dynamic>?;
+        if (root == null) continue;
 
-      final allAnimes = <AnimeBasic>[];
-      for (final key in root.keys) {
-        final idx = (root[key] as num?)?.toInt();
-        if (idx != null && idx < data.length) {
-          final resolved = _resolveVal(data, idx);
-          if (resolved is List) {
-            allAnimes.addAll(_resolveAnimeListFromResolved(resolved));
+        final allAnimes = <AnimeBasic>[];
+        for (final key in root.keys) {
+          final idx = (root[key] as num?)?.toInt();
+          if (idx != null && idx < data.length) {
+            final resolved = _resolveVal(data, idx);
+            if (resolved is List) {
+              allAnimes.addAll(_resolveAnimeListFromResolved(resolved));
+            }
           }
         }
+        if (allAnimes.isNotEmpty) return allAnimes;
       }
-      if (allAnimes.isNotEmpty) return allAnimes;
-    }
-    return [];
+      return [];
     });
   }
 
@@ -320,139 +340,180 @@ class ApiService {
 
   static Future<AnimeDetail> fetchAnimeDetail(String slug) async {
     return _retry(() async {
-    final resp = await _http.get(Uri.parse('$_base/media/$slug/__data.json'), headers: _headers);
-    final json = jsonDecode(resp.body) as Map<String, dynamic>;
-    final data = _getMainData(json);
-    if (data == null) throw Exception('No data');
+      final resp = await _http.get(
+        Uri.parse('$_base/media/$slug/__data.json'),
+        headers: _headers,
+      );
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = _getMainData(json);
+      if (data == null) throw Exception('No data');
 
-    final root = data[0] as Map<String, dynamic>;
-    final mediaIdx = _asInt(root['media'], 1);
-    final media = _resolveVal(data, mediaIdx);
-    if (media is! Map) throw Exception('No media');
+      final root = data[0] as Map<String, dynamic>;
+      final mediaIdx = _asInt(root['media'], 1);
+      final media = _resolveVal(data, mediaIdx);
+      if (media is! Map) throw Exception('No media');
 
-    final id = _asInt(media['id']);
-    final title = '${media['title'] ?? ''}';
-    final slugVal = '${media['slug'] ?? slug}';
-    final synopsis = '${media['synopsis'] ?? ''}';
-    final statusRaw = _asInt(media['status'], -1);
-    const statusMap = {0: 'Finalizado', 1: 'En emisión', 2: 'En emisión'};
-    final status = statusMap[statusRaw] ?? (statusRaw >= 0 ? 'Status $statusRaw' : 'unknown');
-    final posterId = _asInt(media['poster'], id);
-    final startDate = media['startDate'] as String?;
+      final id = _asInt(media['id']);
+      final title = '${media['title'] ?? ''}';
+      final slugVal = '${media['slug'] ?? slug}';
+      final synopsis = '${media['synopsis'] ?? ''}';
+      final statusRaw = _asInt(media['status'], -1);
+      const statusMap = {0: 'Finalizado', 1: 'En emisión', 2: 'En emisión'};
+      final status =
+          statusMap[statusRaw] ??
+          (statusRaw >= 0 ? 'Status $statusRaw' : 'unknown');
+      final posterId = _asInt(media['poster'], id);
+      final startDate = media['startDate'] as String?;
 
-    final cat = media['category'];
-    final category = cat is Map ? '${cat['name'] ?? 'TV Anime'}' : 'TV Anime';
+      final cat = media['category'];
+      final category = cat is Map ? '${cat['name'] ?? 'TV Anime'}' : 'TV Anime';
 
-    final genresList = media['genres'] as List? ?? [];
-    final genres = genresList.whereType<Map>().map((g) => Genre(
-      id: _asInt(g['id']),
-      name: '${g['name'] ?? ''}',
-      slug: '${g['slug'] ?? ''}',
-    )).toList();
+      final genresList = media['genres'] as List? ?? [];
+      final genres = genresList
+          .whereType<Map>()
+          .map(
+            (g) => Genre(
+              id: _asInt(g['id']),
+              name: '${g['name'] ?? ''}',
+              slug: '${g['slug'] ?? ''}',
+            ),
+          )
+          .toList();
 
-    final episodesList = media['episodes'] as List? ?? [];
-    final episodes = episodesList.whereType<Map>().map((ep) => EpisodeBasic(
-      id: _asInt(ep['id']),
-      number: _asInt(ep['number']),
-    )).toList();
+      final episodesList = media['episodes'] as List? ?? [];
+      final episodes = episodesList
+          .whereType<Map>()
+          .map(
+            (ep) => EpisodeBasic(
+              id: _asInt(ep['id']),
+              number: _asInt(ep['number']),
+            ),
+          )
+          .toList();
 
-    return AnimeDetail(
-      id: id, title: title, synopsis: synopsis,
-      poster: _coverUrl(posterId),
-      backdrop: _backdropUrl(posterId),
-      status: status, startDate: startDate,
-      category: category, genres: genres,
-      episodesCount: episodes.length, slug: slugVal,
-      episodes: episodes, mature: false,
-    );
+      return AnimeDetail(
+        id: id,
+        title: title,
+        synopsis: synopsis,
+        poster: _coverUrl(posterId),
+        backdrop: _backdropUrl(posterId),
+        status: status,
+        startDate: startDate,
+        category: category,
+        genres: genres,
+        episodesCount: episodes.length,
+        slug: slugVal,
+        episodes: episodes,
+        mature: false,
+      );
     });
   }
 
   // ── Episode detail ──────────────────────────────────
 
-  static Future<EpisodeDetail> fetchEpisodeDetail(String animeSlug, int episodeNumber) async {
+  static Future<EpisodeDetail> fetchEpisodeDetail(
+    String animeSlug,
+    int episodeNumber,
+  ) async {
     return _retry(() async {
-    final resp = await _http.get(
-      Uri.parse('$_base/media/$animeSlug/$episodeNumber/__data.json'),
-      headers: _headers,
-    );
-    final json = jsonDecode(resp.body) as Map<String, dynamic>;
-    final data = _getNodeWithKey(json, 'episode') ?? _getMainData(json);
-    if (data == null) throw Exception('No data');
+      final resp = await _http.get(
+        Uri.parse('$_base/media/$animeSlug/$episodeNumber/__data.json'),
+        headers: _headers,
+      );
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = _getNodeWithKey(json, 'episode') ?? _getMainData(json);
+      if (data == null) throw Exception('No data');
 
-    final root = data[0] as Map<String, dynamic>;
-    final epIdx = _asInt(root['episode'], 1);
-    final embedsRootIdx = _asInt(root['embeds']);
-    final downloadsRootIdx = _asInt(root['downloads']);
+      final root = data[0] as Map<String, dynamic>;
+      final epIdx = _asInt(root['episode'], 1);
+      final embedsRootIdx = _asInt(root['embeds']);
+      final downloadsRootIdx = _asInt(root['downloads']);
 
-    final ep = _resolveVal(data, epIdx);
-    if (ep is! Map) throw Exception('No episode');
+      final ep = _resolveVal(data, epIdx);
+      if (ep is! Map) throw Exception('No episode');
 
-    final episodeId = _asInt(ep['id']);
-    final mediaId = _asInt(ep['mediaId']);
-    final number = _asInt(ep['number'], episodeNumber);
+      final episodeId = _asInt(ep['id']);
+      final mediaId = _asInt(ep['mediaId']);
+      final number = _asInt(ep['number'], episodeNumber);
 
-    final variants = <String>[];
-    final embeds = <ServerMirror>[];
-    final seenServers = <String>{};  // Track to avoid duplicates
+      final variants = <String>[];
+      final embeds = <ServerMirror>[];
+      final seenServers = <String>{}; // Track to avoid duplicates
 
-    // Parse embeds
-    if (embedsRootIdx > 0 && embedsRootIdx < data.length) {
-      final embedsMap = _resolveVal(data, embedsRootIdx);
-      if (embedsMap is Map) {
-        for (final entry in embedsMap.entries) {
-          final variantName = entry.key as String;
-          if (!variants.contains(variantName)) variants.add(variantName);
-          final mirrors = entry.value as List? ?? [];
-          for (final mirror in mirrors) {
-            if (mirror is Map) {
-              final server = '${mirror['server'] ?? 'Unknown'}';
-              final url = '${mirror['url'] ?? ''}';
-              final key = '$variantName:$server';
-              if (url.isNotEmpty && !seenServers.contains(key)) {
-                seenServers.add(key);
-                embeds.add(ServerMirror(server: server, url: url, variant: variantName));
+      // Parse embeds
+      if (embedsRootIdx > 0 && embedsRootIdx < data.length) {
+        final embedsMap = _resolveVal(data, embedsRootIdx);
+        if (embedsMap is Map) {
+          for (final entry in embedsMap.entries) {
+            final variantName = entry.key as String;
+            if (!variants.contains(variantName)) variants.add(variantName);
+            final mirrors = entry.value as List? ?? [];
+            for (final mirror in mirrors) {
+              if (mirror is Map) {
+                final server = '${mirror['server'] ?? 'Unknown'}';
+                final url = '${mirror['url'] ?? ''}';
+                final key = '$variantName:$server';
+                if (url.isNotEmpty && !seenServers.contains(key)) {
+                  seenServers.add(key);
+                  embeds.add(
+                    ServerMirror(
+                      server: server,
+                      url: url,
+                      variant: variantName,
+                    ),
+                  );
+                }
               }
             }
           }
         }
       }
-    }
 
-    // Parse downloads (skip if already in embeds)
-    if (downloadsRootIdx > 0 && downloadsRootIdx < data.length) {
-      final dlMap = _resolveVal(data, downloadsRootIdx);
-      if (dlMap is Map) {
-        for (final entry in dlMap.entries) {
-          final variantName = entry.key as String;
-          if (!variants.contains(variantName)) variants.add(variantName);
-          final mirrors = entry.value as List? ?? [];
-          for (final mirror in mirrors) {
-            if (mirror is Map) {
-              final server = '${mirror['server'] ?? 'Unknown'}';
-              final url = '${mirror['url'] ?? ''}';
-              final key = '$variantName:$server';
-              if (url.isNotEmpty && !seenServers.contains(key)) {
-                seenServers.add(key);
-                embeds.add(ServerMirror(server: server, url: url, variant: variantName));
+      // Parse downloads (skip if already in embeds)
+      if (downloadsRootIdx > 0 && downloadsRootIdx < data.length) {
+        final dlMap = _resolveVal(data, downloadsRootIdx);
+        if (dlMap is Map) {
+          for (final entry in dlMap.entries) {
+            final variantName = entry.key as String;
+            if (!variants.contains(variantName)) variants.add(variantName);
+            final mirrors = entry.value as List? ?? [];
+            for (final mirror in mirrors) {
+              if (mirror is Map) {
+                final server = '${mirror['server'] ?? 'Unknown'}';
+                final url = '${mirror['url'] ?? ''}';
+                final key = '$variantName:$server';
+                if (url.isNotEmpty && !seenServers.contains(key)) {
+                  seenServers.add(key);
+                  embeds.add(
+                    ServerMirror(
+                      server: server,
+                      url: url,
+                      variant: variantName,
+                    ),
+                  );
+                }
               }
             }
           }
         }
       }
-    }
 
-    // Sort variants: DUB first
-    variants.sort((a, b) {
-      if (a == 'DUB') return -1;
-      if (b == 'DUB') return 1;
-      return a.compareTo(b);
-    });
+      // Sort variants: DUB first
+      variants.sort((a, b) {
+        if (a == 'DUB') return -1;
+        if (b == 'DUB') return 1;
+        return a.compareTo(b);
+      });
 
-    return EpisodeDetail(
-      id: episodeId, mediaId: mediaId, number: number,
-      variants: variants, embeds: embeds, filler: false, downloads: [],
-    );
+      return EpisodeDetail(
+        id: episodeId,
+        mediaId: mediaId,
+        number: number,
+        variants: variants,
+        embeds: embeds,
+        filler: false,
+        downloads: [],
+      );
     });
   }
 
@@ -460,37 +521,44 @@ class ApiService {
 
   static Future<Map<String, dynamic>> fetchVideoUrl(String embedUrl) async {
     return _retry(() async {
-    // HLS (zilla-networks)
-    if (embedUrl.contains('zilla-networks.com/play/')) {
-      final id = embedUrl.split('/').last;
-      if (id.isNotEmpty) {
-        // Append ?x.m3u8 so video_view's ExoPlayer regex detects HLS type.
-        // URL pattern: /m3u8/{id} lacks the dot that ExoPlayer needs (\.m3u8).
-        return {'url': 'https://player.zilla-networks.com/m3u8/$id?x.m3u8', 'type': 'hls'};
-      }
-    }
-
-    // MP4Upload — extract direct .mp4 URL
-    if (embedUrl.contains('mp4upload.com')) {
-      try {
-        final resp = await _http.get(Uri.parse(embedUrl), headers: _headers);
-        final body = resp.body;
-        // Pattern: src: "https://a*.mp4upload.com:*/d/*/video.mp4"
-        final match = RegExp(r'src:\s*"(https://[^"]*\.mp4)"').firstMatch(body);
-        if (match != null) {
-          return {'url': match.group(1)!, 'type': 'mp4'};
+      // HLS (zilla-networks)
+      if (embedUrl.contains('zilla-networks.com/play/')) {
+        final id = embedUrl.split('/').last;
+        if (id.isNotEmpty) {
+          // Append ?x.m3u8 so video_view's ExoPlayer regex detects HLS type.
+          // URL pattern: /m3u8/{id} lacks the dot that ExoPlayer needs (\.m3u8).
+          return {
+            'url': 'https://player.zilla-networks.com/m3u8/$id?x.m3u8',
+            'type': 'hls',
+          };
         }
-        // Fallback: find any mp4upload mp4 URL
-        final match2 = RegExp(r'(https://a\d+\.mp4upload\.com:\d+/d/[^"]*\.mp4)').firstMatch(body);
-        if (match2 != null) {
-          return {'url': match2.group(1)!, 'type': 'mp4'};
-        }
-      } catch (e) {
-        debugPrint('MP4Upload extraction error: $e');
       }
-    }
 
-    return {'url': embedUrl, 'type': 'embed'};
+      // MP4Upload — extract direct .mp4 URL
+      if (embedUrl.contains('mp4upload.com')) {
+        try {
+          final resp = await _http.get(Uri.parse(embedUrl), headers: _headers);
+          final body = resp.body;
+          // Pattern: src: "https://a*.mp4upload.com:*/d/*/video.mp4"
+          final match = RegExp(
+            r'src:\s*"(https://[^"]*\.mp4)"',
+          ).firstMatch(body);
+          if (match != null) {
+            return {'url': match.group(1)!, 'type': 'mp4'};
+          }
+          // Fallback: find any mp4upload mp4 URL
+          final match2 = RegExp(
+            r'(https://a\d+\.mp4upload\.com:\d+/d/[^"]*\.mp4)',
+          ).firstMatch(body);
+          if (match2 != null) {
+            return {'url': match2.group(1)!, 'type': 'mp4'};
+          }
+        } catch (e) {
+          debugPrint('MP4Upload extraction error: $e');
+        }
+      }
+
+      return {'url': embedUrl, 'type': 'embed'};
     });
   }
 
@@ -505,25 +573,35 @@ class ApiService {
     }).toList();
   }
 
-  static Future<void> addHistory(int animeId, String animeSlug, String animeTitle, int episodeNumber) async {
+  static Future<void> addHistory(
+    int animeId,
+    String animeSlug,
+    String animeTitle,
+    int episodeNumber,
+  ) async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('history') ?? [];
     // Remove existing entry for SAME episode (not same anime)
     raw.removeWhere((s) {
       final j = jsonDecode(s) as Map<String, dynamic>;
-      return j['anime_slug'] == animeSlug && j['episode_number'] == episodeNumber;
+      return j['anime_slug'] == animeSlug &&
+          j['episode_number'] == episodeNumber;
     });
     // Add to front
-    raw.insert(0, jsonEncode({
-      'anime_id': animeId,
-      'anime_slug': animeSlug,
-      'anime_title': animeTitle,
-      'episode_number': episodeNumber,
-      'watched_at': DateTime.now().toIso8601String(),
-    }));
+    raw.insert(
+      0,
+      jsonEncode({
+        'anime_id': animeId,
+        'anime_slug': animeSlug,
+        'anime_title': animeTitle,
+        'episode_number': episodeNumber,
+        'watched_at': DateTime.now().toIso8601String(),
+      }),
+    );
     // Keep max 200
     if (raw.length > 200) raw.removeRange(200, raw.length);
     await prefs.setStringList('history', raw);
+    SyncService.notifyLocalChanged();
   }
 
   static Future<void> deleteHistory(String animeSlug) async {
@@ -534,6 +612,7 @@ class ApiService {
       return j['anime_slug'] == animeSlug;
     });
     await prefs.setStringList('history', raw);
+    SyncService.notifyLocalChanged();
   }
 
   // ── Followed (local) ────────────────────────────────
@@ -552,20 +631,31 @@ class ApiService {
     return followed.any((f) => f.animeId == animeId);
   }
 
-  static Future<void> follow(int animeId, String animeTitle, String animeSlug) async {
+  static Future<void> follow(
+    int animeId,
+    String animeTitle,
+    String animeSlug,
+  ) async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('followed') ?? [];
     if (raw.any((s) => (jsonDecode(s) as Map)['anime_id'] == animeId)) return;
-    raw.add(jsonEncode({
-      'anime_id': animeId,
-      'anime_title': animeTitle,
-      'anime_slug': animeSlug,
-      'followed_at': DateTime.now().toIso8601String(),
-    }));
+    raw.add(
+      jsonEncode({
+        'anime_id': animeId,
+        'anime_title': animeTitle,
+        'anime_slug': animeSlug,
+        'followed_at': DateTime.now().toIso8601String(),
+      }),
+    );
     await prefs.setStringList('followed', raw);
+    SyncService.notifyLocalChanged();
   }
 
-  static Future<bool> toggleFollow(int animeId, String animeTitle, String animeSlug) async {
+  static Future<bool> toggleFollow(
+    int animeId,
+    String animeTitle,
+    String animeSlug,
+  ) async {
     final following = await isFollowing(animeId);
     if (following) {
       await unfollow(animeId);
@@ -581,14 +671,56 @@ class ApiService {
     final raw = prefs.getStringList('followed') ?? [];
     raw.removeWhere((s) => (jsonDecode(s) as Map)['anime_id'] == animeId);
     await prefs.setStringList('followed', raw);
+    SyncService.notifyLocalChanged();
+  }
+
+  /// Reemplaza TODO el estado local (historial + favoritos) de una vez.
+  /// Lo usa SyncService al aplicar un merge desde la nube.
+  static Future<void> replaceAllState(
+    List<HistoryEntry> history,
+    List<FollowedAnime> followed,
+  ) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'history',
+      history
+          .map(
+            (h) => jsonEncode({
+              'anime_id': h.animeId,
+              'anime_slug': h.animeSlug,
+              'anime_title': h.animeTitle,
+              'episode_number': h.episodeNumber,
+              'watched_at': h.watchedAt,
+            }),
+          )
+          .toList(),
+    );
+    await prefs.setStringList(
+      'followed',
+      followed
+          .map(
+            (f) => jsonEncode({
+              'anime_id': f.animeId,
+              'anime_title': f.animeTitle,
+              'anime_slug': f.animeSlug,
+              'followed_at': f.followedAt,
+            }),
+          )
+          .toList(),
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────
 
-  static List<AnimeBasic> _resolveAnimeList(List<dynamic> data, List<dynamic> indices) {
+  static List<AnimeBasic> _resolveAnimeList(
+    List<dynamic> data,
+    List<dynamic> indices,
+  ) {
     final animes = <AnimeBasic>[];
     for (final idxVal in indices) {
-      final idx = idxVal is int ? idxVal : (idxVal is double ? idxVal.toInt() : -1);
+      final idx = idxVal is int
+          ? idxVal
+          : (idxVal is double ? idxVal.toInt() : -1);
       if (idx < 0 || idx >= data.length) continue;
       final obj = data[idx] as Map?;
       if (obj == null) continue;
@@ -603,7 +735,9 @@ class ApiService {
       final title = _resolveStr(data, titleIdx);
       final slug = _resolveStr(data, slugIdx);
       final synopsis = _resolveStr(data, synopsisIdx);
-      final startDate = startDateIdx != null ? _resolveStr(data, startDateIdx) : null;
+      final startDate = startDateIdx != null
+          ? _resolveStr(data, startDateIdx)
+          : null;
 
       String category = 'TV Anime';
       final catIdx = (obj['category'] as num?)?.toInt();
@@ -624,45 +758,63 @@ class ApiService {
       }
 
       if (title.isNotEmpty && slug.isNotEmpty) {
-        animes.add(AnimeBasic(
-          id: id, title: title, synopsis: synopsis,
-          poster: _coverUrl(posterId),
-          slug: slug, startDate: startDate, category: category,
-        ));
+        animes.add(
+          AnimeBasic(
+            id: id,
+            title: title,
+            synopsis: synopsis,
+            poster: _coverUrl(posterId),
+            slug: slug,
+            startDate: startDate,
+            category: category,
+          ),
+        );
       }
     }
     return animes;
   }
 
   static List<AnimeBasic> _resolveAnimeListFromResolved(List<dynamic> arr) {
-    return arr.whereType<Map>().map((obj) {
-      final id = _asInt(obj['id']);
-      final title = obj['title'] as String? ?? '';
-      final slug = obj['slug'] as String? ?? '';
-      if (title.isEmpty || slug.isEmpty) return null;
-      final synopsis = obj['synopsis'] as String? ?? '';
-      final startDate = obj['startDate'] as String?;
-      final posterId = _asInt(obj['poster'], id);
-      final cat = obj['category'];
-      final category = cat is Map ? (cat['name'] as String? ?? 'TV Anime') : 'TV Anime';
+    return arr
+        .whereType<Map>()
+        .map((obj) {
+          final id = _asInt(obj['id']);
+          final title = obj['title'] as String? ?? '';
+          final slug = obj['slug'] as String? ?? '';
+          if (title.isEmpty || slug.isEmpty) return null;
+          final synopsis = obj['synopsis'] as String? ?? '';
+          final startDate = obj['startDate'] as String?;
+          final posterId = _asInt(obj['poster'], id);
+          final cat = obj['category'];
+          final category = cat is Map
+              ? (cat['name'] as String? ?? 'TV Anime')
+              : 'TV Anime';
 
-      // Extract latestEpisode info
-      int? latestEpId;
-      int? latestEpNum;
-      String? latestEpCreatedAt;
-      final le = obj['latestEpisode'];
-      if (le is Map) {
-        latestEpId = (le['id'] as num?)?.toInt();
-        latestEpNum = (le['number'] as num?)?.toInt();
-        latestEpCreatedAt = '${le['createdAt'] ?? ''}';
-      }
+          // Extract latestEpisode info
+          int? latestEpId;
+          int? latestEpNum;
+          String? latestEpCreatedAt;
+          final le = obj['latestEpisode'];
+          if (le is Map) {
+            latestEpId = (le['id'] as num?)?.toInt();
+            latestEpNum = (le['number'] as num?)?.toInt();
+            latestEpCreatedAt = '${le['createdAt'] ?? ''}';
+          }
 
-      return AnimeBasic(
-        id: id, title: title, synopsis: synopsis,
-        poster: _coverUrl(posterId), slug: slug, startDate: startDate, category: category,
-        latestEpisodeId: latestEpId, latestEpisodeNumber: latestEpNum,
-        latestEpisodeCreatedAt: latestEpCreatedAt,
-      );
-    }).whereType<AnimeBasic>().toList();
+          return AnimeBasic(
+            id: id,
+            title: title,
+            synopsis: synopsis,
+            poster: _coverUrl(posterId),
+            slug: slug,
+            startDate: startDate,
+            category: category,
+            latestEpisodeId: latestEpId,
+            latestEpisodeNumber: latestEpNum,
+            latestEpisodeCreatedAt: latestEpCreatedAt,
+          );
+        })
+        .whereType<AnimeBasic>()
+        .toList();
   }
 }

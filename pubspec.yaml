@@ -19,6 +19,7 @@ dependencies:
   video_view:
     path: video_view
   window_manager: ^0.5.2
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
