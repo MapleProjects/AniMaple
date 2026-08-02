@@ -148,7 +148,7 @@ class _SyncButtonState extends State<SyncButton> {
                 style: TextStyle(fontSize: 14, color: Color(0xFFe8e4f0)),
               ),
               subtitle: const Text(
-                'Los cambios se reflejan solos en tus dispositivos',
+                'Tus datos se sincronizan automáticamente entre todos tus dispositivos',
                 style: TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
               ),
             ),
