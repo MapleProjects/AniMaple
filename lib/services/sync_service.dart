@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
@@ -43,6 +44,8 @@ class SyncService {
   static bool _busy = false;
   static Timer? _debounce;
   static Timer? _autoSyncTimer;
+  static StreamSubscription<List<ConnectivityResult>>? _connSub;
+  static bool _wasOffline = false;
 
   /// Marca de tiempo ISO de la última sincronización exitosa (o null).
   static String? lastSyncedAt;
@@ -229,21 +232,43 @@ class SyncService {
     _autoSyncTimer = null;
   }
 
-  /// Forzar sincronización manual (botón en la UI de diagnóstico).
-  static Future<Map<String, String>> forceSyncNow() async {
-    lastError = null;
-    if (!isSignedIn) {
-      return {'status': 'no-session'};
+  /// Vigila la conectividad: cuando la red se restablece (o al arranque si ya
+  /// hay red) dispara un poll inmediato, para que la sincronización se
+  /// recupere en ≤10s tras un fallo de conexión sin que el usuario haga nada.
+  /// Si la sesión aún no se restauró (app iniciada sin Internet), reintenta
+  /// la restauración al volver la red.
+  static void watchConnectivity() {
+    _connSub ??= Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (online && _wasOffline) {
+        debugPrint('Sync: red restablecida → intentar sync');
+        if (!isSignedIn) {
+          attemptRestoreAndSync();
+        } else {
+          _pollRemote();
+        }
+      }
+      _wasOffline = !online;
+    });
+    Connectivity().checkConnectivity().then((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      _wasOffline = !online;
+      if (online && isSignedIn) _pollRemote();
+    });
+  }
+
+  /// Restaura la sesión (si es posible) y sincroniza. Se llama al arranque y
+  /// desde el watcher de conectividad cuando la red vuelve. No muestra UI:
+  /// si no hay credencial guardada termina silenciosamente (login manual).
+  static Future<void> attemptRestoreAndSync() async {
+    if (isSignedIn) {
+      sync(forcePush: true); // ya hay sesión → publicar/traer de inmediato
+      return;
     }
-    if (!await _ensureAuthHeaders()) {
-      lastError = 'No se pudo autenticar con Google. Revisa tu sesión.';
-      return {'status': 'auth-fail'};
+    final restored = await tryRestoreSession().catchError((_) => false);
+    if (restored == true) {
+      sync(forcePush: true);
     }
-    await sync(forcePush: true);
-    return {
-      'status': isBusy ? 'busy' : 'done',
-      'fileId': _fileId ?? 'null',
-    };
   }
 
   /// Revisa la versión remota y hace pull si cambió desde la última vista.

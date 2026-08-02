@@ -52,14 +52,6 @@ class _SyncButtonState extends State<SyncButton> {
     });
   }
 
-  String _formatTime(String iso) {
-    final dt = DateTime.tryParse(iso)?.toLocal();
-    if (dt == null) return iso;
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '${dt.day}/${dt.month} $h:$m';
-  }
-
   Future<void> _handleTap() async {
     if (!_signedIn) {
       // Iniciar sesión y arrancar la sincronización automática.
@@ -152,44 +144,13 @@ class _SyncButtonState extends State<SyncButton> {
             ListTile(
               leading: const Icon(Icons.sync, color: Color(0xFFa78bfa)),
               title: const Text(
-                'Sincronización automática activa',
-                style: TextStyle(fontSize: 14, color: Color(0xFFe8e4f0)),
-              ),
-              subtitle: Text(
-                SyncService.lastSyncedAt == null
-                    ? 'Aún no se ha sincronizado en esta sesión'
-                    : 'Última sincronización: ${_formatTime(SyncService.lastSyncedAt!)}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
-              ),
-            ),
-            // Solo para diagnóstico cuando algo no converge
-            ListTile(
-              leading: const Icon(Icons.sync_problem, color: Color(0xFFa78bfa)),
-              title: const Text(
-                'Sincronizar ahora',
+                'Sincronización automática',
                 style: TextStyle(fontSize: 14, color: Color(0xFFe8e4f0)),
               ),
               subtitle: const Text(
-                'Sube y baja tu historial/favoritos manualmente',
+                'Los cambios se reflejan solos en tus dispositivos',
                 style: TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
               ),
-              onTap: () async {
-                Navigator.pop(sheetCtx);
-                final result = await SyncService.forceSyncNow();
-                if (!mounted) return;
-                final err = SyncService.lastError;
-                final msg = err != null
-                    ? err
-                    : 'Sin cambios (ya sincronizado). '
-                          'Archivo: ${result['fileId'] ?? '—'}';
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(msg),
-                    duration: const Duration(seconds: 3),
-                  ),
-                );
-                _refreshFromService();
-              },
             ),
             ListTile(
               leading: const Icon(Icons.logout, color: Color(0xFFf87171)),

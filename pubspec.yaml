@@ -20,6 +20,8 @@ dependencies:
     path: video_view
   window_manager: ^0.5.2
   google_sign_in: ^7.2.0
+  # v7 requiere AGP 8.9.1+; el proyecto usa AGP 8.7.3 → serie 6.x (compatible)
+  connectivity_plus: ^6.0.0
   webview_flutter: ^4.14.1
 
 dev_dependencies:

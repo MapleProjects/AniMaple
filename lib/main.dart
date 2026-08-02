@@ -21,31 +21,14 @@ void main() {
   // El estado real (login/logout) se refleja vía authenticationEvents en la UI.
   unawaited(() async {
     await SyncService.initialize();
-    // Intentar restaurar la sesión con reintentos espaciados: tras una
-    // reinstalación Credential Manager puede tardar en tener la credencial.
-    // Límite de intentos para no abrir el selector de cuentas en bucle.
-    const maxAttempts = 4;
-    var attempts = 0;
-    Future<void> attempt() async {
-      if (attempts >= maxAttempts) return; // sin sesión → login manual
-      attempts++;
-      final restored =
-          await SyncService.tryRestoreSession().catchError((_) => false);
-      if (restored == true) {
-        // sync completo con forcePush: publica el historial/favoritos
-        // LOCAL existente (de versiones anteriores) y trae el remoto,
-        // luego arranca el polling en tiempo real.
-        SyncService.sync(forcePush: true);
-        SyncService.startAutoSync(); // cambios remotos se reflejan en vivo
-      } else {
-        // Sin sesión aún: reintentar tras 3s (la UI muestra el avatar
-        // genérico para iniciar sesión manualmente si persiste).
-        Future.delayed(const Duration(seconds: 3), attempt);
-      }
-    }
-
+    // Arrancar SIEMPRE el polling de 10s y el watcher de conectividad, esté
+    // o no la sesión restaurada todavía: si la app inicia sin Internet, al
+    // volver la red el watcher reintenta restaurar sesión y sincronizar —
+    // todo de fondo, el usuario no tiene que tocar nada.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      attempt();
+      SyncService.startAutoSync();
+      SyncService.watchConnectivity();
+      SyncService.attemptRestoreAndSync();
     });
   }());
 
