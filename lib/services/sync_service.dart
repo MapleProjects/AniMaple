@@ -39,6 +39,14 @@ class SyncService {
   static Timer? _debounce;
   static Timer? _autoSyncTimer;
 
+  /// Marca de tiempo ISO de la última sincronización exitosa (o null).
+  static String? lastSyncedAt;
+
+  /// URL del archivo en Drive (para diagnóstico en la UI).
+  static String? get syncFileId => _fileId;
+  static String? get lastErrorForUi => lastError;
+  static bool get isBusy => _busy;
+
   /// Se incrementa cada vez que el estado local (historial/Mi lista) cambia.
   /// Las páginas lo escuchan para refrescar en vivo sin resync manual.
   static final ValueNotifier<int> stateVersion = ValueNotifier<int>(0);
@@ -216,6 +224,23 @@ class SyncService {
     _autoSyncTimer = null;
   }
 
+  /// Forzar sincronización manual (botón en la UI de diagnóstico).
+  static Future<Map<String, String>> forceSyncNow() async {
+    lastError = null;
+    if (!isSignedIn) {
+      return {'status': 'no-session'};
+    }
+    if (!await _ensureAuthHeaders()) {
+      lastError = 'No se pudo autenticar con Google. Revisa tu sesión.';
+      return {'status': 'auth-fail'};
+    }
+    await sync(forcePush: true);
+    return {
+      'status': isBusy ? 'busy' : 'done',
+      'fileId': _fileId ?? 'null',
+    };
+  }
+
   /// Revisa la versión remota y hace pull si cambió desde la última vista.
   /// Respeta límites de Drive: nunca descarga si `version` no cambió.
   static Future<void> _pollRemote() async {
@@ -319,6 +344,7 @@ class SyncService {
       }
       // Registrar la versión recién publicada para no re-pull de nosotros mismos.
       await _cacheRemoteVersion();
+      lastSyncedAt = DateTime.now().toUtc().toIso8601String();
       debugPrint('Sync: push OK, ${utf8.encode(body).length} bytes');
       return true;
     } catch (e) {
@@ -373,6 +399,7 @@ class SyncService {
         // Los datos locales cambiaron → avisar a las páginas para refresh en vivo.
         stateVersion.value++;
       }
+      lastSyncedAt = DateTime.now().toUtc().toIso8601String();
       return changed;
     } catch (e) {
       _authHeaders = null;
