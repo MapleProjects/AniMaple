@@ -42,6 +42,10 @@ class SyncService {
   static String? _fileId; // id del archivo en Drive (se cachea)
   static int? _lastRemoteVersion; // última versión remota vista
   static bool _busy = false;
+  // Hay cambios locales (borrados, historial, seguidos) que aún no se
+  // publicaron con éxito. El poll periódico lo reintenta hasta lograrlo,
+  // así una falla de red/sesión no deja un cambio local olvidado.
+  static bool _localDirty = false;
   static Timer? _debounce;
   static Timer? _autoSyncTimer;
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
@@ -196,7 +200,9 @@ class SyncService {
     _busy = true;
     try {
       final changed = await _pullIntoLocal();
-      if (changed || forcePush) {
+      // Subir también si hay cambios locales aún no publicados (red/sesión
+      // fallaron antes): el pull-merge no debe descartarlos.
+      if (changed || forcePush || _localDirty) {
         await _pushLocal();
       }
     } finally {
@@ -208,6 +214,9 @@ class SyncService {
   /// Debounce de 2s para no subir por cada tap. Antes de subir hace un
   /// pull-merge, así no pisa cambios remotos que otro dispositivo publicó.
   static Future<void> notifyLocalChanged() async {
+    // Hay cambios locales que publicar. Se marca aunque la sesión no esté
+    // lista todavía: el poll reintentará cuando vuelva la red/sesión.
+    _localDirty = true;
     if (!isSignedIn) return;
     if (!await _ensureAuthHeaders()) return;
     _debounce?.cancel();
@@ -274,7 +283,16 @@ class SyncService {
   /// Revisa la versión remota y hace pull si cambió desde la última vista.
   /// Respeta límites de Drive: nunca descarga si `version` no cambió.
   static Future<void> _pollRemote() async {
-    if (_busy || !isSignedIn) return;
+    if (_busy) return;
+    // Si hay cambios locales pendientes y la sesión no está, intentar
+    // restaurarla: sin esto, un borrado hecho con sesión caducada quedaría
+    // sin subir hasta que el usuario hiciera algo (loop de 10s lo recupera).
+    if (!isSignedIn) {
+      if (_localDirty) {
+        attemptRestoreAndSync();
+      }
+      return;
+    }
     if (_authHeaders == null && !await _ensureAuthHeaders()) return;
     try {
       // Búsqueda fresca (sin cache) — además re-ejecuta el dedup de
@@ -288,7 +306,18 @@ class SyncService {
       final v = version is int ? version : int.tryParse('$version');
 
       // Sin cambio remoto → no tocar Drive de nuevo.
-      if (v == null || v == _lastRemoteVersion) return;
+      // PERO si hay cambios locales pendientes de publicar (falló antes la
+      // red/sesión), hay que reintentarlo aunque la versión no cambió: si no,
+      // un borrado o edición local podría quedarse sin subir días hasta que
+      // otro cambio disparara el push. Reintento: mark seen = v, y sync lo
+      // publica (sync usa _localDirty).
+      if (v == null || v == _lastRemoteVersion) {
+        if (_localDirty) {
+          debugPrint('Sync: pendiente local → reintentar publicar');
+          await sync();
+        }
+        return;
+      }
 
       // Cambió → sync completo (merge + push para propagar la unión).
       await sync();
@@ -378,6 +407,8 @@ class SyncService {
       }
       // Registrar la versión recién publicada para no re-pull de nosotros mismos.
       await _cacheRemoteVersion();
+      // Cambios locales ya publicados con éxito → limpiar el pendiente.
+      _localDirty = false;
       lastSyncedAt = DateTime.now().toUtc().toIso8601String();
       debugPrint('Sync: push OK, ${utf8.encode(body).length} bytes');
       return true;

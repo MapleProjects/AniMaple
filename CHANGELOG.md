@@ -1,5 +1,16 @@
 # AniMaple — Registro de cambios
 
+## v1.2.4 (03 ago 2026) — versión revisada (+11)
+
+### Sincronización (corrección)
+
+- **Los cambios locales ya no quedan "olvidados"**: antes, si un borrado o
+  una edición del historial/seguidos no se subía a la nube (fallo de red o
+  de sesión en ese momento), no se reintentaba hasta que el usuario hiciera
+  otro cambio. Ahora un pendiente local se publica automáticamente en cuanto
+  se restablece la conexión o la sesión, sin esperar un nuevo evento.
+  El borrado de historial se propaga al otro dispositivo en segundos.
+
 ## v1.2.4 (03 ago 2026)
 
 ### Notificaciones
