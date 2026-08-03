@@ -1,5 +1,17 @@
 # AniMaple — Registro de cambios
 
+## v1.2.8 (03 ago 2026)
+
+### Correcciones
+
+- **Reproducción automática al reconectar**: al recuperar la conexión, el
+  capítulo se reanuda reproduciéndose solo, sin que tengas que tocar la
+  pantalla, y continúa donde se cortó.
+- **Títulos con tildes corregidos**: los nombres de animes con caracteres
+  especiales (tildes, ñ) que podían verse distorsionados en Historial y en
+  Mi lista ahora se muestran correctamente. Los títulos guardados se
+  reparan automáticamente.
+
 ## v1.2.7 (03 ago 2026) — versión revisada (+15)
 
 ### Actualización automática (corrección)

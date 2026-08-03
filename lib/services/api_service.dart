@@ -209,6 +209,23 @@ class ApiService {
     }
   }
 
+  /// Repara títulos persistidos con mojibake de latin1→UTF-8. Antes del fix
+  /// de `_jsonFrom`, los títulos se guardaban en SharedPreferences con la
+  /// decodificación latin1 por defecto → tildes rotas ("Ã©" en vez de "é").
+  /// Si el texto ya es correcto, se devuelve igual (sin tocar).
+  static String _fixMojibake(String s) {
+    if (s.isEmpty) return s;
+    // Señal típica de mojibake: "Ã" precede a tildes/ñ(UTF-8 de 2 bytes),
+    // "Â" a símbolos. Sin eso, el texto ya está limpio.
+    if (!s.contains('Ã') && !s.contains('Â')) return s;
+    try {
+      final bytes = latin1.encode(s);
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return s;
+    }
+  }
+
   // ── Recent episodes ─────────────────────────────────
 
   static Future<List<RecentEpisode>> fetchRecentEpisodes() async {
@@ -582,10 +599,21 @@ class ApiService {
   static Future<List<HistoryEntry>> fetchHistory() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('history') ?? [];
-    return raw.map((s) {
-      final j = jsonDecode(s) as Map<String, dynamic>;
-      return HistoryEntry.fromJson(j);
-    }).toList();
+    var changed = false;
+    final out = <HistoryEntry>[];
+    for (var i = 0; i < raw.length; i++) {
+      final j = jsonDecode(raw[i]) as Map<String, dynamic>;
+      final title = _fixMojibake('${j['anime_title'] ?? ''}');
+      if (title != j['anime_title']) {
+        // Reparar el título persistido para que el sync propague el limpio.
+        j['anime_title'] = title;
+        raw[i] = jsonEncode(j);
+        changed = true;
+      }
+      out.add(HistoryEntry.fromJson(j));
+    }
+    if (changed) await prefs.setStringList('history', raw);
+    return out;
   }
 
   static Future<void> addHistory(
@@ -702,10 +730,20 @@ class ApiService {
   static Future<List<FollowedAnime>> fetchFollowed() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('followed') ?? [];
-    return raw.map((s) {
-      final j = jsonDecode(s) as Map<String, dynamic>;
-      return FollowedAnime.fromJson(j);
-    }).toList();
+    var changed = false;
+    final out = <FollowedAnime>[];
+    for (var i = 0; i < raw.length; i++) {
+      final j = jsonDecode(raw[i]) as Map<String, dynamic>;
+      final title = _fixMojibake('${j['anime_title'] ?? ''}');
+      if (title != j['anime_title']) {
+        j['anime_title'] = title;
+        raw[i] = jsonEncode(j);
+        changed = true;
+      }
+      out.add(FollowedAnime.fromJson(j));
+    }
+    if (changed) await prefs.setStringList('followed', raw);
+    return out;
   }
 
   static Future<bool> isFollowing(int animeId) async {
@@ -782,7 +820,7 @@ class ApiService {
             (h) => jsonEncode({
               'anime_id': h.animeId,
               'anime_slug': h.animeSlug,
-              'anime_title': h.animeTitle,
+              'anime_title': _fixMojibake(h.animeTitle),
               'episode_number': h.episodeNumber,
               'watched_at': h.watchedAt,
             }),
@@ -795,7 +833,7 @@ class ApiService {
           .map(
             (f) => jsonEncode({
               'anime_id': f.animeId,
-              'anime_title': f.animeTitle,
+              'anime_title': _fixMojibake(f.animeTitle),
               'anime_slug': f.animeSlug,
               'followed_at': f.followedAt,
             }),

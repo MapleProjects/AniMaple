@@ -390,6 +390,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       try {
         _pendingSeek = _lastPositionMs; // restaurar al volver a playing
         _player.open(url, headers: _lastVideoHeaders);
+        // Forzar reproducción: con autoPlay soló se reproducía en el primer
+        // open; en la reconexión quedaba pausado y el usuario debía tocar.
+        _player.play();
       } catch (e) {
         debugPrint('Reconnect open error: $e');
       }
