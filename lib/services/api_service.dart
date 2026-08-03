@@ -587,6 +587,13 @@ class ApiService {
       return j['anime_slug'] == animeSlug &&
           j['episode_number'] == episodeNumber;
     });
+    // Un re-marcado revoca un borrado pendiente para ese capítulo.
+    final deleted = await fetchDeletedHistory();
+    final key = '$animeSlug#$episodeNumber';
+    if (deleted.containsKey(key)) {
+      deleted.remove(key);
+      await saveDeletedHistory(deleted);
+    }
     // Add to front
     raw.insert(
       0,
@@ -595,7 +602,7 @@ class ApiService {
         'anime_slug': animeSlug,
         'anime_title': animeTitle,
         'episode_number': episodeNumber,
-        'watched_at': DateTime.now().toIso8601String(),
+        'watched_at': DateTime.now().toUtc().toIso8601String(),
       }),
     );
     // Keep max 200
@@ -607,13 +614,73 @@ class ApiService {
   static Future<void> deleteHistory(String animeSlug) async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('history') ?? [];
+    // Tombstone por cada capítulo borrado: el sync no los resucitará.
+    final deleted = await fetchDeletedHistory();
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final s in raw) {
+      final j = jsonDecode(s) as Map<String, dynamic>;
+      if (j['anime_slug'] == animeSlug) {
+        deleted['$animeSlug#${j['episode_number']}'] = now;
+      }
+    }
     raw.removeWhere((s) {
       final j = jsonDecode(s) as Map<String, dynamic>;
       return j['anime_slug'] == animeSlug;
     });
     await prefs.setStringList('history', raw);
+    await saveDeletedHistory(deleted);
     SyncService.notifyLocalChanged();
   }
+
+  // ── Tombstones de borrado (local) ───────────────────
+  // El sync hace union, así que sin estos marcadores el remoto
+  // "resucita" lo que se elimina localmente. Cada delete escribe una
+  // clave con timestamp; el merge se lleva la más reciente y descarta
+  // las entradas vivas cuyo borrado es más nuevo que el propio dato.
+
+  static const _kDeletedHistory = 'deleted_history';
+  static const _kDeletedFollowed = 'deleted_followed';
+
+  /// Mapa clave → deleted_at de capítulos eliminados del historial.
+  static Future<Map<String, String>> fetchDeletedHistory() async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kDeletedHistory);
+    if (raw == null || raw.isEmpty) return {};
+    return _decodeTombstones(raw);
+  }
+
+  /// Mapa anime_id → deleted_at de animes eliminados de favoritos.
+  static Future<Map<String, String>> fetchDeletedFollowed() async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kDeletedFollowed);
+    if (raw == null || raw.isEmpty) return {};
+    return _decodeTombstones(raw);
+  }
+
+  static Future<void> saveDeletedHistory(Map<String, String> m) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    await prefs.setString(_kDeletedHistory, _encodeTombstones(m));
+  }
+
+  static Future<void> saveDeletedFollowed(Map<String, String> m) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    await prefs.setString(_kDeletedFollowed, _encodeTombstones(m));
+  }
+
+  static Map<String, String> _decodeTombstones(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      return decoded.map(
+        (k, v) => MapEntry('$k', '$v'),
+      );
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static String _encodeTombstones(Map<String, String> m) =>
+      jsonEncode(m);
 
   // ── Followed (local) ────────────────────────────────
 
@@ -639,12 +706,18 @@ class ApiService {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('followed') ?? [];
     if (raw.any((s) => (jsonDecode(s) as Map)['anime_id'] == animeId)) return;
+    // Un re-seguimiento revoca un borrado pendiente para este anime.
+    final deleted = await fetchDeletedFollowed();
+    if (deleted.containsKey('$animeId')) {
+      deleted.remove('$animeId');
+      await saveDeletedFollowed(deleted);
+    }
     raw.add(
       jsonEncode({
         'anime_id': animeId,
         'anime_title': animeTitle,
         'anime_slug': animeSlug,
-        'followed_at': DateTime.now().toIso8601String(),
+        'followed_at': DateTime.now().toUtc().toIso8601String(),
       }),
     );
     await prefs.setStringList('followed', raw);
@@ -669,6 +742,10 @@ class ApiService {
   static Future<void> unfollow(int animeId) async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('followed') ?? [];
+    // Tombstone: el sync no debe volver a traer un favorito eliminado.
+    final deleted = await fetchDeletedFollowed();
+    deleted['$animeId'] = DateTime.now().toUtc().toIso8601String();
+    await saveDeletedFollowed(deleted);
     raw.removeWhere((s) => (jsonDecode(s) as Map)['anime_id'] == animeId);
     await prefs.setStringList('followed', raw);
     SyncService.notifyLocalChanged();

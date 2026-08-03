@@ -305,12 +305,14 @@ class SyncService {
   static bool _isAuthError(Object e) =>
       e.toString().contains('401') || e.toString().contains('403');
 
-  /// Serializa el estado local (historial + favoritos) a un Map.
+  /// Serializa el estado local (historial + favoritos + tombstones) a un Map.
   static Future<Map<String, dynamic>> _collectLocalState() async {
     final history = await ApiService.fetchHistory();
     final followed = await ApiService.fetchFollowed();
+    final deletedHistory = await ApiService.fetchDeletedHistory();
+    final deletedFollowed = await ApiService.fetchDeletedFollowed();
     return {
-      'version': 1,
+      'version': 2,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
       'history': history
           .map(
@@ -333,6 +335,8 @@ class SyncService {
             },
           )
           .toList(),
+      'deleted_history': deletedHistory,
+      'deleted_followed': deletedFollowed,
     };
   }
 
@@ -423,8 +427,15 @@ class SyncService {
             (e) => FollowedAnime.fromJson((e as Map).cast<String, dynamic>()),
           )
           .toList();
+      final remoteDeletedHistory = _decodeStrMap(remote['deleted_history']);
+      final remoteDeletedFollowed = _decodeStrMap(remote['deleted_followed']);
 
-      final changed = await _mergeIntoLocal(remoteHistory, remoteFollowed);
+      final changed = await _mergeIntoLocal(
+        remoteHistory,
+        remoteFollowed,
+        remoteDeletedHistory,
+        remoteDeletedFollowed,
+      );
       if (changed) {
         // Los datos locales cambiaron → avisar a las páginas para refresh en vivo.
         stateVersion.value++;
@@ -437,6 +448,12 @@ class SyncService {
       debugPrint('Sync pull error: $e');
       return false;
     }
+  }
+
+  /// Parsea un mapa clave → valor tolerando valores null (remoto v1).
+  static Map<String, String> _decodeStrMap(dynamic v) {
+    if (v is! Map) return {};
+    return v.map((k, val) => MapEntry('$k', '$val'));
   }
 
   /// Marca _lastRemoteVersion con la versión actual del archivo (tras push).
@@ -453,18 +470,42 @@ class SyncService {
     }
   }
 
-  /// Merge last-write-wins por registro.
+  /// Merge last-write-wins por registro + tombstones de borrado.
+  ///
+  /// Los tombstones garantizan que eliminar en un dispositivo se propague:
+  /// si la clave está en deleted_* y su deleted_at es más reciente que el
+  /// dato vivo, la entrada se descarta aunque aparezca en el remoto.
+  /// Una entrada viva con timestamp más nuevo que el tombstone revoca el
+  /// borrado (re-marcar/re-seguir vuelve a traer el dato).
+  ///
+  /// El orden final es determinista (timestamp UTC desc + id/épisode de
+  /// desempate) para que todos los dispositivos converjan a la misma lista,
+  /// incluso con datos antiguos cuyo timestamp venía sin normalizar.
   static Future<bool> _mergeIntoLocal(
     List<HistoryEntry> remoteHistory,
     List<FollowedAnime> remoteFollowed,
+    Map<String, String> remoteDeletedHistory,
+    Map<String, String> remoteDeletedFollowed,
   ) async {
     final localHistory = await ApiService.fetchHistory();
     final localFollowed = await ApiService.fetchFollowed();
+    final localDeletedHistory = await ApiService.fetchDeletedHistory();
+    final localDeletedFollowed = await ApiService.fetchDeletedFollowed();
 
-    // ── Merge historial ──
+    // ── Merge tombstones: last-write-wins por clave ──
+    final deletedHistory = _mergeTombstones(
+      localDeletedHistory,
+      remoteDeletedHistory,
+    );
+    final deletedFollowed = _mergeTombstones(
+      localDeletedFollowed,
+      remoteDeletedFollowed,
+    );
+
+    // ── Merge historial (dedup por slug#episodio) ──
     final mergedHistory = <String, HistoryEntry>{};
     for (final h in [...localHistory, ...remoteHistory]) {
-      final key = '${h.animeSlug}#${h.episodeNumber}';
+      final key = _historyKey(h);
       final existing = mergedHistory[key];
       if (existing == null) {
         mergedHistory[key] = h;
@@ -472,13 +513,18 @@ class SyncService {
         mergedHistory[key] = h;
       }
     }
+    // Aplicar tombstones: descartar capítulos borrados más recientemente.
+    // Un dato re-marcado (watched_at > tombstone) sobrevive automáticamente:
+    // _isTombstoned lo mantiene y el tombstone queda inerte en el mapa.
+    mergedHistory.removeWhere((key, h) =>
+        _isTombstoned(deletedHistory[key], h.watchedAt));
     final sortedHistory = mergedHistory.values.toList()
-      ..sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
+      ..sort((a, b) => _compareHistoryDesc(a, b));
     if (sortedHistory.length > 200) {
       sortedHistory.removeRange(200, sortedHistory.length);
     }
 
-    // ── Merge favoritos ──
+    // ── Merge favoritos (dedup por anime_id) ──
     final mergedFollowed = <int, FollowedAnime>{};
     for (final f in [...localFollowed, ...remoteFollowed]) {
       final existing = mergedFollowed[f.animeId];
@@ -488,22 +534,113 @@ class SyncService {
         mergedFollowed[f.animeId] = f;
       }
     }
+    mergedFollowed.removeWhere((id, f) =>
+        _isTombstoned(deletedFollowed['$id'], f.followedAt));
     final sortedFollowed = mergedFollowed.values.toList()
-      ..sort((a, b) => b.followedAt.compareTo(a.followedAt));
+      ..sort((a, b) => _compareFollowedDesc(a, b));
 
-    // ── Ver si cambió ──
-    final sameHistory = _sameEntries(localHistory, sortedHistory);
-    final sameFollowed = _sameEntries(localFollowed, sortedFollowed);
-    if (sameHistory && sameFollowed) {
+    // ── Ver si cambió (por contenido y orden reales) ──
+    final sameHistory = _sameHistory(localHistory, sortedHistory);
+    final sameFollowed = _sameFollowed(localFollowed, sortedFollowed);
+    final sameTombstones =
+        _mapsEqual(localDeletedHistory, deletedHistory) &&
+            _mapsEqual(localDeletedFollowed, deletedFollowed);
+    if (sameHistory && sameFollowed && sameTombstones) {
       debugPrint('Sync: merge sin cambios');
       return false;
     }
 
     await ApiService.replaceAllState(sortedHistory, sortedFollowed);
+    await ApiService.saveDeletedHistory(deletedHistory);
+    await ApiService.saveDeletedFollowed(deletedFollowed);
     debugPrint(
       'Sync: merge aplicado — history=${sortedHistory.length}, '
-      'followed=${sortedFollowed.length}',
+      'followed=${sortedFollowed.length}, '
+      'delHist=${deletedHistory.length}, delFol=${deletedFollowed.length}',
     );
+    return true;
+  }
+
+  static String _historyKey(HistoryEntry h) =>
+      '${h.animeSlug}#${h.episodeNumber}';
+
+  /// Union de mapas de tombstones: para cada clave gana el deleted_at mayor.
+  static Map<String, String> _mergeTombstones(
+    Map<String, String> a,
+    Map<String, String> b,
+  ) {
+    final out = <String, String>{...a};
+    for (final e in b.entries) {
+      final cur = out[e.key];
+      if (cur == null || _isNewer(e.value, cur)) out[e.key] = e.value;
+    }
+    return out;
+  }
+
+  /// true si el tombstone [deletedAt] es más reciente que el timestamp del dato.
+  static bool _isTombstoned(String? deletedAt, String dataTs) {
+    if (deletedAt == null) return false;
+    return !_isNewer(dataTs, deletedAt);
+  }
+
+  /// Compara dos timestamps como instantes (tolerante a formatos mezclados).
+  static int _timestampCompare(String a, String b) {
+    final at = DateTime.tryParse(a);
+    final bt = DateTime.tryParse(b);
+    if (at == null || bt == null) return a.compareTo(b);
+    return at.compareTo(bt);
+  }
+
+  /// Order determinista, más reciente primero. Desempate por slug + episodio
+  /// para que dos dispositivos con timestamps iguales coincidan.
+  static int _compareHistoryDesc(HistoryEntry a, HistoryEntry b) {
+    final t = _timestampCompare(b.watchedAt, a.watchedAt);
+    if (t != 0) return t;
+    final s = a.animeSlug.compareTo(b.animeSlug);
+    if (s != 0) return s;
+    return a.episodeNumber.compareTo(b.episodeNumber);
+  }
+
+  static int _compareFollowedDesc(FollowedAnime a, FollowedAnime b) {
+    final t = _timestampCompare(b.followedAt, a.followedAt);
+    if (t != 0) return t;
+    return a.animeId.compareTo(b.animeId);
+  }
+
+  static bool _sameHistory(List<HistoryEntry> a, List<HistoryEntry> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = a[i], y = b[i];
+      if (x.animeId != y.animeId ||
+          x.animeSlug != y.animeSlug ||
+          x.animeTitle != y.animeTitle ||
+          x.episodeNumber != y.episodeNumber ||
+          x.watchedAt != y.watchedAt) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool _sameFollowed(List<FollowedAnime> a, List<FollowedAnime> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = a[i], y = b[i];
+      if (x.animeId != y.animeId ||
+          x.animeTitle != y.animeTitle ||
+          x.animeSlug != y.animeSlug ||
+          x.followedAt != y.followedAt) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool _mapsEqual(Map<String, String> a, Map<String, String> b) {
+    if (a.length != b.length) return false;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return false;
+    }
     return true;
   }
 
@@ -512,14 +649,6 @@ class SyncService {
     final bt = DateTime.tryParse(b);
     if (at == null || bt == null) return a.compareTo(b) > 0;
     return at.isAfter(bt);
-  }
-
-  static bool _sameEntries<T>(List<T> a, List<T> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i].toString() != b[i].toString()) return false;
-    }
-    return true;
   }
 
   /// Crea el archivo en appDataFolder si no existe. Devuelve su id.

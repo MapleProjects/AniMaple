@@ -1,5 +1,22 @@
 # AniMaple — Registro de cambios
 
+## v1.2.1 (02 ago 2026)
+
+### Correcciones (sync)
+
+- **Los borrados ya persisten**: eliminar un favorito o un capítulo del
+  historial ahora deja un *tombstone*. Antes el merge hacía solo union y el
+  remoto "resucitaba" lo eliminado, en el mismo dispositivo o en otros.
+- **Orden convergente entre dispositivos**: historial y Mi lista se
+  reordenan siempre por timestamp (UTC, normalizado) con desempate por
+  id/capítulo. Todos los dispositivos convergen a la misma lista, incluso con
+  datos antiguos guardados antes de la normalización.
+- **Re-marcar un capítulo ya visto lo reordena, no lo duplica**: el mismo
+  capítulo aparece una sola vez y queda primero.
+- `_sameEntries` comparaba con `toString()` (sin override) → el merge
+  ignoraba reordenamientos por creer "sin cambios". Ahora compara contenido
+  y orden reales (historia + seguidos + tombstones).
+
 ## v1.2.0 (01 ago 2026)
 
 ### Nuevo
