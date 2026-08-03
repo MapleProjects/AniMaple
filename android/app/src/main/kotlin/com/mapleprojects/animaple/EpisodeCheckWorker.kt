@@ -56,21 +56,25 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
         // Prefs privadas del worker para estado de notificación.
         private const val PREFS_NOTIF = "animaple_notif"
-        // Cadencia del trabajo periódico. Mínimo de PeriodicWorkRequest = 15 min.
-        private const val INTERVAL_MIN = 15L
+        // Cadencia efectiva: revisión cada 8 min vía one-off auto-reagendada.
+        private const val CHECK_EVERY_MIN = 8L
+        // Respaldo administrado por el sistema (sobrevive reinicios). Mínimo
+        // permitido por PeriodicWorkRequest = 15 min; no va más abajo.
+        private const val PERIODIC_MIN = 15L
         // Nombre de la cadena one-off LEGACY (previo a v1.2.9): se cancela al
         // migrar para que no queden dos mecanismos compitiendo.
         private const val WORK_LEGACY = "animaple_episode_check"
         // Trabajo periódico administrado por el sistema (sobrevive reinicio).
         private const val WORK_NAME = "animaple_episode_check_periodic"
-        // Revisión inmediata (tras reinicio vía BootReceiver).
+        // Revisión de 8 min (auto-reagendada) y revisión inmediata (boot).
         private const val WORK_NOW = "animaple_episode_check_now"
 
         /**
-         * Agenda la revisión periódica de capítulos. PeriodicWorkRequest es
-         * persistente: WorkManager lo reagenda SOLO tras reinicios del
-         * dispositivo (contrato + RECEIVE_BOOT_COMPLETED), de modo que las
-         * notificaciones siguen llegando sin abrir la app. KEEP no duplica.
+         * Agenda la revisión periódica de capítulos como RED DE SEGURIDAD.
+         * PeriodicWorkRequest es persistente: WorkManager lo reagenda SOLO
+         * tras reinicios del dispositivo (contrato + RECEIVE_BOOT_COMPLETED),
+         * de modo que aunque la cadena de 8 min fallara, el ciclo continúa.
+         * KEEP no duplica.
          */
         fun enqueuePeriodic(ctx: Context) {
             try {
@@ -80,7 +84,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build()
                 val request = PeriodicWorkRequestBuilder<EpisodeCheckWorker>(
-                    INTERVAL_MIN, TimeUnit.MINUTES
+                    PERIODIC_MIN, TimeUnit.MINUTES
                 )
                     .setConstraints(constraints)
                     .build()
@@ -89,31 +93,39 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
                     ExistingPeriodicWorkPolicy.KEEP,
                     request,
                 )
-                Log.d(TAG, "EpisodeCheck: periódico cada $INTERVAL_MIN min (KEEP)")
+                Log.d(TAG, "EpisodeCheck: respaldo periódico cada $PERIODIC_MIN min (KEEP)")
             } catch (e: Exception) {
                 Log.e(TAG, "EpisodeCheck enqueuePeriodic error: ${e.message}")
             }
         }
 
-        /** Revisión inmediata. La usa BootReceiver tras un reinicio. */
-        fun enqueueImmediate(ctx: Context) {
+        /**
+         * Agenda la siguiente revisión en [delayMinutes]. La cadena principal
+         * es esta: one-off de ~8 min auto-reagendado (el worker se re-encola
+         * al terminar). WorkManager la persiste y la re-encola tras reinicios.
+         */
+        fun enqueueDelayed(ctx: Context, delayMinutes: Long) {
             try {
                 val constraints = Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build()
                 val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
                     .setConstraints(constraints)
+                    .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
                     .build()
                 WorkManager.getInstance(ctx).enqueueUniqueWork(
                     WORK_NOW,
                     ExistingWorkPolicy.REPLACE,
                     request,
                 )
-                Log.d(TAG, "EpisodeCheck: revisión inmediata encolada")
+                Log.d(TAG, "EpisodeCheck: próxima revisión en $delayMinutes min")
             } catch (e: Exception) {
-                Log.e(TAG, "EpisodeCheck enqueueImmediate error: ${e.message}")
+                Log.e(TAG, "EpisodeCheck enqueueDelayed error: ${e.message}")
             }
         }
+
+        /** Revisión inmediata. La usa BootReceiver tras un reinicio. */
+        fun enqueueImmediate(ctx: Context) = enqueueDelayed(ctx, 0L)
 
         /** Detiene todos los ciclos (al vaciarse la lista de seguidos). */
         fun cancel(ctx: Context) {
@@ -183,8 +195,11 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         } catch (e: Exception) {
             Log.e(TAG, "EpisodeCheck error: ${e.message}")
         }
-        // El ciclo continuo lo garantiza el PeriodicWorkRequest (WOK_NAME),
-        // administrado por el sistema: no hay auto-reagenda manual aquí.
+        // Cadencia principal (~8 min): reagendar la siguiente revisión. Al
+        // terminar sin seguidos no se llega aquí (early return arriba), así
+        // que la cadena se detiene sola. El periódico de 15 min queda como
+        // red de seguridad administrada por el sistema tras reinicios.
+        enqueueDelayed(ctx, CHECK_EVERY_MIN)
         return Result.success()
     }
 

@@ -72,8 +72,8 @@ void main() {
           ),
         );
       });
-      // Optimización de batería (Doze): el worker de capítulos corre cada
-      // 15 min en segundo plano y tras reinicios. Si el sistema difiere el
+      // Optimización de batería (Doze): el worker de capítulos revisa cada
+      // 8 min en segundo plano y tras reinicios. Si el sistema difiere el
       // trabajo en reposo, los avisos se retrasan. Eximir a la app (una sola
       // vez, dialog del sistema) la equipara a WhatsApp/Facebook.
       Future.delayed(const Duration(milliseconds: 2400), () async {

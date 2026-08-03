@@ -73,8 +73,9 @@ class NotificationService {
     } catch (_) {}
   }
 
-  /// Agenda (una sola vez) la revisión periódica de nuevos capítulos.
-  /// Idempotente nativamente (ExistingPeriodicWorkPolicy.KEEP).
+  /// Agenda (una sola vez) la revisión de nuevos capítulos. Registra el
+  /// respaldo periódico de 15 min (idempotente, ExistingPeriodicWorkPolicy.
+  /// KEEP); la cadencia real de 8 min la mantiene el worker al reagendarse.
   static Future<void> scheduleEpisodeCheck() async {
     try {
       await _channel.invokeMethod('scheduleEpisodeCheck');
