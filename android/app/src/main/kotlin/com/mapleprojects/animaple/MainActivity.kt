@@ -28,6 +28,7 @@ import androidx.work.WorkManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
@@ -36,10 +37,12 @@ class MainActivity : FlutterActivity() {
     private val PIP_CHANNEL = "com.mapleprojects.animaple/pip"
     private val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
     private val NOTIF_CHANNEL = "com.mapleprojects.animaple/notifications"
+    private val UPDATE_CHANNEL = "com.mapleprojects.animaple/updater"
 
     private var pipMethodChannel: MethodChannel? = null
     private var mediaMethodChannel: MethodChannel? = null
     private var notifMethodChannel: MethodChannel? = null
+    private var updateMethodChannel: MethodChannel? = null
 
     // ── PiP State ──
     private var isPipSupported = false
@@ -153,7 +156,39 @@ class MainActivity : FlutterActivity() {
         // Crea el canal de notificaciones de novedades (idempotente).
         Notifier.ensureNewEpisodeChannel(this)
         setupNotificationChannel(flutterEngine)
+        setupUpdateChannel(flutterEngine)
         setupMediaSession()
+    }
+
+    // ── Updater Channel ──
+    // Actualización automática desde GitHub. Flutter consulta el release,
+    // descarga el APK en `updates/` y pide instalar vía FileProvider.
+    private fun setupUpdateChannel(flutterEngine: FlutterEngine) {
+        updateMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATE_CHANNEL)
+        // Al arrancar la app nueva, limpiar APK descargados que ya no se
+        // necesitan (la instalación anterior dejó el archivo huérfano).
+        Updater.cleanupDownloaded(this)
+
+        updateMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getCurrentVersion" -> {
+                    result.success(Updater.currentVersion(this))
+                }
+                "getUpdatesDir" -> {
+                    result.success(Updater.updatesDir(this).absolutePath)
+                }
+                "installApk" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.success(false)
+                    } else {
+                        Updater.install(this, File(path))
+                        result.success(true)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     // ── Notification Service Channel ──

@@ -1,5 +1,20 @@
 # AniMaple — Registro de cambios
 
+## v1.2.5 (03 ago 2026)
+
+### Actualización automática
+
+- **Aviso de versión nueva al abrir la app**: si hay una release más reciente
+  disponible, al iniciar aparece una ventana con dos opciones: **Actualizar**
+  (a la derecha) y **Posponer** (a la izquierda).
+- **Recordatorio a la vista**: si pospones la actualización, junto al icono
+  de tu cuenta aparece un botón que indica que hay una versión pendiente.
+  Al tocarlo se vuelve a mostrar la misma ventana.
+- **Descarga dentro de la app**: Actualizar descarga el APK desde GitHub
+  directamente en AniMaple (sin abrir el navegador), con barra de progreso,
+  y pide permiso para instalarse al terminar.
+- **Sin archivos basura**: el APK descargado se elimina tras la instalación.
+
 ## v1.2.4 (03 ago 2026) — versión revisada (+11)
 
 ### Sincronización (corrección)

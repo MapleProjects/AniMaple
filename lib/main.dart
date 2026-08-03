@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'services/api_service.dart';
 import 'services/sync_service.dart';
 import 'services/notification_service.dart';
+import 'services/update_service.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
@@ -34,6 +35,21 @@ void main() {
       // Se pide al ARRANQUE (no al entrar a un capítulo): app recién instalada
       // debe tener todas las notificaciones habilitadas desde el comienzo.
       NotificationService.init();
+      // Actualización: consultar releases de GitHub. Si hay versión nueva,
+      // mostrar el diálogo Actualizar/Posponer (diálogo también accesible
+      // desde el botón-badge junto a la cuenta).
+      Future.delayed(const Duration(milliseconds: 2500), () async {
+        final hasUpdate = await UpdateService.checkForUpdate();
+        if (!hasUpdate) return;
+        final ctx = AniMapleApp.navigatorKey.currentContext;
+        if (ctx == null || !ctx.mounted) return;
+        final update = await UpdateService.showUpdateDialog(ctx);
+        if (update == true &&
+            AniMapleApp.navigatorKey.currentContext?.mounted == true) {
+          await UpdateService.downloadAndInstall(
+              AniMapleApp.navigatorKey.currentContext!);
+        }
+      });
     });
   }());
 
@@ -52,10 +68,14 @@ void main() {
 class AniMapleApp extends StatelessWidget {
   const AniMapleApp({super.key});
 
+  /// Navigator global para mostrar diálogos desde servicios (ej. actualización).
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'AniMaple',
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,

@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
 import '../widgets/sync_button.dart';
+import '../widgets/update_badge_button.dart';
 import 'detail_page.dart';
 import 'episode_page.dart';
 
@@ -68,7 +69,15 @@ class _HomePageState extends State<HomePage> {
         actions: const [
           Padding(
             padding: EdgeInsets.only(right: 8),
-            child: Center(child: SyncButton()),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  UpdateBadgeButton(),
+                  SyncButton(),
+                ],
+              ),
+            ),
           ),
         ],
       ),
