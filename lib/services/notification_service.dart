@@ -25,10 +25,51 @@ class NotificationService {
   static bool _mirrorRegistered = false;
 
   /// Pide el permiso de notificaciones. Se llama una vez al arrancar.
-  /// En Android 13+ abre el diálogo del sistema; en versiones anteriores es no-op.
+  /// En Android 13+ abre el diálogo del sistema SOLO si el usuario aún puede
+  /// decidir (nunca lo denegó con "Don't allow"); en versiones anteriores
+  /// es no-op.
   static Future<void> requestPermissionAtStartup() async {
     try {
       await _channel.invokeMethod('requestPermission');
+    } catch (_) {}
+  }
+
+  /// Estado real: "granted" | "permanent" (denegado, solo Ajustes) | "possible".
+  static Future<String> notificationStatus() async {
+    try {
+      final s = await _channel.invokeMethod<String>('notificationStatus');
+      return s ?? 'possible';
+    } catch (_) {
+      return 'possible';
+    }
+  }
+
+  /// Abre los ajustes de notificaciones de la app en Android. Útil cuando el
+  /// permiso fue denegado de forma permanente y solo queda reactivarlo desde
+  /// el sistema ("Don't allow" ya no permite re-prompt de la app).
+  static Future<void> openAppNotificationSettings() async {
+    try {
+      await _channel.invokeMethod('openAppNotificationSettings');
+    } catch (_) {}
+  }
+
+  /// true si la app ya está exenta de la optimización de batería (Doze).
+  static Future<bool> isBatteryOptimizationIgnored() async {
+    try {
+      return await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored') ??
+          true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Pide al usuario eximir a AniMaple de la optimización de batería. Abre el
+  /// diálogo del sistema (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS). Clave
+  /// para que el worker de capítulos corra también con el teléfono en reposo
+  /// (Doze), sin depender de Firebase ni de ningún backend.
+  static Future<void> requestBatteryOptimizationExemption() async {
+    try {
+      await _channel.invokeMethod('requestBatteryOptimizationExemption');
     } catch (_) {}
   }
 

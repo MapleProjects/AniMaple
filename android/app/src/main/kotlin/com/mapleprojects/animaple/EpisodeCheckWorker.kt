@@ -4,9 +4,11 @@ import android.content.Context
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import org.json.JSONArray
@@ -54,10 +56,77 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
         // Prefs privadas del worker para estado de notificación.
         private const val PREFS_NOTIF = "animaple_notif"
-        // Intervalo de revisión (WorkManager periódico tiene mínimo 15 min;
-        // usamos one-off auto-reagendada para alcanzar 10 min).
-        private const val INTERVAL_MIN = 10L
-        private const val WORK_NAME = "animaple_episode_check"
+        // Cadencia del trabajo periódico. Mínimo de PeriodicWorkRequest = 15 min.
+        private const val INTERVAL_MIN = 15L
+        // Nombre de la cadena one-off LEGACY (previo a v1.2.9): se cancela al
+        // migrar para que no queden dos mecanismos compitiendo.
+        private const val WORK_LEGACY = "animaple_episode_check"
+        // Trabajo periódico administrado por el sistema (sobrevive reinicio).
+        private const val WORK_NAME = "animaple_episode_check_periodic"
+        // Revisión inmediata (tras reinicio vía BootReceiver).
+        private const val WORK_NOW = "animaple_episode_check_now"
+
+        /**
+         * Agenda la revisión periódica de capítulos. PeriodicWorkRequest es
+         * persistente: WorkManager lo reagenda SOLO tras reinicios del
+         * dispositivo (contrato + RECEIVE_BOOT_COMPLETED), de modo que las
+         * notificaciones siguen llegando sin abrir la app. KEEP no duplica.
+         */
+        fun enqueuePeriodic(ctx: Context) {
+            try {
+                // Migración: matar la cadena one-off antigua (v1.2.2-v1.2.8).
+                WorkManager.getInstance(ctx).cancelUniqueWork(WORK_LEGACY)
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+                val request = PeriodicWorkRequestBuilder<EpisodeCheckWorker>(
+                    INTERVAL_MIN, TimeUnit.MINUTES
+                )
+                    .setConstraints(constraints)
+                    .build()
+                WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
+                    WORK_NAME,
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    request,
+                )
+                Log.d(TAG, "EpisodeCheck: periódico cada $INTERVAL_MIN min (KEEP)")
+            } catch (e: Exception) {
+                Log.e(TAG, "EpisodeCheck enqueuePeriodic error: ${e.message}")
+            }
+        }
+
+        /** Revisión inmediata. La usa BootReceiver tras un reinicio. */
+        fun enqueueImmediate(ctx: Context) {
+            try {
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+                val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
+                    .setConstraints(constraints)
+                    .build()
+                WorkManager.getInstance(ctx).enqueueUniqueWork(
+                    WORK_NOW,
+                    ExistingWorkPolicy.REPLACE,
+                    request,
+                )
+                Log.d(TAG, "EpisodeCheck: revisión inmediata encolada")
+            } catch (e: Exception) {
+                Log.e(TAG, "EpisodeCheck enqueueImmediate error: ${e.message}")
+            }
+        }
+
+        /** Detiene todos los ciclos (al vaciarse la lista de seguidos). */
+        fun cancel(ctx: Context) {
+            try {
+                val wm = WorkManager.getInstance(ctx)
+                wm.cancelUniqueWork(WORK_NAME)
+                wm.cancelUniqueWork(WORK_NOW)
+                wm.cancelUniqueWork(WORK_LEGACY)
+                Log.d(TAG, "EpisodeCheck cancelado (sin seguidos)")
+            } catch (e: Exception) {
+                Log.e(TAG, "EpisodeCheck cancel error: ${e.message}")
+            }
+        }
     }
 
     override suspend fun doWork(): Result {
@@ -100,7 +169,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
                     for ((slug, ep) in pending) {
                         val entry = followed.optJSONObject(slug)
                         val title = entry?.optString("title", ep.title) ?: ep.title
-                        Notifier.notifyNewEpisode(ctx, title, ep.number, slug)
+                        Notifier.notifyNewEpisode(ctx, title, ep.number, slug, ep.animeId)
                         lastNotified.put(slug, ep.number)
                         notified++
                         Log.d(TAG, "EpisodeCheck: notificado $slug ep ${ep.number}")
@@ -114,31 +183,9 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         } catch (e: Exception) {
             Log.e(TAG, "EpisodeCheck error: ${e.message}")
         }
-        // Siempre reagendar el siguiente ciclo (mientras haya seguidos).
-        reschedule(ctx)
+        // El ciclo continuo lo garantiza el PeriodicWorkRequest (WOK_NAME),
+        // administrado por el sistema: no hay auto-reagenda manual aquí.
         return Result.success()
-    }
-
-    /** One-off auto-reagendada cada 10 min. Alcanza intervalos que el
-     *  PeriodicWorkRequest de WorkManager no permite (<15 min). */
-    private fun reschedule(ctx: Context) {
-        try {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
-            val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
-                .setConstraints(constraints)
-                .setInitialDelay(INTERVAL_MIN, TimeUnit.MINUTES)
-                .build()
-            WorkManager.getInstance(ctx).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
-            Log.d(TAG, "EpisodeCheck reagendado en $INTERVAL_MIN min")
-        } catch (e: Exception) {
-            Log.e(TAG, "EpisodeCheck reschedule error: ${e.message}")
-        }
     }
 
     private data class RecentEp(
@@ -146,6 +193,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         val title: String,
         val number: Int,
         val createdMs: Long,
+        val animeId: Int,
     )
 
     private fun fetchRecentEpisodes(): List<RecentEp> {
@@ -193,7 +241,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             val idx = optInt(epIndices.opt(j))
             if (idx < 0 || idx >= data.length()) continue
             val rawEp = data.optJSONObject(idx) ?: continue
-            val number = optInt(rawEp.opt("number"))
+            val number = resolveIndexedInt(data, rawEp, "number")
             if (number <= 0) continue
             val mediaIdx = optInt(rawEp.opt("media"))
             if (mediaIdx < 0 || mediaIdx >= data.length()) continue
@@ -203,7 +251,8 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             if (slug.isEmpty() || title.isEmpty()) continue
             val created = resolveStr(data, rawEp, "createdAt")
             val createdMs = tsMillis(created)
-            out.add(RecentEp(slug, title, number, createdMs))
+            val animeId = resolveIndexedInt(data, rawMedia, "id")
+            out.add(RecentEp(slug, title, number, createdMs, animeId))
         }
         return out
     }
@@ -214,6 +263,29 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         return when (v) {
             is Number -> v.toInt()
             is String -> v.toIntOrNull() ?: 0
+            else -> 0
+        }
+    }
+
+    /**
+     * Resolución devalue de 1 salto para campos numéricos que son ÍNDICES
+     * hacia el valor real (number, id). Espejo de _resolveVal del Dart.
+     *
+     * CRÍTICO: en __data.json de SvelteKit el valor crudo de "number" no es
+     * el número de episodio, es un índice dentro de `data` (p. ej. `166` →
+     * data[166] = `5`). Leer el índice crudo producía avisos "Episodio 184"
+     * cuando el episodio real era el 5. Un solo salto resuelve el valor real.
+     */
+    private fun resolveIndexedInt(data: JSONArray, obj: JSONObject, key: String): Int {
+        val v = obj.opt(key) ?: return 0
+        if (v is String) return v.toIntOrNull() ?: 0
+        if (v !is Number) return 0
+        val idx = v.toInt()
+        if (idx !in 0 until data.length()) return 0
+        val inner = data.opt(idx)
+        return when (inner) {
+            is Number -> inner.toInt()
+            is String -> inner.toIntOrNull() ?: 0
             else -> 0
         }
     }

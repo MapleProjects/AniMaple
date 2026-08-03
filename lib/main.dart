@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'services/api_service.dart';
 import 'services/sync_service.dart';
 import 'services/notification_service.dart';
@@ -35,6 +36,79 @@ void main() {
       // Se pide al ARRANQUE (no al entrar a un capítulo): app recién instalada
       // debe tener todas las notificaciones habilitadas desde el comienzo.
       NotificationService.init();
+      // Si el permiso de notificaciones fue denegado de forma permanente
+      // (Android 13+: "Don't allow" no permite volver a preguntar), guiar una
+      // sola vez a Ajustes. Sin esto, un usuario que negó sin querer jamás
+      // recibe avisos de capítulos nuevos, ni con la app abierta ni cerrada.
+      Future.delayed(const Duration(milliseconds: 1500), () async {
+        final status = await NotificationService.notificationStatus();
+        if (status != 'permanent') return;
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getBool('notif_settings_prompted') ?? false) return;
+        await prefs.setBool('notif_settings_prompted', true);
+        final ctx = AniMapleApp.navigatorKey.currentContext;
+        if (ctx == null || !ctx.mounted) return;
+        await showDialog<void>(
+          context: ctx,
+          builder: (dctx) => AlertDialog(
+            title: const Text('Activa las notificaciones'),
+            content: const Text(
+              'AniMaple necesita permiso para avisarte cuando un anime de '
+              'tu lista estrena capítulo, incluso con la app cerrada.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dctx),
+                child: const Text('Ahora no'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dctx);
+                  NotificationService.openAppNotificationSettings();
+                },
+                child: const Text('Abrir ajustes'),
+              ),
+            ],
+          ),
+        );
+      });
+      // Optimización de batería (Doze): el worker de capítulos corre cada
+      // 15 min en segundo plano y tras reinicios. Si el sistema difiere el
+      // trabajo en reposo, los avisos se retrasan. Eximir a la app (una sola
+      // vez, dialog del sistema) la equipara a WhatsApp/Facebook.
+      Future.delayed(const Duration(milliseconds: 2400), () async {
+        final ignored = await NotificationService.isBatteryOptimizationIgnored();
+        if (ignored) return;
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getBool('battery_prompt_done') ?? false) return;
+        await prefs.setBool('battery_prompt_done', true);
+        final ctx = AniMapleApp.navigatorKey.currentContext;
+        if (ctx == null || !ctx.mounted) return;
+        await showDialog<void>(
+          context: ctx,
+          builder: (dctx) => AlertDialog(
+            title: const Text('Notificaciones en segundo plano'),
+            content: const Text(
+              'Para que los avisos de capítulos lleguen incluso con el '
+              'teléfono en reposo o tras reiniciarlo, permite que AniMaple '
+              'ignore la optimización de batería.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dctx),
+                child: const Text('No, gracias'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dctx);
+                  NotificationService.requestBatteryOptimizationExemption();
+                },
+                child: const Text('Activar'),
+              ),
+            ],
+          ),
+        );
+      });
       // Actualización: consultar releases de GitHub. Si hay versión nueva,
       // mostrar el diálogo Actualizar/Posponer (diálogo también accesible
       // desde el botón-badge junto a la cuenta).

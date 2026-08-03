@@ -15,21 +15,18 @@ import android.graphics.drawable.Icon
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.util.Rational
-import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
 
@@ -58,6 +55,7 @@ class MainActivity : FlutterActivity() {
         private const val TAG = "AniMaple"
         private const val MEDIA_CHANNEL_ID = "animaple_media_playback"
         private const val NOTIFICATION_ID = 1001
+        private const val PREFS_NOTIF = "animaple_notif"
         private const val ACTION_MEDIA_PLAY_PAUSE = "com.mapleprojects.animaple.MEDIA_PLAY_PAUSE"
         private const val ACTION_MEDIA_STOP = "com.mapleprojects.animaple.MEDIA_STOP"
     }
@@ -220,9 +218,21 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "requestPermission" -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1002)
-                    }
+                    requestNotificationPermission()
+                    result.success(true)
+                }
+                "notificationStatus" -> {
+                    result.success(notificationStatus())
+                }
+                "openAppNotificationSettings" -> {
+                    openNotificationSettings()
+                    result.success(true)
+                }
+                "isBatteryOptimizationIgnored" -> {
+                    result.success(isBatteryOptimizationIgnored())
+                }
+                "requestBatteryOptimizationExemption" -> {
+                    requestBatteryOptimizationExemption()
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -230,24 +240,106 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Primer disparo del ciclo de revisión. El Worker se auto-reagenda cada
-     *  10 min (patrón one-off: WorkManager periódico tiene mínimo 15 min, no
-     *  alcanza el intervalo deseado). Red requerida, duración segundos. */
+    /** Registra el seguimiento periódico de capítulos (15 min). El
+     *  PeriodicWorkRequest lo administra el sistema: sobrevive reinicios y
+     *  proceso muerto. KEEP: no se duplica en cada arranque. */
     private fun scheduleEpisodeCheck() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
-            .setConstraints(constraints)
-            .setInitialDelay(10, TimeUnit.MINUTES)
-            .build()
-        // REPLACE: no duplica; el worker reagenda el siguiente ciclo al terminar.
-        WorkManager.getInstance(this).enqueueUniqueWork(
-            "animaple_episode_check",
-            ExistingWorkPolicy.REPLACE,
-            request,
-        )
-        Log.d(TAG, "EpisodeCheck primer ciclo en 10 min")
+        EpisodeCheckWorker.enqueuePeriodic(this)
+    }
+
+    // ── Permiso de notificaciones (Android 13+ / POST_NOTIFICATIONS) ──
+    // Regla del sistema: si el usuario toca "Don't allow", el diálogo ya NO
+    // vuelve a aparecer y solo se reactiva desde Ajustes. Se guarda el
+    // resultado del request (1002) en prefs para distinguir "posible" (nunca
+    // respondió / swipe-away) de "permanente" (negó) sin consultar una API
+    // inestable. La app re-pide solo en "posible"; en "permanente" se guía
+    // a Ajustes desde Dart.
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (areNotificationsEnabled()) return
+            if (notificationStatus() != "possible") return
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                1002
+            )
+        }
+    }
+
+    /** "granted" | "permanent" | "possible" para que Dart decida qué hacer. */
+    private fun notificationStatus(): String {
+        if (areNotificationsEnabled()) return "granted"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val prefs = getSharedPreferences(PREFS_NOTIF, MODE_PRIVATE)
+            val requested = prefs.getBoolean("perm_requested", false)
+            val granted = prefs.getBoolean("perm_granted", false)
+            return if (requested && !granted) "permanent" else "possible"
+        }
+        return "granted"
+    }
+
+    private fun areNotificationsEnabled(): Boolean {
+        return (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .areNotificationsEnabled()
+    }
+
+    private fun openNotificationSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "openNotificationSettings error: ${e.message}")
+        }
+    }
+
+    // ── Optimización de batería (Doze) ──
+    // Si el dispositivo entra en Doze con la app en segundo plano, el trabajo
+    // periódico se difiere a ventanas de mantenimiento (pueden espaciarse
+    // mucho). Eximir a la app (Settings ACTION_REQUEST_IGNORE_BATTERY_
+    // OPTIMIZATIONS) permite que el worker corra con normalidad, como hacen
+    // WhatsApp/Facebook. Es un permiso especial (Play lo restringe a apps
+    // cuyo nucleo se ve perjudicado; esta app distribuye por GitHub).
+
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (isBatteryOptimizationIgnored()) return
+        try {
+            val intent = Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "requestBatteryOptimizationExemption error: ${e.message}")
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1002) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+            getSharedPreferences(PREFS_NOTIF, MODE_PRIVATE).edit()
+                .putBoolean("perm_requested", true)
+                .putBoolean("perm_granted", granted)
+                .apply()
+            Log.d(TAG, "POST_NOTIFICATIONS result: granted=$granted")
+            if (granted) Notifier.ensureNewEpisodeChannel(this)
+        }
     }
 
     /** Persiste el espejo {slug: titulo} de seguidos para que el Worker lo lea
@@ -255,11 +347,10 @@ class MainActivity : FlutterActivity() {
     private fun updateFollowedMirror(json: String) {
         val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
         prefs.edit().putString(EpisodeCheckWorker.KEY_FOLLOWED_JSON, json).apply()
-        // KEEP hace scheduleEpisodeCheck idempotente: no duplica si ya existe.
+        // KEEP hace el periódico idempotente: no se duplica si ya existe.
         scheduleEpisodeCheck()
         if (json == "{}" || json.isEmpty()) {
-            WorkManager.getInstance(this).cancelUniqueWork("animaple_episode_check")
-            Log.d(TAG, "EpisodeCheck cancelado (sin seguidos)")
+            EpisodeCheckWorker.cancel(this)
         }
     }
 
