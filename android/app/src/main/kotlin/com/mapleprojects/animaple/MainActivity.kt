@@ -21,9 +21,9 @@ import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -183,23 +183,24 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Agenda la revisión periódica de capítulos nuevos (mín 15 min, red requerida,
-     *  duración 10s). WorkManager la persiste y la re-programa tras reinicio. */
+    /** Primer disparo del ciclo de revisión. El Worker se auto-reagenda cada
+     *  10 min (patrón one-off: WorkManager periódico tiene mínimo 15 min, no
+     *  alcanza el intervalo deseado). Red requerida, duración segundos. */
     private fun scheduleEpisodeCheck() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-        val request = PeriodicWorkRequestBuilder<EpisodeCheckWorker>(15, TimeUnit.MINUTES)
+        val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
             .setConstraints(constraints)
-            .setInitialDelay(1, TimeUnit.MINUTES)
+            .setInitialDelay(10, TimeUnit.MINUTES)
             .build()
-        // KEEP: no duplica si ya está agendado (por ejemplo tras reinicio).
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+        // REPLACE: no duplica; el worker reagenda el siguiente ciclo al terminar.
+        WorkManager.getInstance(this).enqueueUniqueWork(
             "animaple_episode_check",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE,
             request,
         )
-        Log.d(TAG, "EpisodeCheck agendado cada 15 min")
+        Log.d(TAG, "EpisodeCheck primer ciclo en 10 min")
     }
 
     /** Persiste el espejo {slug: titulo} de seguidos para que el Worker lo lea

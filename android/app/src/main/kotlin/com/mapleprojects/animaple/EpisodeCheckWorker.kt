@@ -2,7 +2,12 @@ package com.mapleprojects.animaple
 
 import android.content.Context
 import android.util.Log
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,6 +18,7 @@ import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.TimeUnit
 
 /**
  * Worker periódico (WorkManager) que revisa si algún anime seguido estrenó
@@ -26,7 +32,11 @@ import java.util.TimeZone
  * - Filtro temporal: solo notifica si createdAt(episodio) > followedAt(anime).
  *   Seguir un anime viejo no dispara nada; solo cuentan estrenos posteriores.
  * - Anime finalizado = jamás aparece en recientes → cero procesamiento.
- * - Toppe: máximo 5 notificaciones por ciclo (evita inundar con lotes).
+ * - Sin límite de avisos por ciclo: notifica TODOS los estrenos nuevos de la
+ *   ventana (10 min). El control anti-duplicado es por número de capítulo
+ *   en lastNotified, no por tope de cantidad.
+ * - Revisión cada 10 min mediante one-off auto-reagendada (el WorkManager
+ *   periódico tiene mínimo 15 min y no alcanza este intervalo).
  * - Sin seguidos o sin red → no consume recursos.
  */
 class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
@@ -44,13 +54,15 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
         // Prefs privadas del worker para estado de notificación.
         private const val PREFS_NOTIF = "animaple_notif"
-        // Toppe de notificaciones por ciclo.
-        private const val MAX_PER_CYCLE = 5
+        // Intervalo de revisión (WorkManager periódico tiene mínimo 15 min;
+        // usamos one-off auto-reagendada para alcanzar 10 min).
+        private const val INTERVAL_MIN = 10L
+        private const val WORK_NAME = "animaple_episode_check"
     }
 
     override suspend fun doWork(): Result {
-        return try {
-            val ctx = applicationContext
+        val ctx = applicationContext
+        try {
             val prefs = ctx.getSharedPreferences(FLUTTER_PREFS, Context.MODE_PRIVATE)
             val followedJson = prefs.getString(KEY_FOLLOWED_JSON, null)
             if (followedJson.isNullOrEmpty() || followedJson == "{}") {
@@ -61,50 +73,71 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             if (followed.length() == 0) return Result.success()
 
             val recent = fetchRecentEpisodes()
-            if (recent.isEmpty()) return Result.success()
+            if (recent.isNotEmpty()) {
+                val selPrefs = ctx.getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE)
+                val lastNotifiedRaw = selPrefs.getString(KEY_LAST_NOTIFIED, "{}")
+                val lastNotified = JSONObject(lastNotifiedRaw ?: "{}")
 
-            val selPrefs = ctx.getSharedPreferences(PREFS_NOTIF, Context.MODE_PRIVATE)
-            val lastNotifiedRaw = selPrefs.getString(KEY_LAST_NOTIFIED, "{}")
-            val lastNotified = JSONObject(lastNotifiedRaw ?: "{}")
-
-            // Pendientes por anime (máx 1 capítulo; se queda el más reciente).
-            val pending = LinkedHashMap<String, RecentEp>()
-            for (ep in recent) {
-                if (pending.size >= MAX_PER_CYCLE) break
-                if (!followed.has(ep.slug)) continue
-                val entry = followed.optJSONObject(ep.slug) ?: continue
-                val followedAt = tsMillis(entry.optString("followedAt", ""))
-                // Capítulo anterior al momento de seguir → ignorar.
-                if (followedAt > 0 && ep.createdMs <= followedAt) continue
-                val known = lastNotified.optInt(ep.slug, 0)
-                if (ep.number > known) {
-                    val existing = pending[ep.slug]
-                    if (existing == null || ep.number > existing.number) {
-                        pending[ep.slug] = ep
+                // Sin límite: pendientes por anime (máx 1; se queda el más reciente).
+                val pending = LinkedHashMap<String, RecentEp>()
+                for (ep in recent) {
+                    if (!followed.has(ep.slug)) continue
+                    val entry = followed.optJSONObject(ep.slug) ?: continue
+                    val followedAt = tsMillis(entry.optString("followedAt", ""))
+                    // Capítulo anterior al momento de seguir → ignorar.
+                    if (followedAt > 0 && ep.createdMs <= followedAt) continue
+                    val known = lastNotified.optInt(ep.slug, 0)
+                    if (ep.number > known) {
+                        val existing = pending[ep.slug]
+                        if (existing == null || ep.number > existing.number) {
+                            pending[ep.slug] = ep
+                        }
                     }
                 }
-            }
 
-            if (pending.isEmpty()) {
-                Log.d(TAG, "EpisodeCheck: sin novedades")
-                return Result.success()
+                if (pending.isNotEmpty()) {
+                    var notified = 0
+                    for ((slug, ep) in pending) {
+                        val entry = followed.optJSONObject(slug)
+                        val title = entry?.optString("title", ep.title) ?: ep.title
+                        Notifier.notifyNewEpisode(ctx, title, ep.number, slug)
+                        lastNotified.put(slug, ep.number)
+                        notified++
+                        Log.d(TAG, "EpisodeCheck: notificado $slug ep ${ep.number}")
+                    }
+                    selPrefs.edit().putString(KEY_LAST_NOTIFIED, lastNotified.toString()).apply()
+                    Log.d(TAG, "EpisodeCheck: $notified notificación(es)")
+                } else {
+                    Log.d(TAG, "EpisodeCheck: sin novedades")
+                }
             }
-
-            var notified = 0
-            for ((slug, ep) in pending) {
-                val entry = followed.optJSONObject(slug)
-                val title = entry?.optString("title", ep.title) ?: ep.title
-                Notifier.notifyNewEpisode(ctx, title, ep.number, slug)
-                lastNotified.put(slug, ep.number)
-                notified++
-                Log.d(TAG, "EpisodeCheck: notificado $slug ep ${ep.number}")
-            }
-            selPrefs.edit().putString(KEY_LAST_NOTIFIED, lastNotified.toString()).apply()
-            Log.d(TAG, "EpisodeCheck: $notified notificación(es)")
-            Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "EpisodeCheck error: ${e.message}")
-            Result.retry()
+        }
+        // Siempre reagendar el siguiente ciclo (mientras haya seguidos).
+        reschedule(ctx)
+        return Result.success()
+    }
+
+    /** One-off auto-reagendada cada 10 min. Alcanza intervalos que el
+     *  PeriodicWorkRequest de WorkManager no permite (<15 min). */
+    private fun reschedule(ctx: Context) {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
+                .setConstraints(constraints)
+                .setInitialDelay(INTERVAL_MIN, TimeUnit.MINUTES)
+                .build()
+            WorkManager.getInstance(ctx).enqueueUniqueWork(
+                WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+            Log.d(TAG, "EpisodeCheck reagendado en $INTERVAL_MIN min")
+        } catch (e: Exception) {
+            Log.e(TAG, "EpisodeCheck reschedule error: ${e.message}")
         }
     }
 

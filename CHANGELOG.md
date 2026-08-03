@@ -1,5 +1,16 @@
 # AniMaple — Registro de cambios
 
+## v1.2.4 (03 ago 2026)
+
+### Notificaciones
+
+- **Revisión cada 10 minutos**: los nuevos capítulos se detectan con mayor
+  frecuencia. Se usa un trabajo que se reprograma solo (el mínimo del sistema
+  para tareas periódicas es 15 min, por eso se agenda manualmente).
+- **Sin límite de avisos**: se notifica cada estreno nuevo que aparezca en la
+  ventana. Ningún capítulo deja de avisarse; la protección contra repetir es
+  por número de capítulo, no por tope de cantidad.
+
 ## v1.2.3 (02 ago 2026)
 
 ### Notificaciones (optimización)
