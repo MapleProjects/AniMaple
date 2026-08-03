@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v1.2.7 (03 ago 2026) — versión revisada (+15)
+
+### Actualización automática (corrección)
+
+- **Notas de la actualización legibles**: el texto con los cambios del release
+  se muestra correctamente (encabezados, listas y negritas), ya no aparece
+  el código de formato.
+
 ## v1.2.7 (03 ago 2026)
 
 ### Reproductor (ajuste)

@@ -260,17 +260,15 @@ class UpdateService {
                 padding: const EdgeInsets.only(top: 10),
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(10),
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFF110e1a),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: const Color(0xFF2a2438)),
                   ),
-                  child: Text(
-                    info!.notes!,
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF8f86a8)),
+                  child: SingleChildScrollView(
+                    child: _MarkdownNotes(info!.notes!),
                   ),
                 ),
               ),
@@ -484,5 +482,91 @@ class _ResumeAwaiter extends WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       if (!_completer.isCompleted) _completer.complete();
     }
+  }
+}
+
+/// Renderiza el markdown de las notas del release como texto legible
+/// (headers, lista de puntos, negrita). Sin dependencias externas.
+class _MarkdownNotes extends StatelessWidget {
+  const _MarkdownNotes(this._text);
+
+  final String _text;
+
+  // Extrae los segmentos de una línea y estilo bold para los `**...**`.
+  static List<TextSpan> _inlineSpans(String line) {
+    const bold = TextStyle(fontSize: 12, color: Color(0xFFe8e4f0), fontWeight: FontWeight.w700, height: 1.35);
+    final spans = <TextSpan>[];
+    final regex = RegExp(r'\*\*(.+?)\*\*');
+    var last = 0;
+    for (final m in regex.allMatches(line)) {
+      if (m.start > last) spans.add(TextSpan(text: line.substring(last, m.start)));
+      spans.add(TextSpan(text: m.group(1), style: bold));
+      last = m.end;
+    }
+    if (last < line.length) spans.add(TextSpan(text: line.substring(last)));
+    if (spans.isEmpty) spans.add(TextSpan(text: line));
+    return spans;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = _text.split('\n');
+    final children = <Widget>[];
+
+    for (final raw in lines) {
+      final line = raw.trimRight();
+      if (line.trim().isEmpty) {
+        children.add(const SizedBox(height: 6));
+        continue;
+      }
+      // Header nivel 2: "## Título"
+      if (line.startsWith('## ')) {
+        children.add(Padding(
+          padding: const EdgeInsets.only(top: 6, bottom: 3),
+          child: Text(
+            line.substring(3).trim(),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFFe8e4f0)),
+          ),
+        ));
+        continue;
+      }
+      // Header nivel 3: "### Subtítulo"
+      if (line.startsWith('### ')) {
+        children.add(Padding(
+          padding: const EdgeInsets.only(top: 6, bottom: 2),
+          child: Text(
+            line.substring(4).trim(),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFa78bfa)),
+          ),
+        ));
+        continue;
+      }
+      // Lista: "- ítem"
+      if (line.trimLeft().startsWith('- ')) {
+        children.add(RichText(
+          text: TextSpan(
+            style: const TextStyle(fontSize: 12, color: Color(0xFFb8b0cd), height: 1.35),
+            children: [
+              const TextSpan(text: '•  ', style: TextStyle(color: Color(0xFF8b5cf6), fontWeight: FontWeight.w900)),
+              ..._inlineSpans(line.trimLeft().substring(2)),
+            ],
+          ),
+        ));
+        continue;
+      }
+      // Párrafo plano
+      children.add(RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 12, color: Color(0xFFb8b0cd), height: 1.35),
+          children: _inlineSpans(line),
+        ),
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
+    );
   }
 }
