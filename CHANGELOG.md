@@ -1,5 +1,23 @@
 # AniMaple — Registro de cambios
 
+## v1.2.7 (03 ago 2026)
+
+### Reproductor (ajuste)
+
+- **Reconexión cada 8 segundos**: el intento de restaurar la reproducción tras
+  una pérdida de internet ahora espera 8 segundos entre reintentos, para dar
+  al video tiempo de cargar y reproducirse (antes cada segundo nunca llegaba
+  a hacerlo).
+- **Aviso claro**: al perder la conexión se muestra "Conexión perdida, se
+  está restaurando la reproducción".
+
+### Actualización automática (ajuste)
+
+- **Permiso de instalación antes de descargar**: al tocar Actualizar se pide
+  primero el permiso de "instalar apps desconocidas" si hace falta, y solo
+  después comienza la descarga. Ya no pasa que se descargue el APK, se pida el
+  permiso y haya que volver a descargarlo al regresar.
+
 ## v1.2.6 (03 ago 2026)
 
 ### Reproductor (corrección)

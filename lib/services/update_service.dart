@@ -298,10 +298,90 @@ class UpdateService {
     );
   }
 
+  /// Comprueba (y pide si falta) el permiso de instalar apps desconocidas
+  /// ANTES de descargar, para que no haya que volver a bajar el APK si era la
+  /// primera vez. Devuelve true si se puede proceder a descargar.
+  static Future<bool> ensureInstallPermission(BuildContext context) async {
+    bool canInstall;
+    try {
+      canInstall = await _channel
+              .invokeMethod<bool>('canRequestPackageInstalls') ??
+          true;
+    } catch (_) {
+      // Plataforma sin permiso de instalación (desktop/web) → continuar.
+      return true;
+    }
+    if (canInstall) return true;
+    if (!context.mounted) return false;
+
+    // Pedir el permiso ahora, antes de descargar.
+    final proceed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16121f),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.security, color: Color(0xFFa78bfa), size: 30),
+        title: const Text(
+          'Permiso para instalar',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0)),
+        ),
+        content: const Text(
+          'Para instalar la actualización, AniMaple necesita permiso para '
+          'instalar apps desconocidas. Se abrirá la configuración del sistema.',
+          style: TextStyle(fontSize: 13, color: Color(0xFFb8b0cd)),
+        ),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8b5cf6),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Permitir', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !context.mounted) return false;
+
+    // Abrir los ajustes de "Instalar apps desconocidas".
+    try {
+      await _channel.invokeMethod('requestInstallPermission');
+    } catch (_) {}
+
+    // Esperar a que el usuario vuelva de los ajustes y re-verificar.
+    final completer = Completer<void>();
+    final awaiter = _ResumeAwaiter(completer);
+    WidgetsBinding.instance.addObserver(awaiter);
+    try {
+      await completer.future.timeout(const Duration(seconds: 60));
+    } catch (_) {}
+    WidgetsBinding.instance.removeObserver(awaiter);
+
+    try {
+      return await _channel
+              .invokeMethod<bool>('canRequestPackageInstalls') ??
+          false;
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// Descarga + instalación con diálogo de progreso.
   static Future<void> downloadAndInstall(BuildContext context) async {
     final info = _pending;
     if (info == null) return;
+
+    // Permiso de instalación ANTES de descargar (evita re-descargar el APK
+    // si es la primera vez y hay que ir a habilitar "fuentes desconocidas").
+    final canInstall = await ensureInstallPermission(context);
+    if (!canInstall || !context.mounted) return;
 
     final progress = ValueNotifier<double>(0);
     final errorMsg = ValueNotifier<String?>(null);
@@ -388,6 +468,21 @@ class UpdateService {
       if (done.value && errorMsg.value == null) {
         if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
       }
+    }
+  }
+}
+
+/// Observa el ciclo de vida de la app para detectar cuándo el usuario vuelve
+/// de los ajustes de "Instalar apps desconocidas" a la app.
+class _ResumeAwaiter extends WidgetsBindingObserver {
+  _ResumeAwaiter(this._completer);
+
+  final Completer<void> _completer;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (!_completer.isCompleted) _completer.complete();
     }
   }
 }

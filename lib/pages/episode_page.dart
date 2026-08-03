@@ -368,7 +368,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() {});
 
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    // Intento cada 8 s: a 1 s el video apenas llegaba a cargar cuando ya se
+    // relanzaba el siguiente intento, así que nunca llegaba a reproducirse.
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 8), (_) {
       if (!mounted || _player.disposed) {
         _reconnectTimer?.cancel();
         return;
@@ -819,7 +821,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'Se está restaurando el video donde iba',
+                  'Conexión perdida, se está restaurando la reproducción',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],

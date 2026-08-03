@@ -41,6 +41,20 @@ object Updater {
         return dir
     }
 
+    /** true si la app ya tiene permiso para instalar apps desconocidas
+     *  (Android 8+ pide habilitarlo por-app; en versiones antiguas siempre). */
+    fun canRequestPackageInstalls(ctx: Context): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            ctx.packageManager.canRequestPackageInstalls()
+    }
+
+    /** Abre los ajustes para habilitar "Instalar apps desconocidas" (este app). */
+    fun requestInstallPermission(ctx: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            this.requestInstallPermissionImpl(ctx)
+        }
+    }
+
     /** Lanza el instalador del sistema para [apk]. Si la app no tiene permiso
      *  de "orígenes desconocidos" (Android 8+), lo pide primero. */
     fun install(ctx: Context, apk: File) {
@@ -52,13 +66,13 @@ object Updater {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !ctx.packageManager.canRequestPackageInstalls()
         ) {
-            requestInstallPermission(ctx)
+            requestInstallPermissionImpl(ctx)
             return
         }
         launchInstaller(ctx, apk)
     }
 
-    private fun requestInstallPermission(ctx: Context) {
+    private fun requestInstallPermissionImpl(ctx: Context) {
         try {
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,

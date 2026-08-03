@@ -177,6 +177,18 @@ class MainActivity : FlutterActivity() {
                 "getUpdatesDir" -> {
                     result.success(Updater.updatesDir(this).absolutePath)
                 }
+                "canRequestPackageInstalls" -> {
+                    // Consulta si la app puede instalar APK (permitir fuentes
+                    // desconocidas). Se consulta ANTES de descargar para pedir
+                    // el permiso a tiempo y no tener que re-descargar.
+                    result.success(Updater.canRequestPackageInstalls(this))
+                }
+                "requestInstallPermission" -> {
+                    // Abre los ajustes para habilitar "Instalar apps
+                    // desconocidas" para esta app.
+                    Updater.requestInstallPermission(this)
+                    result.success(true)
+                }
                 "installApk" -> {
                     val path = call.argument<String>("path")
                     if (path == null) {
