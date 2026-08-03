@@ -42,11 +42,20 @@ class NotificationService {
 
   /// Re-escribe el espejo de seguidos en nativo. Se llama tras cualquier
   /// cambio de la lista de seguidos (follow/unfollow/merge desde la nube).
+  ///
+  /// Estructura: {slug: {"title": ..., "followedAt": ...}}. El Worker usa
+  /// followedAt para no notificar capítulos anteriores al momento de seguir:
+  /// si sigues un anime que ya lleva 200 capítulos no llega ninguna
+  /// notificación, solo los que estrenen después.
   static Future<void> updateFollowedMirror() async {
     try {
       final followed = await ApiService.fetchFollowed();
-      final mirror = <String, String>{
-        for (final FollowedAnime f in followed) f.animeSlug: f.animeTitle,
+      final mirror = <String, dynamic>{
+        for (final FollowedAnime f in followed)
+          f.animeSlug: {
+            'title': f.animeTitle,
+            'followedAt': f.followedAt,
+          },
       };
       await _channel.invokeMethod('updateFollowedMirror', {
         'json': jsonEncode(mirror),

@@ -10,12 +10,24 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Worker periódico (WorkManager) que revisa si algún anime seguido estrenó
  * un capítulo nuevo y lo notifica. Corre aunque la app esté cerrada y se
  * reprograma automáticamente tras un reinicio (contrato de androidx.work).
- * Sin seguidos o sin red → no consume recursos.
+ *
+ * OPTIMIZACIÓN (mínimo procesamiento):
+ * - Un solo GET al recientes del sitio (~20 episodios). NO se itera la lista
+ *   de seguidos (900 animes no multiplican el trabajo): el coste es
+ *   O(recientes), y cada lookup es O(1) sobre el mapa.
+ * - Filtro temporal: solo notifica si createdAt(episodio) > followedAt(anime).
+ *   Seguir un anime viejo no dispara nada; solo cuentan estrenos posteriores.
+ * - Anime finalizado = jamás aparece en recientes → cero procesamiento.
+ * - Toppe: máximo 5 notificaciones por ciclo (evita inundar con lotes).
+ * - Sin seguidos o sin red → no consume recursos.
  */
 class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {
@@ -24,15 +36,16 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         private const val TAG = "AniMaple"
         // Mismo nombre de prefs del plugin shared_preferences (backend legacy).
         private const val FLUTTER_PREFS = "FlutterSharedPreferences"
-        // Clave espejo JSON {slug: titulo} mantenida por Dart (NotifService).
+        // Clave espejo JSON {slug: {title, followedAt}} mantenida por Dart.
         const val KEY_FOLLOWED_JSON = "notif_followed_json"
         private const val KEY_LAST_NOTIFIED = "notif_last_notified"
-        const val CHANNEL_NEW_EP = "animaple_new_episodes"
         private const val BASE = "https://animeav1.com"
         private const val UA =
             "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
         // Prefs privadas del worker para estado de notificación.
         private const val PREFS_NOTIF = "animaple_notif"
+        // Toppe de notificaciones por ciclo.
+        private const val MAX_PER_CYCLE = 5
     }
 
     override suspend fun doWork(): Result {
@@ -54,15 +67,20 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             val lastNotifiedRaw = selPrefs.getString(KEY_LAST_NOTIFIED, "{}")
             val lastNotified = JSONObject(lastNotifiedRaw ?: "{}")
 
+            // Pendientes por anime (máx 1 capítulo; se queda el más reciente).
             val pending = LinkedHashMap<String, RecentEp>()
             for (ep in recent) {
-                if (followed.has(ep.slug)) {
-                    val known = lastNotified.optInt(ep.slug, 0)
-                    if (ep.number > known) {
-                        val existing = pending[ep.slug]
-                        if (existing == null || ep.number > existing.number) {
-                            pending[ep.slug] = ep
-                        }
+                if (pending.size >= MAX_PER_CYCLE) break
+                if (!followed.has(ep.slug)) continue
+                val entry = followed.optJSONObject(ep.slug) ?: continue
+                val followedAt = tsMillis(entry.optString("followedAt", ""))
+                // Capítulo anterior al momento de seguir → ignorar.
+                if (followedAt > 0 && ep.createdMs <= followedAt) continue
+                val known = lastNotified.optInt(ep.slug, 0)
+                if (ep.number > known) {
+                    val existing = pending[ep.slug]
+                    if (existing == null || ep.number > existing.number) {
+                        pending[ep.slug] = ep
                     }
                 }
             }
@@ -74,7 +92,8 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
 
             var notified = 0
             for ((slug, ep) in pending) {
-                val title = followed.optString(slug, ep.title)
+                val entry = followed.optJSONObject(slug)
+                val title = entry?.optString("title", ep.title) ?: ep.title
                 Notifier.notifyNewEpisode(ctx, title, ep.number, slug)
                 lastNotified.put(slug, ep.number)
                 notified++
@@ -93,6 +112,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         val slug: String,
         val title: String,
         val number: Int,
+        val createdMs: Long,
     )
 
     private fun fetchRecentEpisodes(): List<RecentEp> {
@@ -148,14 +168,15 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             val slug = resolveStr(data, rawMedia, "slug")
             val title = resolveStr(data, rawMedia, "title")
             if (slug.isEmpty() || title.isEmpty()) continue
-            out.add(RecentEp(slug, title, number))
+            val created = resolveStr(data, rawEp, "createdAt")
+            val createdMs = tsMillis(created)
+            out.add(RecentEp(slug, title, number, createdMs))
         }
         return out
     }
 
     // ── Resolutores devalue (espejo de api_service.dart) ──
 
-    /** Convierte a int un valor que puede ser double/int/string. */
     private fun optInt(v: Any?): Int {
         return when (v) {
             is Number -> v.toInt()
@@ -164,10 +185,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         }
     }
 
-    /**
-     * Resuelve cadena de índices: media['slug'] puede ser 12 → data[12] = "algo"
-     * o 12 → data[12] = 45 → data[45] = "algo" (espejo de _resolveVal).
-     */
+    /** Resuelve cadena de índices (espejo de _resolveVal). */
     private fun resolveStr(data: JSONArray, obj: JSONObject, key: String): String {
         var v = obj.opt(key)
         var guard = 6
@@ -184,5 +202,25 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
             return ""
         }
         return ""
+    }
+
+    /** "2026-08-02 20:15:17.307125+00" | "2026-08-02T15:00:00.000Z" → epoch ms (UTC). */
+    private fun tsMillis(s: String): Long {
+        if (s.isEmpty()) return 0L
+        return try {
+            val clean = s.trim().replace('T', ' ')
+            val end = clean.indexOf('.')
+            val datePart = if (end > 0) clean.substring(0, end) else clean
+            // formato esperado: yyyy-MM-dd HH:mm[:ss]
+            val fmt = if (datePart.length > 16)
+                SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            else
+                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+            fmt.timeZone = TimeZone.getTimeZone("UTC")
+            fmt.parse(datePart).time
+        } catch (e: Exception) {
+            Log.w(TAG, "tsMillis parse falló: '$s'")
+            0L
+        }
     }
 }

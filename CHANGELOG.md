@@ -1,5 +1,18 @@
 # AniMaple — Registro de cambios
 
+## v1.2.3 (02 ago 2026)
+
+### Notificaciones (optimización)
+
+- **Solo capítulos posteriores a tu seguimiento**: si sigues un anime que ya
+  lleva muchos capítulos, no llegan avisos por lo que ya se emitió — solo por
+  los que se estrenen después del momento en que lo agregaste a Mi lista.
+- **Mínimo uso de recursos**: la revisión procesa únicamente los episodios
+  recientes del catálogo (una sola consulta), sin importar cuántos animes
+  sigas. Los animes finalizados no se procesan en absoluto.
+- **Sin saturación**: como máximo 5 avisos por ciclo; nunca se inunda la
+  bandeja de notificaciones.
+
 ## v1.2.2 (02 ago 2026)
 
 ### Correcciones
