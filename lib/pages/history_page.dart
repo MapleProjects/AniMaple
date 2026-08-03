@@ -41,7 +41,7 @@ class HistoryPageState extends State<HistoryPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF110e1a),
         title: const Text('Eliminar del historial', style: TextStyle(color: Color(0xFFe8e4f0))),
-        content: Text('¿Eliminar "${h.animeTitle}" del historial?', style: const TextStyle(color: Color(0xFFa99fc0))),
+        content: Text('¿Eliminar el capítulo ${h.episodeNumber} de "${h.animeTitle}" del historial?', style: const TextStyle(color: Color(0xFFa99fc0))),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -55,7 +55,7 @@ class HistoryPageState extends State<HistoryPage> {
       ),
     );
     if (confirm == true) {
-      await ApiService.deleteHistory(h.animeSlug);
+      await ApiService.deleteHistory(h.animeSlug, h.episodeNumber);
       _load();
     }
   }

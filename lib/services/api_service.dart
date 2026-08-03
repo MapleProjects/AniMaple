@@ -6,6 +6,7 @@ import 'package:http/io_client.dart' as http_io;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
 import 'sync_service.dart';
+import 'notification_service.dart';
 
 class ApiService {
   /// Safe int extraction — handles double/int/string from devalue format.
@@ -194,6 +195,20 @@ class ApiService {
   static String _thumbnailUrl(int id) => '$_cdn/thumbnails/$id.jpg';
   static String _backdropUrl(int id) => '$_cdn/backdrops/$id.jpg';
 
+  /// Decodifica respuestas JSON como UTF-8. `resp.body` usa latin1 por
+  /// defecto cuando el servidor no declara charset → rompe tildes/ñ. Leer
+  /// `bodyBytes` y decodificar UTF-8 explícitamente las preserva.
+  static Map<String, dynamic> _jsonFrom(http.Response resp) {
+    try {
+      final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return decoded.cast<String, dynamic>();
+      return {};
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
   // ── Recent episodes ─────────────────────────────────
 
   static Future<List<RecentEpisode>> fetchRecentEpisodes() async {
@@ -202,7 +217,7 @@ class ApiService {
         Uri.parse('$_base/__data.json'),
         headers: _headers,
       );
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = _jsonFrom(resp);
       final data = _getMainData(json);
       if (data == null) return [];
 
@@ -285,7 +300,7 @@ class ApiService {
         ).replace(queryParameters: {'search': query}),
         headers: _headers,
       );
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = _jsonFrom(resp);
       final data = _getMainData(json);
       if (data == null) return [];
 
@@ -310,7 +325,7 @@ class ApiService {
         Uri.parse('$_base/horario/__data.json'),
         headers: _headers,
       );
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = _jsonFrom(resp);
       final nodes = json['nodes'] as List? ?? [];
 
       for (final node in nodes) {
@@ -344,7 +359,7 @@ class ApiService {
         Uri.parse('$_base/media/$slug/__data.json'),
         headers: _headers,
       );
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = _jsonFrom(resp);
       final data = _getMainData(json);
       if (data == null) throw Exception('No data');
 
@@ -420,7 +435,7 @@ class ApiService {
         Uri.parse('$_base/media/$animeSlug/$episodeNumber/__data.json'),
         headers: _headers,
       );
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final json = _jsonFrom(resp);
       final data = _getNodeWithKey(json, 'episode') ?? _getMainData(json);
       if (data == null) throw Exception('No data');
 
@@ -611,21 +626,21 @@ class ApiService {
     SyncService.notifyLocalChanged();
   }
 
-  static Future<void> deleteHistory(String animeSlug) async {
+  /// Elimina SOLO el capítulo [episodeNumber] del anime [animeSlug] del
+  /// historial, dejando intactos los demás capítulos del mismo anime.
+  /// Escribe un tombstone con clave `slug#episodio` para que el sync
+  /// mantenga el borrado en todos los dispositivos.
+  static Future<void> deleteHistory(String animeSlug, int episodeNumber) async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('history') ?? [];
-    // Tombstone por cada capítulo borrado: el sync no los resucitará.
+    // Tombstone por el capítulo borrado: el sync no lo resucitará.
     final deleted = await fetchDeletedHistory();
     final now = DateTime.now().toUtc().toIso8601String();
-    for (final s in raw) {
-      final j = jsonDecode(s) as Map<String, dynamic>;
-      if (j['anime_slug'] == animeSlug) {
-        deleted['$animeSlug#${j['episode_number']}'] = now;
-      }
-    }
+    deleted['$animeSlug#$episodeNumber'] = now;
     raw.removeWhere((s) {
       final j = jsonDecode(s) as Map<String, dynamic>;
-      return j['anime_slug'] == animeSlug;
+      return j['anime_slug'] == animeSlug &&
+          j['episode_number'] == episodeNumber;
     });
     await prefs.setStringList('history', raw);
     await saveDeletedHistory(deleted);
@@ -722,6 +737,7 @@ class ApiService {
     );
     await prefs.setStringList('followed', raw);
     SyncService.notifyLocalChanged();
+    NotificationService.updateFollowedMirror();
   }
 
   static Future<bool> toggleFollow(
@@ -749,6 +765,7 @@ class ApiService {
     raw.removeWhere((s) => (jsonDecode(s) as Map)['anime_id'] == animeId);
     await prefs.setStringList('followed', raw);
     SyncService.notifyLocalChanged();
+    NotificationService.updateFollowedMirror();
   }
 
   /// Reemplaza TODO el estado local (historial + favoritos) de una vez.
@@ -785,6 +802,7 @@ class ApiService {
           )
           .toList(),
     );
+    NotificationService.updateFollowedMirror();
   }
 
   // ── Helpers ─────────────────────────────────────────

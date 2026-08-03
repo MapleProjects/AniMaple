@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/api_service.dart';
 import 'services/sync_service.dart';
+import 'services/notification_service.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
@@ -29,6 +30,10 @@ void main() {
       SyncService.startAutoSync();
       SyncService.watchConnectivity();
       SyncService.attemptRestoreAndSync();
+      // Notificaciones: permiso + agendado del worker + espejo de seguidos.
+      // Se pide al ARRANQUE (no al entrar a un capítulo): app recién instalada
+      // debe tener todas las notificaciones habilitadas desde el comienzo.
+      NotificationService.init();
     });
   }());
 

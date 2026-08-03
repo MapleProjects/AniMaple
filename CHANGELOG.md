@@ -1,5 +1,27 @@
 # AniMaple — Registro de cambios
 
+## v1.2.2 (02 ago 2026)
+
+### Correcciones
+
+- **Borrado por capítulo**: eliminar un capítulo del historial ya no borra
+  todo el anime; solo quita ese capítulo y deja el resto intactos.
+- **Tildes corregidas**: los títulos con acentos/ñ volvían distorsionados
+  (mojibake) porque las respuestas JSON se decodificaban como latin1. Ahora
+  se decodifican como UTF-8, los títulos se muestran correctos en todas las
+  pantallas y diálogos.
+
+### Notificaciones
+
+- **Permiso al arranque**: la app pide permiso de notificaciones al abrirse
+  por primera vez, no al reproducir un capítulo.
+- **Nuevos capítulos de tu lista**: al estrenarse un episodio de un anime
+  que sigues, llega una notificación. La revisión corre en segundo plano
+  (WorkManager) cada 15 min solo si hay red y hay seguidos; resiste cierres
+  de la app y reinicios del dispositivo.
+- Los controles de reproducción (play/pausa/detener con la barra de progreso)
+  siguen en la notificación durante el video.
+
 ## v1.2.1 (02 ago 2026)
 
 ### Correcciones (sync)

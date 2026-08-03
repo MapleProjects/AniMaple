@@ -60,6 +60,9 @@ android {
 dependencies {
     // MediaSessionCompat for media playback notification controls
     implementation("androidx.media:media:1.7.0")
+    // Background periodic new-episode check (WorkManager v2.9, compatible AGP 8.7.3)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 flutter {

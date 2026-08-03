@@ -66,7 +66,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   // Media notification
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
-  bool _notificationPermissionRequested = false;
 
   // End-of-episode countdown
   bool _showCountdown = false;
@@ -218,8 +217,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     // Only sync playing=true to native AFTER user explicitly started playback.
     // Prevents auto-PiP when video loads slowly in the background.
     if (playing && _userStartedPlayback) _syncPipState(true);
-    // Request notification permission on first play
-    if (playing) _requestNotificationPermission();
     // Update media notification with current state
     _updateMediaSession(playing);
     if (mounted) setState(() {});
@@ -250,14 +247,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _dismissMediaNotification() {
     try {
       _mediaChannel.invokeMethod('dismissMediaNotification');
-    } catch (_) {}
-  }
-
-  void _requestNotificationPermission() {
-    if (_notificationPermissionRequested) return;
-    _notificationPermissionRequested = true;
-    try {
-      _mediaChannel.invokeMethod('requestNotificationPermission');
     } catch (_) {}
   }
 

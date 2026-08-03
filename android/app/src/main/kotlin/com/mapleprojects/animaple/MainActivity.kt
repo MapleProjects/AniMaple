@@ -20,18 +20,26 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.Rational
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
 
     // ── Method Channels ──
     private val PIP_CHANNEL = "com.mapleprojects.animaple/pip"
     private val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
+    private val NOTIF_CHANNEL = "com.mapleprojects.animaple/notifications"
 
     private var pipMethodChannel: MethodChannel? = null
     private var mediaMethodChannel: MethodChannel? = null
+    private var notifMethodChannel: MethodChannel? = null
 
     // ── PiP State ──
     private var isPipSupported = false
@@ -142,7 +150,69 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // Crea el canal de notificaciones de novedades (idempotente).
+        Notifier.ensureNewEpisodeChannel(this)
+        setupNotificationChannel(flutterEngine)
         setupMediaSession()
+    }
+
+    // ── Notification Service Channel ──
+    // Flutter agenda la revisión periódica de nuevos capítulos (WorkManager),
+    // escribe el espejo de seguidos y pide el permiso de notificaciones.
+    private fun setupNotificationChannel(flutterEngine: FlutterEngine) {
+        notifMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NOTIF_CHANNEL)
+        notifMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "scheduleEpisodeCheck" -> {
+                    scheduleEpisodeCheck()
+                    result.success(true)
+                }
+                "updateFollowedMirror" -> {
+                    val json = call.argument<String>("json") ?: "{}"
+                    updateFollowedMirror(json)
+                    result.success(true)
+                }
+                "requestPermission" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1002)
+                    }
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /** Agenda la revisión periódica de capítulos nuevos (mín 15 min, red requerida,
+     *  duración 10s). WorkManager la persiste y la re-programa tras reinicio. */
+    private fun scheduleEpisodeCheck() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = PeriodicWorkRequestBuilder<EpisodeCheckWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setInitialDelay(1, TimeUnit.MINUTES)
+            .build()
+        // KEEP: no duplica si ya está agendado (por ejemplo tras reinicio).
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "animaple_episode_check",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+        Log.d(TAG, "EpisodeCheck agendado cada 15 min")
+    }
+
+    /** Persiste el espejo {slug: titulo} de seguidos para que el Worker lo lea
+     *  sin depender de la sesión/red de Google. Si se vacía, se cancela el worker. */
+    private fun updateFollowedMirror(json: String) {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        prefs.edit().putString(EpisodeCheckWorker.KEY_FOLLOWED_JSON, json).apply()
+        // KEEP hace scheduleEpisodeCheck idempotente: no duplica si ya existe.
+        scheduleEpisodeCheck()
+        if (json == "{}" || json.isEmpty()) {
+            WorkManager.getInstance(this).cancelUniqueWork("animaple_episode_check")
+            Log.d(TAG, "EpisodeCheck cancelado (sin seguidos)")
+        }
     }
 
     // ══════════════════════════════════════════════
