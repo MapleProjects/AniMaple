@@ -1,5 +1,19 @@
 # AniMaple — Registro de cambios
 
+## v1.2.6 (03 ago 2026)
+
+### Reproductor (corrección)
+
+- **Reconexión automática al perder internet**: si la conexión se cae durante
+  la reproducción, AniMaple reanuda el video automáticamente. Reintenta cada
+  segundo, sin límite, hasta volver a conectar, y muestra un aviso
+  "Reconectando…". Ya no se queda en 00:00 ni es necesario recargar.
+- **Progreso conservado al reconectar**: al volver la conexión, el capítulo
+  continúa exactamente en el segundo donde se cortó.
+- **Progreso conservado al cambiar de servidor o idioma**: cambiar entre
+  servidores (HLS / MP4Upload) o entre Doblaje y Subtitulado no pierde lo
+  visto; el video retoma desde donde iba.
+
 ## v1.2.5 (03 ago 2026)
 
 ### Actualización automática

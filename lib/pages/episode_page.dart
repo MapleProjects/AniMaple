@@ -75,6 +75,23 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // Position update timer (video_view doesn't auto-rebuild on position change)
   Timer? _positionTimer;
 
+  // ── Reconexión + preservación de progreso ──
+  // Posición vista (ms) rastreada continuamente. Se usa para restaurar el
+  // progreso tras pérdida de internet (reconexión) y al cambiar de servidor
+  // o de idioma (Doblaje ↔ Subtitulado).
+  int _lastPositionMs = 0;
+
+  // Último source abierto, para reintentar la reconexión indefinidamente.
+  String? _lastVideoUrl;
+  Map<String, String>? _lastVideoHeaders;
+
+  // true mientras se está reintentando reconectar tras un error de red.
+  bool _reconnecting = false;
+  Timer? _reconnectTimer;
+
+  // Posición a restaurar (ms) al volver a playing. -1 = sin pendiente.
+  int _pendingSeek = -1;
+
   // Mouse hover (desktop only)
   bool _isHovering = false;
 
@@ -211,6 +228,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _startPositionTimer();
       // Auto-hide controls when video starts playing
       _startHideTimer();
+
+      // Restaurar la posición pendiente cuando el video vuelve a estar
+      // reproduciéndose (tras reconexión o cambio de servidor/idioma).
+      if (_pendingSeek > 0 && _pendingSeek != _player.position.value) {
+        final target = _pendingSeek;
+        _pendingSeek = -1; // consumir antes del seek (evitar loops)
+        _player.seekTo(target);
+      } else if (_pendingSeek == 0) {
+        _pendingSeek = -1;
+      }
+
+      // Si estábamos reconectando y ya estamos reproduciendo… todo
+      // correcto; el timer de reconexión se cancela aquí.
+      _stopReconnectIfPlaying();
     } else {
       _positionTimer?.cancel();
     }
@@ -220,6 +251,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     // Update media notification with current state
     _updateMediaSession(playing);
     if (mounted) setState(() {});
+  }
+
+  /// Cancela el reintento de reconexión si el video ya está reproduciéndose.
+  void _stopReconnectIfPlaying() {
+    if (_reconnecting &&
+        _player.playbackState.value == VideoControllerPlaybackState.playing) {
+      _reconnecting = false;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _videoErrorShown = false; // permitir reportar un error futuro
+      if (mounted) setState(() {});
+    }
   }
 
   void _syncPipState(bool playing) {
@@ -291,8 +334,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO_VIEW ERROR: $err');
-      // Mostrar el error al usuario con botón de copiar (patrón de la app:
-      // errores siempre visibles). Se muestra una sola vez por error.
+      // Pérdida de conexión durante la reproducción → reconexión automática
+      // indefinida (cada 1s) hasta que el video vuelva, restaurando el
+      // progreso visto. Solo si ya había un source cargado.
+      final hadSource = _lastVideoUrl != null && _lastVideoUrl!.isNotEmpty;
+      if (hadSource && !_reconnecting) {
+        _startReconnect();
+        return;
+      }
+      // Error sin source previo (o indisponible): mostrarlo una sola vez.
       if (mounted && !_videoErrorShown) {
         _videoErrorShown = true;
         showErrorSheet(
@@ -303,6 +353,54 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         );
       }
     }
+  }
+
+  /// Reintenta abrir el último source cada segundo, indefinidamente, hasta
+  /// que la conexión vuelva y el video se reproduzca de nuevo. Al lograrlo,
+  /// [playbackState] cambia a playing y [seekTo] restaura la posición.
+  void _startReconnect() {
+    if (_reconnecting) return;
+    _reconnecting = true;
+    _videoErrorShown = false;
+    // Guardar el progreso justo antes de caer, por si el timer no lo capturó.
+    final pos = _player.position.value;
+    if (pos > 0) _lastPositionMs = pos;
+    if (mounted) setState(() {});
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _player.disposed) {
+        _reconnectTimer?.cancel();
+        return;
+      }
+      // Si el player ya volvió a reproducir, no reintentar más.
+      if (_player.playbackState.value == VideoControllerPlaybackState.playing) {
+        _stopReconnectIfPlaying();
+        return;
+      }
+      final url = _lastVideoUrl;
+      if (url == null || url.isEmpty) {
+        _reconnectTimer?.cancel();
+        _reconnecting = false;
+        return;
+      }
+      debugPrint('Reconnect intent: $url (resume ${_lastPositionMs}ms)');
+      try {
+        _pendingSeek = _lastPositionMs; // restaurar al volver a playing
+        _player.open(url, headers: _lastVideoHeaders);
+      } catch (e) {
+        debugPrint('Reconnect open error: $e');
+      }
+    });
+  }
+
+  /// Cancela la reconexión (se llama cuando el video ya se reprodujo).
+  void _stopReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnecting = false;
+    _videoErrorShown = false;
+    if (mounted) setState(() {});
   }
 
   void _onLoading() {
@@ -325,6 +423,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _countdownTimer?.cancel();
     _positionTimer?.cancel();
     _seekResetTimer?.cancel();
+    _reconnectTimer?.cancel();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
@@ -430,6 +529,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             : videoType == 'mp4'
                 ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                 : null;
+
+        // Cambio de servidor/idioma: conservar la posición actual para
+        // restaurarla cuando el nuevo source empiece a reproducirse.
+        final before = _player.position.value;
+        if (before > 0) _lastPositionMs = before;
+        _pendingSeek = _lastPositionMs;
+
+        // Registrar el source activo: permite reconectar automáticamente si
+        // el usuario pierde internet durante la reproducción.
+        _lastVideoUrl = videoUrl;
+        _lastVideoHeaders = headers;
+
+        // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
+        // propósito.
+        _stopReconnect();
+
         _player.open(videoUrl, headers: headers);
         return;
       } catch (e, st) {
@@ -451,6 +566,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _loading = true;
       _userStartedPlayback = false;
     });
+    // Cancelar reconexión y reiniciar la posición: es otro capítulo, no
+    // debe heredar el progreso del anterior.
+    _reconnectTimer?.cancel();
+    _reconnecting = false;
+    _pendingSeek = -1;
+    _lastPositionMs = 0;
+    _lastVideoUrl = null;
+    _lastVideoHeaders = null;
     _player.close();
     _load();
   }
@@ -575,6 +698,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _positionTimer?.cancel();
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
+      // Cargar el progreso visto para restaurarlo (reconexión / cambio de
+      // servidor / cambio de idioma). Solo se guarda en reproducción.
+      if (_player.playbackState.value == VideoControllerPlaybackState.playing) {
+        _lastPositionMs = _player.position.value;
+      }
       // Clear _dragValue when player position catches up after seek
       if (_dragValue != null && !_isDragging) {
         final pos = _player.position.value;
@@ -675,6 +803,28 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // Loading spinner
         if (_player.loading.value)
           const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+
+        // Reconexión automática (pérdida de internet): aviso al usuario
+        if (_reconnecting)
+          Container(
+            color: Colors.black.withValues(alpha: 0.55),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+                SizedBox(height: 12),
+                Text(
+                  'Reconectando…',
+                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Se está restaurando el video donde iba',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
 
         // Big center play/pause (when paused)
         if (!isPlaying && !_player.loading.value)
