@@ -501,6 +501,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (_isDesktop) {
       if (_isFullscreen) {
         windowManager.setFullScreen(false);
+        windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
       }
       if (_isPipMode) {
         _exitPipDesktop();
@@ -656,7 +657,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final nextFullscreen = !_isFullscreen;
     if (_isDesktop) {
       try {
-        await windowManager.setFullScreen(nextFullscreen);
+        if (nextFullscreen) {
+          await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+          await windowManager.setFullScreen(true);
+        } else {
+          await windowManager.setFullScreen(false);
+          await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+        }
       } catch (e) {
         debugPrint('Windows fullscreen error: $e');
       }
@@ -710,7 +717,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       body: _isPipMode
         ? _buildVideoPlayer()
         : _isFullscreen
-          ? Center(child: AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()))
+          ? SizedBox.expand(child: _buildVideoPlayer())
           : isWide
             ? _buildWideLayout(ep, filteredEmbeds, anime)
             : _buildNarrowLayout(ep, filteredEmbeds, anime),

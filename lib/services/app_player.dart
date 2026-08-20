@@ -217,9 +217,12 @@ class MediaKitAppPlayer implements AppPlayer {
     _error.value = null;
   }
 
+  static final GlobalKey _videoWidgetKey = GlobalKey();
+
   @override
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     return mkv.Video(
+      key: _videoWidgetKey,
       controller: _videoController,
       controls: mkv.NoVideoControls,
       fit: fit,
