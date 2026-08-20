@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 import 'services/api_service.dart';
 import 'services/sync_service.dart';
 import 'services/notification_service.dart';
@@ -14,8 +17,11 @@ import 'pages/following_page.dart';
 import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    await windowManager.ensureInitialized();
+  }
   MediaKit.ensureInitialized();
   ApiService.init();
 
