@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 /// Local HTTP proxy that fixes content-type and headers for HLS / MP4 streams.
 ///
@@ -13,6 +14,9 @@ class HlsProxy {
 
   int get port => _port;
   bool get isRunning => _server != null;
+
+  static const String _defaultUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
   /// Start the proxy server on a random available loopback port.
   Future<void> start() async {
@@ -77,6 +81,24 @@ class HlsProxy {
     }
   }
 
+  void _applyHeaders(HttpClientRequest req, String targetUrl, String? customReferer) {
+    req.headers.set('User-Agent', _defaultUserAgent);
+    req.headers.set('Accept', '*/*');
+    req.headers.set('Accept-Language', 'es-ES,es;q=0.9,en;q=0.8');
+    req.headers.set('Sec-Fetch-Dest', 'empty');
+    req.headers.set('Sec-Fetch-Mode', 'cors');
+    req.headers.set('Sec-Fetch-Site', 'cross-site');
+
+    final ref = customReferer ?? _refererOf(targetUrl);
+    if (ref.isNotEmpty) {
+      req.headers.set('Referer', ref);
+      try {
+        final u = Uri.parse(ref);
+        req.headers.set('Origin', '${u.scheme}://${u.host}');
+      } catch (_) {}
+    }
+  }
+
   /// Fetch m3u8, rewrite all playlist and segment URLs to go through the proxy.
   Future<void> _handleM3U8(
     HttpRequest request,
@@ -84,15 +106,11 @@ class HlsProxy {
     String? customReferer,
   ) async {
     final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true);
+      ..badCertificateCallback = ((cert, host, port) => true)
+      ..connectionTimeout = const Duration(seconds: 15);
     try {
       final req = await client.getUrl(Uri.parse(m3u8Url));
-      req.headers.set(
-        'User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      );
-      final ref = customReferer ?? _refererOf(m3u8Url);
-      if (ref.isNotEmpty) req.headers.set('Referer', ref);
+      _applyHeaders(req, m3u8Url, customReferer);
       final res = await req.close();
       final body = await res.transform(utf8.decoder).join();
 
@@ -117,27 +135,31 @@ class HlsProxy {
     String? customReferer,
   ) async {
     final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true);
+      ..badCertificateCallback = ((cert, host, port) => true)
+      ..connectionTimeout = const Duration(seconds: 20);
     try {
       final req = await client.getUrl(Uri.parse(segmentUrl));
-      req.headers.set(
-        'User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      );
-      final ref = customReferer ?? _refererOf(segmentUrl);
-      if (ref.isNotEmpty) req.headers.set('Referer', ref);
+      _applyHeaders(req, segmentUrl, customReferer);
+
+      final range = request.headers.value(HttpHeaders.rangeHeader);
+      if (range != null && range.isNotEmpty) {
+        req.headers.set(HttpHeaders.rangeHeader, range);
+      }
+
       final res = await req.close();
 
-      final ctype = res.headers.contentType?.mimeType ?? 'video/mp4';
-      request.response
-        ..statusCode = res.statusCode
-        ..headers.set(
-          'Content-Type',
-          ctype.startsWith('text/') || ctype == 'application/octet-stream'
-              ? 'video/mp4'
-              : ctype,
-        )
-        ..headers.set('Access-Control-Allow-Origin', '*');
+      request.response.statusCode = res.statusCode;
+      request.response.headers.set('Access-Control-Allow-Origin', '*');
+      request.response.headers.set('Content-Type', 'video/mp4');
+
+      final contentRange = res.headers.value(HttpHeaders.contentRangeHeader);
+      if (contentRange != null) {
+        request.response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+      }
+      final contentLength = res.headers.contentLength;
+      if (contentLength > 0) {
+        request.response.headers.contentLength = contentLength;
+      }
 
       await res.pipe(request.response);
     } finally {
@@ -152,15 +174,11 @@ class HlsProxy {
     String? customReferer,
   ) async {
     final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true);
+      ..badCertificateCallback = ((cert, host, port) => true)
+      ..connectionTimeout = const Duration(seconds: 20);
     try {
       final req = await client.getUrl(Uri.parse(videoUrl));
-      req.headers.set(
-        'User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      );
-      final ref = customReferer ?? _refererOf(videoUrl);
-      if (ref.isNotEmpty) req.headers.set('Referer', ref);
+      _applyHeaders(req, videoUrl, customReferer);
 
       final range = request.headers.value(HttpHeaders.rangeHeader);
       if (range != null && range.isNotEmpty) {
@@ -212,12 +230,14 @@ class HlsProxy {
       if (trimmed.isEmpty) {
         result.add(line);
       } else if (trimmed.startsWith('#')) {
-        // Rewrite URI="..." inside tags like EXT-X-MAP and EXT-X-KEY
+        // Rewrite URI="..." inside tags like EXT-X-MAP, EXT-X-KEY, EXT-X-MEDIA
         result.add(trimmed.replaceAllMapped(
           RegExp(r'URI="([^"]+)"'),
           (m) {
-            final resolved = _absoluteUrl(m.group(1)!, base);
-            return 'URI="http://127.0.0.1:$_port/segment?url=${Uri.encodeComponent(resolved)}$refParam"';
+            final uriVal = m.group(1)!;
+            final resolved = _absoluteUrl(uriVal, base);
+            final path = resolved.toLowerCase().contains('.m3u8') ? 'play.m3u8' : 'segment';
+            return 'URI="http://127.0.0.1:$_port/$path?url=${Uri.encodeComponent(resolved)}$refParam"';
           },
         ));
       } else {

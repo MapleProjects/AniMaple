@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
+import '../services/hls_proxy.dart';
 import '../widgets/error_dialog.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
@@ -98,6 +99,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   late int _currentEp;
 
   late final AppPlayer _player;
+  final HlsProxy _hlsProxy = HlsProxy();
 
   @override
   void initState() {
@@ -427,6 +429,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.positionMs.removeListener(_onPositionChanged);
     _player.durationMs.removeListener(_onDurationChanged);
     _player.dispose();
+    _hlsProxy.stop();
     _syncPipState(false);
     _dismissMediaNotification();
     if (_isFullscreen && !_isDesktop) {
@@ -522,6 +525,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                 : null;
 
+        await _hlsProxy.start();
+        final playableUrl = videoType == 'hls'
+            ? _hlsProxy.proxyM3U8(videoUrl, referer: headers?['Referer'])
+            : _hlsProxy.proxyVideo(videoUrl, referer: headers?['Referer']);
+
         // Cambio de servidor/idioma: conservar la posición actual para
         // restaurarla cuando el nuevo source empiece a reproducirse.
         final before = _player.positionMs.value;
@@ -530,14 +538,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
         // Registrar el source activo: permite reconectar automáticamente si
         // el usuario pierde internet durante la reproducción.
-        _lastVideoUrl = videoUrl;
-        _lastVideoHeaders = headers;
+        _lastVideoUrl = playableUrl;
+        _lastVideoHeaders = null;
 
         // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
         // propósito.
         _stopReconnect();
 
-        await _player.open(videoUrl, headers: headers);
+        await _player.open(playableUrl);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
