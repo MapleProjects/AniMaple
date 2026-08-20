@@ -535,6 +535,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                 : null;
 
+        // Asegurar que el proxy local esté iniciado para inyectar headers
+        // (Referer/User-Agent) y corregir Content-Type en Windows y Android.
+        await _hlsProxy.start();
+        final playableUrl = videoType == 'hls'
+            ? _hlsProxy.proxyM3U8(videoUrl, referer: headers?['Referer'])
+            : (_isDesktop
+                ? _hlsProxy.proxyVideo(videoUrl, referer: headers?['Referer'])
+                : videoUrl);
+
         // Cambio de servidor/idioma: conservar la posición actual para
         // restaurarla cuando el nuevo source empiece a reproducirse.
         final before = _player.position.value;
@@ -543,14 +552,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
         // Registrar el source activo: permite reconectar automáticamente si
         // el usuario pierde internet durante la reproducción.
-        _lastVideoUrl = videoUrl;
-        _lastVideoHeaders = headers;
+        _lastVideoUrl = playableUrl;
+        _lastVideoHeaders = _isDesktop ? null : headers;
 
         // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
         // propósito.
         _stopReconnect();
 
-        _player.open(videoUrl, headers: headers);
+        _player.open(playableUrl, headers: _isDesktop ? null : headers);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');

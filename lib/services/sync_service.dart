@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../models/anime.dart';
 import 'api_service.dart';
 import 'gdrive_config.dart';
+import 'desktop_google_auth.dart';
 
 /// SyncService — sincroniza historial y favoritos contra el almacenamiento
 /// personal del usuario en Google Drive (appDataFolder).
@@ -64,20 +65,39 @@ class SyncService {
   static final ValueNotifier<int> stateVersion = ValueNotifier<int>(0);
 
   /// Profile info (photo, nombre) para el avatar del AppBar.
-  static String? get accountDisplayName => _account?.displayName;
-  static String? get accountPhotoUrl => _account?.photoUrl;
+  /// En desktop se resuelve desde DesktopGoogleAuth (google_sign_in no existe).
+  static String? get accountDisplayName => googleSignInSupported
+      ? _account?.displayName
+      : DesktopGoogleAuth.accountDisplayName;
+  static String? get accountPhotoUrl => googleSignInSupported
+      ? _account?.photoUrl
+      : DesktopGoogleAuth.accountPhotoUrl;
 
   /// Último error visible para la UI (patrón de la app: errores siempre visibles).
   static String? lastError;
   static bool get hasError => lastError != null;
 
   static GoogleSignInAccount? get account => _account;
-  static bool get isSignedIn => _account != null;
-  static String? get accountEmail => _account?.email;
+  static bool get isSignedIn =>
+      googleSignInSupported ? _account != null : DesktopGoogleAuth.isSignedIn;
+  static String? get accountEmail =>
+      googleSignInSupported ? _account?.email : DesktopGoogleAuth.accountEmail;
 
-  /// Inicializa el singleton de Google Sign-In.
+  /// ¿Google Sign-In usa el SDK nativo (google_sign_in)? Solo lo hay en
+  /// Android/iOS/macOS/web. En Windows (y Linux) usamos DesktopGoogleAuth.
+  static bool get googleSignInSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  /// Inicializa el singleton de Google Sign-In (o carga la sesión desktop).
   /// Debe llamarse una sola vez, antes de cualquier otro método.
   static Future<void> initialize() async {
+    if (!googleSignInSupported) {
+      await DesktopGoogleAuth.load();
+      return;
+    }
     await GoogleSignIn.instance.initialize(
       clientId: GDriveConfig.androidClientId.isEmpty
           ? null
@@ -95,6 +115,9 @@ class SyncService {
   /// obtiene bajo demanda en el primer sync). Si requiere UI (usuario no
   /// autorizó aún, múltiples cuentas), se resuelve por authenticationEvents.
   static Future<bool> tryRestoreSession() async {
+    if (!googleSignInSupported) {
+      return DesktopGoogleAuth.tryRestore();
+    }
     try {
       final restored = await GoogleSignIn.instance
           .attemptLightweightAuthentication();
@@ -134,6 +157,22 @@ class SyncService {
   /// Devuelve true si quedó autenticado con token usable.
   static Future<bool> signIn() async {
     lastError = null;
+    if (!googleSignInSupported) {
+      final ok = await DesktopGoogleAuth.signIn();
+      if (ok) {
+        _lastRemoteVersion = null;
+        if (!await _cacheAuthHeaders(prompt: false)) {
+          lastError = 'No se pudo obtener el token de acceso de Google Drive.';
+          return false;
+        }
+        startAutoSync();
+        _notifySessionChanged();
+        debugPrint('Sync: signed in (desktop) as $accountEmail');
+        return true;
+      }
+      lastError = 'No se pudo iniciar sesión con Google.';
+      return false;
+    }
     try {
       final account = await GoogleSignIn.instance.authenticate(
         scopeHint: const [_scopeDriveAppdata],
@@ -160,7 +199,11 @@ class SyncService {
 
   static Future<void> signOut() async {
     stopAutoSync();
-    await GoogleSignIn.instance.signOut();
+    if (googleSignInSupported) {
+      await GoogleSignIn.instance.signOut();
+    } else {
+      await DesktopGoogleAuth.signOut();
+    }
     _account = null;
     _authHeaders = null;
     _fileId = null;
@@ -172,6 +215,12 @@ class SyncService {
   /// Obtiene (o refresca) los headers de autorización para drive.appdata.
   /// Con [prompt]=true permite mostrar UI de consentimiento si hace falta.
   static Future<bool> _cacheAuthHeaders({required bool prompt}) async {
+    if (!googleSignInSupported) {
+      final headers = await DesktopGoogleAuth.authorizationHeaders();
+      if (headers == null) return false;
+      _authHeaders = headers;
+      return true;
+    }
     final account = _account;
     if (account == null) return false;
     try {
@@ -547,8 +596,9 @@ class SyncService {
     // Aplicar tombstones: descartar capítulos borrados más recientemente.
     // Un dato re-marcado (watched_at > tombstone) sobrevive automáticamente:
     // _isTombstoned lo mantiene y el tombstone queda inerte en el mapa.
-    mergedHistory.removeWhere((key, h) =>
-        _isTombstoned(deletedHistory[key], h.watchedAt));
+    mergedHistory.removeWhere(
+      (key, h) => _isTombstoned(deletedHistory[key], h.watchedAt),
+    );
     final sortedHistory = mergedHistory.values.toList()
       ..sort((a, b) => _compareHistoryDesc(a, b));
     if (sortedHistory.length > 200) {
@@ -565,8 +615,9 @@ class SyncService {
         mergedFollowed[f.animeId] = f;
       }
     }
-    mergedFollowed.removeWhere((id, f) =>
-        _isTombstoned(deletedFollowed['$id'], f.followedAt));
+    mergedFollowed.removeWhere(
+      (id, f) => _isTombstoned(deletedFollowed['$id'], f.followedAt),
+    );
     final sortedFollowed = mergedFollowed.values.toList()
       ..sort((a, b) => _compareFollowedDesc(a, b));
 
@@ -575,7 +626,7 @@ class SyncService {
     final sameFollowed = _sameFollowed(localFollowed, sortedFollowed);
     final sameTombstones =
         _mapsEqual(localDeletedHistory, deletedHistory) &&
-            _mapsEqual(localDeletedFollowed, deletedFollowed);
+        _mapsEqual(localDeletedFollowed, deletedFollowed);
     if (sameHistory && sameFollowed && sameTombstones) {
       debugPrint('Sync: merge sin cambios');
       return false;

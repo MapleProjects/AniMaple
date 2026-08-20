@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/sync_service.dart';
 import 'detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -13,6 +14,7 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
   Map<String, List<AnimeBasic>> _grouped = {};
   List<String> _days = [];
+  Set<String> _followedSlugs = {};
   int _selectedDay = 0;
   bool _loading = true;
 
@@ -23,9 +25,28 @@ class _CalendarPageState extends State<CalendarPage> {
   void initState() {
     super.initState();
     _load();
+    SyncService.stateVersion.addListener(_loadFollowed);
+  }
+
+  @override
+  void dispose() {
+    SyncService.stateVersion.removeListener(_loadFollowed);
+    super.dispose();
+  }
+
+  Future<void> _loadFollowed() async {
+    try {
+      final f = await ApiService.fetchFollowed();
+      if (mounted) {
+        setState(() {
+          _followedSlugs = f.map((e) => e.animeSlug).toSet();
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load() async {
+    await _loadFollowed();
     while (mounted) {
     try {
       final sched = await ApiService.fetchSchedule();
@@ -134,6 +155,7 @@ class _CalendarPageState extends State<CalendarPage> {
                         itemCount: animeList.length,
                         itemBuilder: (ctx, i) {
                           final a = animeList[i];
+                          final isFollowed = _followedSlugs.contains(a.slug);
                           return GestureDetector(
                             onTap: () => Navigator.push(context, MaterialPageRoute(
                               builder: (_) => DetailPage(slug: a.slug),
@@ -166,6 +188,19 @@ class _CalendarPageState extends State<CalendarPage> {
                                                 borderRadius: BorderRadius.circular(4),
                                               ),
                                               child: Text('Ep ${a.latestEpisodeNumber}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+                                            ),
+                                          ),
+                                        // Favorite heart badge
+                                        if (isFollowed)
+                                          Positioned(
+                                            top: 6, right: 6,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(4),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFef4444).withValues(alpha: 0.9),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.favorite, color: Colors.white, size: 14),
                                             ),
                                           ),
                                       ],

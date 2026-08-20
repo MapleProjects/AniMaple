@@ -54,16 +54,19 @@ El único detalle: el OAuth consent screen debe estar en **In production**
    - **Android**: package `com.mapleprojects.animaple` + SHA-1 de arriba
      → copiar el "Client ID" (termina en `.apps.googleusercontent.com`) a
      `lib/services/gdrive_config.dart` → `androidClientId`
-   - **Web application**: crearlo y copiar su Client ID a
-     `lib/services/gdrive_config.dart` → `webServerClientId`
-     (lo requiere google_sign_in en Android sin google-services.json)
+   - **Web application** (o Desktop): crearlo con Authorized redirect URIs `http://127.0.0.1`
+     → copiar su Client ID y Client Secret a `lib/services/gdrive_config.dart`
+     (`webServerClientId` y `clientSecret`).
+     En Android se usa para `serverClientId` y en Windows/Linux para el flujo
+     OAuth PKCE + loopback redirect local.
 
 ## Archivos involucrados
 
 - `lib/services/sync_service.dart` — Sync completo (login, pull, push, merge)
-- `lib/services/gdrive_config.dart` — **pega aquí los Client IDs**
+- `lib/services/desktop_google_auth.dart` — Flujo OAuth 2.0 PKCE / loopback para Windows/Linux
+- `lib/services/gdrive_config.dart` — **Client IDs y Client Secret**
 - `lib/services/api_service.dart` — hooks de notificación en cada mutación
-- `lib/widgets/sync_button.dart` — botón de nube en el AppBar (home)
+- `lib/widgets/sync_button.dart` — botón de perfil / sincronización en el AppBar
 - `lib/main.dart` — restore de sesión + pull al arrancar
 
 ## Probar

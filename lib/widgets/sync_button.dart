@@ -25,10 +25,14 @@ class _SyncButtonState extends State<SyncButton> {
     _refreshFromService();
 
     // Escuchar eventos de auth/sign-out y cambios de estado en vivo.
-    GoogleSignIn.instance.authenticationEvents.listen((event) {
-      if (!mounted) return;
-      _refreshFromService();
-    });
+    // google_sign_in no existe para Windows/Linux → solo en plataformas
+    // soportadas; la app sigue funcionando local sin sincronización.
+    if (SyncService.googleSignInSupported) {
+      GoogleSignIn.instance.authenticationEvents.listen((event) {
+        if (!mounted) return;
+        _refreshFromService();
+      });
+    }
     SyncService.stateVersion.addListener(_onStateChanged);
   }
 

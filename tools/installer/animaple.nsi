@@ -10,12 +10,17 @@
 !include "LogicLib.nsh"
 
 ;--------------------------------
-; Config — VERSION and BUILD_DIR injected by build script
+; Config — VERSION, BUILD_DIR y INSTALLER_DIR son inyectados por el script
+; de build con -DVERSION=... / -DBUILD_DIR=... / -DINSTALLER_DIR=...
 ; !define VERSION "X.Y.Z"
-; !define BUILD_DIR "C:\Users\WinterOS\AniMaple\build\windows\x64\runner\Release"
+; !define BUILD_DIR "C:\...\build\windows\x64\runner\Release"
+; !define INSTALLER_DIR "C:\...\dist"
+!ifndef INSTALLER_DIR
+  !define INSTALLER_DIR "."
+!endif
 
 Name "AniMaple"
-OutFile "C:\Users\WinterOS\installer\animaple-v${VERSION}-setup.exe"
+OutFile "${INSTALLER_DIR}\animaple-v${VERSION}-setup.exe"
 
 InstallDir "$LOCALAPPDATA\AniMaple"
 InstallDirRegKey HKCU "Software\AniMaple" "InstallPath"
@@ -23,15 +28,15 @@ InstallDirRegKey HKCU "Software\AniMaple" "InstallPath"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 
-Icon "C:\Users\WinterOS\installer\app_icon.ico"
-UninstallIcon "C:\Users\WinterOS\installer\app_icon.ico"
+Icon "${INSTALLER_DIR}\app_icon.ico"
+UninstallIcon "${INSTALLER_DIR}\app_icon.ico"
 
 ;--------------------------------
 ; Interface
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "C:\Users\WinterOS\installer\app_icon.ico"
-!define MUI_UNICON "C:\Users\WinterOS\installer\app_icon.ico"
+!define MUI_ICON "${INSTALLER_DIR}\app_icon.ico"
+!define MUI_UNICON "${INSTALLER_DIR}\app_icon.ico"
 
 !define MUI_WELCOMEPAGE_TITLE "Bienvenido al instalador de AniMaple"
 !define MUI_WELCOMEPAGE_TEXT "Este asistente le guiara en la instalacion de AniMaple v${VERSION}.$\r$\n$\r$\nEl programa se instalara en su carpeta de usuario.$\r$\n$\r$\nHaga clic en Siguiente para continuar."
