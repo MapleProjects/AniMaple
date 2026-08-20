@@ -32,7 +32,9 @@ abstract class AppPlayer {
 
   factory AppPlayer.create() {
     if (isDesktopPlatform) {
-      return MediaKitAppPlayer();
+      final player = MediaKitAppPlayer.instance;
+      player._reset();
+      return player;
     } else {
       return VideoViewAppPlayer();
     }
@@ -41,6 +43,13 @@ abstract class AppPlayer {
 
 /// Windows / Desktop implementation using media_kit (libmpv).
 class MediaKitAppPlayer implements AppPlayer {
+  static MediaKitAppPlayer? _instance;
+
+  static MediaKitAppPlayer get instance {
+    _instance ??= MediaKitAppPlayer._();
+    return _instance!;
+  }
+
   late final mk.Player _player;
   late final mkv.VideoController _videoController;
 
@@ -54,7 +63,7 @@ class MediaKitAppPlayer implements AppPlayer {
   final List<StreamSubscription> _subscriptions = [];
   bool _disposed = false;
 
-  MediaKitAppPlayer() {
+  MediaKitAppPlayer._() {
     _player = mk.Player(
       configuration: const mk.PlayerConfiguration(
         title: 'AniMaple',
@@ -90,6 +99,16 @@ class MediaKitAppPlayer implements AppPlayer {
         _error.value = err;
       }
     }));
+  }
+
+  void _reset() {
+    _disposed = false;
+    _isPlaying.value = false;
+    _isLoading.value = true;
+    _positionMs.value = 0;
+    _durationMs.value = 0;
+    _error.value = null;
+    _finishedCount.value = 0;
   }
 
   static const String _defaultUserAgent =
@@ -189,26 +208,13 @@ class MediaKitAppPlayer implements AppPlayer {
 
   @override
   void dispose() {
-    if (_disposed) return;
     _disposed = true;
-    for (final s in _subscriptions) {
-      s.cancel();
-    }
-    _subscriptions.clear();
-    // Detener la reproducción primero para liberar el pipeline de renderizado
-    // y programar el dispose de libmpv tras el desmontaje del widget Video,
-    // evitando el crash por Access Violation en DirectX11 de Windows.
-    _player.stop().then((_) {
-      Future.delayed(const Duration(milliseconds: 200), () {
-        try {
-          _player.dispose();
-        } catch (_) {}
-      });
-    }).catchError((_) {
-      try {
-        _player.dispose();
-      } catch (_) {}
-    });
+    _player.stop();
+    _isPlaying.value = false;
+    _isLoading.value = false;
+    _positionMs.value = 0;
+    _durationMs.value = 0;
+    _error.value = null;
   }
 
   @override
