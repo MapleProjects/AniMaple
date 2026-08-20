@@ -5,8 +5,14 @@ import '../pages/detail_page.dart';
 class EpisodeCard extends StatelessWidget {
   final RecentEpisode episode;
   final VoidCallback? onTap;
+  final bool isFollowed;
 
-  const EpisodeCard({super.key, required this.episode, this.onTap});
+  const EpisodeCard({
+    super.key,
+    required this.episode,
+    this.onTap,
+    this.isFollowed = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +53,18 @@ class EpisodeCard extends StatelessWidget {
                       child: Text('Ep ${episode.episodeNumber}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                     ),
                   ),
+                  if (isFollowed)
+                    Positioned(
+                      top: 6, right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFef4444).withValues(alpha: 0.9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.favorite, color: Colors.white, size: 13),
+                      ),
+                    ),
                   if (episode.timeAgo.isNotEmpty)
                     Positioned(
                       bottom: 6, right: 6,
@@ -80,8 +98,14 @@ class EpisodeCard extends StatelessWidget {
 class EpisodeCardGrid extends StatelessWidget {
   final RecentEpisode episode;
   final VoidCallback? onTap;
+  final bool isFollowed;
 
-  const EpisodeCardGrid({super.key, required this.episode, this.onTap});
+  const EpisodeCardGrid({
+    super.key,
+    required this.episode,
+    this.onTap,
+    this.isFollowed = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +137,19 @@ class EpisodeCardGrid extends StatelessWidget {
                     )
                   else
                     const Center(child: Icon(Icons.play_circle_outline, color: Color(0xFF4a4260), size: 40)),
+                  // Favorite badge — top-left
+                  if (isFollowed)
+                    Positioned(
+                      top: 6, left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFef4444).withValues(alpha: 0.9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.favorite, color: Colors.white, size: 14),
+                      ),
+                    ),
                   // Episode badge — bottom-left
                   Positioned(
                     bottom: 8, left: 8,
@@ -160,8 +197,14 @@ class EpisodeCardGrid extends StatelessWidget {
 class EpisodeCardLandscape extends StatelessWidget {
   final RecentEpisode episode;
   final VoidCallback? onTap;
+  final bool isFollowed;
 
-  const EpisodeCardLandscape({super.key, required this.episode, this.onTap});
+  const EpisodeCardLandscape({
+    super.key,
+    required this.episode,
+    this.onTap,
+    this.isFollowed = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -202,6 +245,18 @@ class EpisodeCardLandscape extends StatelessWidget {
                       child: Text('Ep ${episode.episodeNumber}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                     ),
                   ),
+                  if (isFollowed)
+                    Positioned(
+                      top: 6, right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFef4444).withValues(alpha: 0.9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.favorite, color: Colors.white, size: 14),
+                      ),
+                    ),
                   const Center(
                     child: Icon(Icons.play_circle_outline, color: Colors.white54, size: 36),
                   ),

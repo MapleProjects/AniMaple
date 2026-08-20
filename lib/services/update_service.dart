@@ -9,29 +9,34 @@ import 'package:http/http.dart' as http;
 class UpdateInfo {
   const UpdateInfo({
     required this.latestVersion,
-    required this.apkUrl,
+    required this.downloadUrl,
     required this.releaseUrl,
+    this.fileName,
     this.notes,
   });
 
-  final String latestVersion; // ej. "1.2.5"
-  final String apkUrl; // https://github.com/.../app-release.apk
+  final String latestVersion; // ej. "1.2.9"
+  final String downloadUrl; // URL del APK o instalador .exe
   final String releaseUrl;
+  final String? fileName;
   final String? notes;
+
+  /// Alias de compatibilidad.
+  String get apkUrl => downloadUrl;
 }
 
 /// UpdateService — actualización automática desde GitHub Releases.
 ///
-/// Como AniMaple no está en Play Store, el flujo es:
+/// Flujo:
 /// 1. `checkForUpdate()` consulta la última release del repo y compara la
-///    versión semántica con la instalada (vía canal nativo).
+///    versión semántica con la instalada (vía canal nativo en Android o versión del app).
 /// 2. Si hay versión nueva → `hasUpdate` = true. La app lo muestra con un
 ///    diálogo Actualizar/Posponer al arrancar y con un botón-badge junto al
 ///    avatar de cuenta.
-/// 3. `downloadAndInstall()` descarga el APK DENTRO de la app (con progreso,
-///    sin abrir el navegador) y pide instalarlo nativamente (FileProvider).
-/// 4. El APK se limpia tras la instalación (la app nueva borra los restos
-///    de `updates/` al primer arranque).
+/// 3. `downloadAndInstall()` descarga el APK/.exe DENTRO de la app (con progreso,
+///    sin abrir el navegador) y lanza la instalación (FileProvider en Android,
+///    proceso desacoplado en Windows).
+/// 4. Los archivos temporales se limpian tras la instalación.
 class UpdateService {
   UpdateService._();
 
@@ -42,6 +47,9 @@ class UpdateService {
   static const _repoOwner = 'MapleProjects';
   static const _repoName = 'AniMaple';
 
+  /// Versión de la app por defecto / compilada.
+  static const String appVersion = '1.2.10';
+
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
 
@@ -51,21 +59,25 @@ class UpdateService {
   static String? get latestVersion => _pending?.latestVersion;
   static bool get isUpdateAvailable => _pending != null;
 
-  /// Versión actual instalada (ej. "1.2.4"). Cadena vacía si no se pudo leer.
-  static String get currentVersion => _currentVersion ?? '';
+  /// Versión actual instalada (ej. "1.2.9").
+  static String get currentVersion => _currentVersion ?? appVersion;
   static String? _currentVersion;
 
   static bool _checked = false;
 
-  /// Lee la versión instalada desde el canal nativo (PackageManager).
+  /// Lee la versión instalada desde el canal nativo (PackageManager en Android) o fallback.
   static Future<String?> _loadCurrentVersion() async {
-    try {
-      final v = await _channel.invokeMethod<String>('getCurrentVersion');
-      _currentVersion = v;
-      return v;
-    } catch (_) {
-      return null;
+    if (Platform.isAndroid) {
+      try {
+        final v = await _channel.invokeMethod<String>('getCurrentVersion');
+        if (v != null && v.isNotEmpty) {
+          _currentVersion = v;
+          return v;
+        }
+      } catch (_) {}
     }
+    _currentVersion = appVersion;
+    return _currentVersion;
   }
 
   /// Consulta la última release de GitHub una vez. Idempotente por proceso.
@@ -91,28 +103,59 @@ class UpdateService {
       final tag = (data['tag_name'] as String? ?? '');
       final latest = tag.startsWith('v') ? tag.substring(1) : tag;
 
-      // Buscar el APK en los assets del release.
+      // Buscar el archivo instalador (.exe para Windows, .apk para Android)
       final assets = (data['assets'] as List? ?? []);
-      String? apkUrl;
-      for (final a in assets) {
-        final name = (a as Map)['name'] as String? ?? '';
-        if (name == 'app-release.apk') {
-          apkUrl = a['browser_download_url'] as String?;
+      String? downloadUrl;
+      String? downloadFileName;
+
+      if (Platform.isWindows) {
+        for (final a in assets) {
+          final name = (a as Map)['name'] as String? ?? '';
+          if (name.toLowerCase().endsWith('.exe')) {
+            downloadUrl = a['browser_download_url'] as String?;
+            downloadFileName = name;
+            if (name.toLowerCase().contains('setup') ||
+                name.toLowerCase().contains('animaple')) {
+              break;
+            }
+          }
+        }
+      } else if (Platform.isAndroid) {
+        for (final a in assets) {
+          final name = (a as Map)['name'] as String? ?? '';
+          if (name.toLowerCase().endsWith('.apk')) {
+            downloadUrl = a['browser_download_url'] as String?;
+            downloadFileName = name;
+            if (name == 'app-release.apk') {
+              break;
+            }
+          }
+        }
+      } else {
+        for (final a in assets) {
+          final name = (a as Map)['name'] as String? ?? '';
+          downloadUrl = a['browser_download_url'] as String?;
+          downloadFileName = name;
           break;
         }
       }
-      if (apkUrl == null) return false;
+
+      if (downloadUrl == null) {
+        debugPrint('Update: no asset found for current platform');
+        return false;
+      }
 
       if (_isNewer(latest, currentVersion)) {
         _pending = UpdateInfo(
           latestVersion: latest,
-          apkUrl: apkUrl,
+          downloadUrl: downloadUrl,
           releaseUrl:
               (data['html_url'] as String?) ?? 'https://github.com/$_repoOwner/$_repoName/releases',
+          fileName: downloadFileName,
           notes: _extractNotes(data['body'] as String?, latest),
         );
         hasUpdate.value = true;
-        debugPrint('Update: disponible $latest (actual: $currentVersion)');
+        debugPrint('Update: disponible $latest ($downloadFileName, actual: $currentVersion)');
         return true;
       }
       debugPrint('Update: sin novedades ($latest == $currentVersion)');
@@ -156,29 +199,40 @@ class UpdateService {
     return clean;
   }
 
-  /// Ruta del directorio donde se descarga el APK (creado por nativo).
+  /// Ruta del directorio donde se descarga el archivo de actualización.
   static Future<String> updatesDir() async {
-    try {
-      return await _channel.invokeMethod<String>('getUpdatesDir') ?? '';
-    } catch (_) {
-      return '';
+    if (Platform.isAndroid) {
+      try {
+        final d = await _channel.invokeMethod<String>('getUpdatesDir');
+        if (d != null && d.isNotEmpty) return d;
+      } catch (_) {}
     }
+    final tempDir = Directory('${Directory.systemTemp.path}/AniMapleUpdates');
+    if (!await tempDir.exists()) {
+      await tempDir.create(recursive: true);
+    }
+    return tempDir.path;
   }
 
-  /// Descarga el APK dentro de la app. Devuelve la ruta del archivo.
+  /// Descarga el instalador/APK dentro de la app. Devuelve la ruta del archivo.
   /// [onProgress] recibe 0.0→1.0 durante la descarga. Lanza si falla.
-  static Future<String> downloadApk({
+  static Future<String> downloadFile({
     required String url,
+    String? fileName,
     void Function(double)? onProgress,
   }) async {
     final dir = await updatesDir();
-    if (dir.isEmpty) throw Exception('No se pudo preparar la carpeta de descarga');
-    final target = '$dir/app-update.apk';
+    if (dir.isEmpty) {
+      throw Exception('No se pudo preparar la carpeta de descarga');
+    }
+    final name = fileName ??
+        (Platform.isWindows ? 'animaple-setup.exe' : 'app-update.apk');
+    final target = '$dir/$name';
 
     final req = http.Request('GET', Uri.parse(url));
     final client = http.Client();
     try {
-      final resp = await client.send(req).timeout(const Duration(seconds: 60));
+      final resp = await client.send(req).timeout(const Duration(seconds: 180));
       if (resp.statusCode != 200) {
         throw Exception('Error al descargar (HTTP ${resp.statusCode})');
       }
@@ -203,26 +257,63 @@ class UpdateService {
     }
   }
 
-  /// Pide la instalación del APK al sistema (nativo: FileProvider + permiso).
+  /// Alias de compatibilidad.
+  static Future<String> downloadApk({
+    required String url,
+    void Function(double)? onProgress,
+  }) =>
+      downloadFile(url: url, onProgress: onProgress);
+
+  /// Pide la instalación de la actualización (nativo en Android, proceso desacoplado en Windows).
   /// Devuelve true si se lanzó el instalador.
-  static Future<bool> requestInstall(String apkPath) async {
-    try {
-      final ok =
-          await _channel.invokeMethod<bool>('installApk', {'path': apkPath});
-      return ok ?? false;
-    } catch (e) {
-      debugPrint('Update install invoke error: $e');
-      return false;
+  static Future<bool> requestInstall(String filePath) async {
+    if (Platform.isWindows) {
+      try {
+        final file = File(filePath);
+        if (!await file.exists()) {
+          debugPrint('Update installer not found at $filePath');
+          return false;
+        }
+        debugPrint('Update: ejecutando instalador $filePath');
+        await Process.start(filePath, [], mode: ProcessStartMode.detached);
+        // Cierra la app para permitir que el instalador sobrescriba los binarios
+        Future.delayed(const Duration(milliseconds: 300), () {
+          exit(0);
+        });
+        return true;
+      } catch (e) {
+        debugPrint('Update Windows install error: $e');
+        return false;
+      }
+    } else if (Platform.isAndroid) {
+      try {
+        final ok =
+            await _channel.invokeMethod<bool>('installApk', {'path': filePath});
+        return ok ?? false;
+      } catch (e) {
+        debugPrint('Update install invoke error: $e');
+        return false;
+      }
     }
+    return false;
   }
 
-  /// Limpieza manual de APK restantes. También la hace la app nueva al arrancar.
+  /// Limpieza manual de archivos de actualización restantes.
   static Future<void> cleanupDownloaded() async {
     try {
       final dir = await updatesDir();
       if (dir.isEmpty) return;
-      final f = File('$dir/app-update.apk');
-      if (await f.exists()) await f.delete();
+      final d = Directory(dir);
+      if (await d.exists()) {
+        final entries = d.listSync();
+        for (final e in entries) {
+          if (e is File) {
+            try {
+              await e.delete();
+            } catch (_) {}
+          }
+        }
+      }
     } catch (_) {}
   }
 
@@ -441,21 +532,23 @@ class UpdateService {
     );
 
     try {
-      final path = await downloadApk(
-        url: info.apkUrl,
+      final path = await downloadFile(
+        url: info.downloadUrl,
+        fileName: info.fileName,
         onProgress: (v) => progress.value = v.clamp(0.0, 1.0),
       );
       progress.value = 1.0;
       done.value = true;
-      // Pedir e instalar (nativo). La app se cierra al actualizar.
+      // Pedir e instalar (en Android o Windows). La app se cierra al actualizar.
       final launched = await requestInstall(path);
       if (launched) {
         // La app se cierra con la instalación; pequeño margen para el 100%.
         await Future<void>.delayed(const Duration(milliseconds: 500));
       } else {
         // El instalador no se pudo lanzar (permiso/rechazo): notificar.
-        errorMsg.value = 'No se pudo iniciar la instalación. '
-            'Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
+        errorMsg.value = Platform.isWindows
+            ? 'No se pudo iniciar el instalador de actualización.'
+            : 'No se pudo iniciar la instalación. Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
         await cleanupDownloaded();
       }
     } catch (e) {

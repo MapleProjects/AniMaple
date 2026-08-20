@@ -1,5 +1,14 @@
 # AniMaple — Registro de cambios
 
+## v1.2.10 (20 ago 2026)
+
+### Novedades y mejoras
+- **Favoritos visibles en Inicio y Horario**: los animes agregados a favoritos ahora muestran el distintivo de corazón rojo en las tarjetas de Inicio y en la cuadrícula de Horario de emisión en tiempo real.
+- **Acceso dinámico e inteligente en Inicio**: al tocar un anime que esté en tus favoritos, la app te lleva directamente al capítulo en emisión actual. Si no está en favoritos, abre la vista detallada con la descripción y todos los capítulos como de costumbre.
+- **Corrección de reproducción en Windows (`SourceNotSupported`)**: integración de proxy local HLS/MP4 con inyección de User-Agent y Referer, permitiendo la reproducción fluida de streams HLS y servidores de video en Windows.
+- **Autoactualización en Windows**: soporte completo para detectar nuevas versiones desde GitHub Releases, descargar el instalador en segundo plano con barra de progreso y actualizar la app automáticamente.
+- **Google Sign-In para Windows**: soporte completo del inicio de sesión con Google en Windows vía flujo OAuth 2.0 PKCE + loopback.
+
 ## v1.2.8 (03 ago 2026)
 
 ### Correcciones

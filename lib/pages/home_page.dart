@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/sync_service.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
 import '../widgets/sync_button.dart';
@@ -17,24 +18,45 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   List<RecentEpisode> _episodes = [];
+  Set<String> _followedSlugs = {};
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _load();
+    SyncService.stateVersion.addListener(_loadFollowed);
+  }
+
+  @override
+  void dispose() {
+    SyncService.stateVersion.removeListener(_loadFollowed);
+    super.dispose();
+  }
+
+  Future<void> _loadFollowed() async {
+    try {
+      final f = await ApiService.fetchFollowed();
+      if (mounted) {
+        setState(() {
+          _followedSlugs = f.map((e) => e.animeSlug).toSet();
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load() async {
+    await _loadFollowed();
     const maxRetries = 10;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
         final eps = await ApiService.fetchRecentEpisodes();
-        if (mounted)
+        if (mounted) {
           setState(() {
             _episodes = eps;
             _loading = false;
           });
+        }
         return;
       } catch (e, st) {
         debugPrint('HOME RETRY: $e');
@@ -42,10 +64,11 @@ class _HomePageState extends State<HomePage> {
         await Future.delayed(const Duration(seconds: 3));
       }
     }
-    if (mounted)
+    if (mounted) {
       setState(() {
         _loading = false;
       });
+    }
   }
 
   @override
@@ -93,7 +116,10 @@ class _HomePageState extends State<HomePage> {
                   // Hero banner
                   if (_episodes.isNotEmpty)
                     SliverToBoxAdapter(
-                      child: _HeroBanner(episode: _episodes.first),
+                      child: _HeroBanner(
+                        episode: _episodes.first,
+                        isFollowed: _followedSlugs.contains(_episodes.first.animeSlug),
+                      ),
                     ),
                   // Section header
                   const SliverToBoxAdapter(
@@ -128,23 +154,44 @@ class _HomePageState extends State<HomePage> {
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                         maxCrossAxisExtent: 300,
                         childAspectRatio: 1.35,
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
                       ),
                       delegate: SliverChildBuilderDelegate(
-                        (ctx, i) => EpisodeCardGrid(
-                          episode: _episodes[i],
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  DetailPage(slug: _episodes[i].animeSlug),
-                            ),
-                          ),
-                        ),
+                        (ctx, i) {
+                          final ep = _episodes[i];
+                          final isFollowed = _followedSlugs.contains(ep.animeSlug);
+                          return EpisodeCardGrid(
+                            episode: ep,
+                            isFollowed: isFollowed,
+                            onTap: () {
+                              if (isFollowed) {
+                                // Si está en la lista de favoritos, va directo al capítulo de emisión
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => EpisodePage(
+                                      animeSlug: ep.animeSlug,
+                                      episodeNumber: ep.episodeNumber,
+                                      animeTitle: ep.animeTitle,
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                // Si no está en favoritos, abre la interfaz de detalle con descripción
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => DetailPage(slug: ep.animeSlug),
+                                  ),
+                                );
+                              }
+                            },
+                          );
+                        },
                         childCount: _episodes.length,
                       ),
                     ),
@@ -159,7 +206,8 @@ class _HomePageState extends State<HomePage> {
 
 class _HeroBanner extends StatelessWidget {
   final RecentEpisode episode;
-  const _HeroBanner({required this.episode});
+  final bool isFollowed;
+  const _HeroBanner({required this.episode, this.isFollowed = false});
 
   @override
   Widget build(BuildContext context) {
@@ -206,23 +254,39 @@ class _HeroBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8b5cf6).withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'Nuevo episodio',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFa78bfa),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Nuevo episodio',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFa78bfa),
+                        ),
+                      ),
                     ),
-                  ),
+                    if (isFollowed) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFef4444).withValues(alpha: 0.9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.favorite, color: Colors.white, size: 12),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Text(
