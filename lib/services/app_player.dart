@@ -92,6 +92,9 @@ class MediaKitAppPlayer implements AppPlayer {
     }));
   }
 
+  static const String _defaultUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
   @override
   ValueListenable<bool> get isPlaying => _isPlaying;
 
@@ -118,9 +121,37 @@ class MediaKitAppPlayer implements AppPlayer {
     if (_disposed) return;
     _error.value = null;
     _isLoading.value = true;
+
+    final referer = headers?['Referer'] ??
+        (url.contains('zilla')
+            ? 'https://player.zilla-networks.com/'
+            : (url.contains('mp4upload')
+                ? 'https://www.mp4upload.com/'
+                : ''));
+    final userAgent = headers?['User-Agent'] ?? _defaultUserAgent;
+
+    try {
+      final platform = _player.platform;
+      if (platform != null) {
+        await (platform as dynamic).command(['set', 'user-agent', userAgent]);
+        if (referer.isNotEmpty) {
+          await (platform as dynamic).command(['set', 'referrer', referer]);
+          await (platform as dynamic).command(['set', 'http-header-fields', 'Referer: $referer\r\nUser-Agent: $userAgent\r\nOrigin: $referer\r\n']);
+          await (platform as dynamic).command(['set', 'demuxer-lavf-o', 'headers=Referer: $referer\r\nUser-Agent: $userAgent\r\nOrigin: $referer\r\n']);
+        }
+      }
+    } catch (_) {}
+
+    final mergedHeaders = <String, String>{
+      'User-Agent': userAgent,
+      if (referer.isNotEmpty) 'Referer': referer,
+      if (referer.isNotEmpty) 'Origin': referer,
+      ...?headers,
+    };
+
     final media = mk.Media(
       url,
-      httpHeaders: headers,
+      httpHeaders: mergedHeaders,
     );
     await _player.open(media, play: true);
   }
