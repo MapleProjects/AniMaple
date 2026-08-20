@@ -202,6 +202,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
+  static Size _lastPipSize = const Size(480, 270);
   Size? _savedWindowSize;
   Offset? _savedWindowPosition;
   bool _pipHovered = false;
@@ -216,7 +217,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           await windowManager.setAlwaysOnTop(true);
           await windowManager.setAspectRatio(16 / 9);
           await windowManager.setMinimumSize(const Size(320, 180));
-          await windowManager.setSize(const Size(480, 270));
+          await windowManager.setSize(_lastPipSize);
           setState(() {
             _isPipMode = true;
             _controlsVisible = false;
@@ -240,6 +241,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<void> _exitPipDesktop() async {
     if (!_isDesktop) return;
     try {
+      if (_isPipMode) {
+        try {
+          final curSize = await windowManager.getSize();
+          if (curSize.width >= 280 && curSize.height >= 150) {
+            _lastPipSize = curSize;
+          }
+        } catch (_) {}
+      }
       await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
       await windowManager.setAlwaysOnTop(false);
       await windowManager.setAspectRatio(0);
@@ -1065,23 +1074,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                         Positioned(
                           top: 4,
                           right: 4,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 18),
-                                tooltip: 'Restaurar ventana',
-                                onPressed: _exitPipDesktop,
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
-                                tooltip: 'Cerrar',
-                                onPressed: () {
-                                  _exitPipDesktop();
-                                  Navigator.maybePop(context);
-                                },
-                              ),
-                            ],
+                          child: IconButton(
+                            icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 20),
+                            tooltip: 'Restaurar ventana',
+                            onPressed: _exitPipDesktop,
                           ),
                         ),
                         // Center Play/Pause button
