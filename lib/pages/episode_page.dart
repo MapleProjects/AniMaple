@@ -323,11 +323,28 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   bool _videoErrorShown = false;
+  final Set<String> _failedServers = {};
 
   void _onError() {
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO ERROR: $err');
+      // Si falló el servidor activo, registrarlo y conmutar automáticamente al siguiente espejo
+      if (_activeServer != null) {
+        _failedServers.add(_activeServer!);
+      }
+      final ep = _episode;
+      if (ep != null) {
+        final remaining = ep.embeds
+            .where((s) => s.variant == _activeVariant && !_failedServers.contains(s.server))
+            .toList();
+        if (remaining.isNotEmpty) {
+          debugPrint('Failing over to next available server: ${remaining.first.server}');
+          _playServer(remaining.first);
+          return;
+        }
+      }
+
       // Pérdida de conexión durante la reproducción → reconexión automática
       // indefinida (cada 1s) hasta que el video vuelva, restaurando el
       // progreso visto. Solo si ya había un source cargado.
@@ -485,12 +502,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _autoPlay() {
     final ep = _episode;
     if (ep == null) return;
+    _failedServers.clear();
     final filtered = ep.embeds.where((s) => s.variant == _activeVariant).toList();
-    // Only HLS and MP4Upload — ignore other servers
-    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
-    if (hls.isNotEmpty) { _playServer(hls.first); return; }
-    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
-    if (mp4.isNotEmpty) { _playServer(mp4.first); return; }
+    if (_isDesktop) {
+      final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
+      if (mp4.isNotEmpty) { _playServer(mp4.first); return; }
+      final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
+      if (hls.isNotEmpty) { _playServer(hls.first); return; }
+    } else {
+      final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
+      if (hls.isNotEmpty) { _playServer(hls.first); return; }
+      final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
+      if (mp4.isNotEmpty) { _playServer(mp4.first); return; }
+    }
+    if (filtered.isNotEmpty) {
+      _playServer(filtered.first);
+    }
   }
 
   Future<void> _playServer(ServerMirror server) async {
