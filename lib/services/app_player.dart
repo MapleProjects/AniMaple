@@ -206,18 +206,27 @@ class MediaKitAppPlayer implements AppPlayer {
   @override
   Future<void> close() async {
     if (_disposed) return;
-    await _player.stop();
+    _disposed = true;
+    _isPlaying.value = false;
+    _isLoading.value = false;
+    try {
+      await _player.pause();
+      await _player.stop();
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _disposed = true;
-    _player.stop();
     _isPlaying.value = false;
     _isLoading.value = false;
     _positionMs.value = 0;
     _durationMs.value = 0;
     _error.value = null;
+    try {
+      _player.pause();
+      _player.stop();
+    } catch (_) {}
   }
 
   static final GlobalKey _videoWidgetKey = GlobalKey();
