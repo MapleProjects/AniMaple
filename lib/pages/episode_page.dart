@@ -177,9 +177,19 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // ── Desktop-only: keyboard shortcut F + mouse hover ──
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyF) {
-      _toggleFullscreen();
-      return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.keyF) {
+        _toggleFullscreen();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape && _isFullscreen) {
+        _toggleFullscreen();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.space) {
+        _togglePlayPause();
+        return KeyEventResult.handled;
+      }
     }
     return KeyEventResult.ignored;
   }
@@ -488,8 +498,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.positionMs.removeListener(_onPositionChanged);
     _player.durationMs.removeListener(_onDurationChanged);
     _player.dispose();
-    if (_isDesktop && _isPipMode) {
-      _exitPipDesktop();
+    if (_isDesktop) {
+      if (_isFullscreen) {
+        windowManager.setFullScreen(false);
+      }
+      if (_isPipMode) {
+        _exitPipDesktop();
+      }
     }
     _syncPipState(false);
     _dismissMediaNotification();
@@ -638,16 +653,23 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _goPrev() => _switchEpisode(_currentEp - 1);
 
   void _toggleFullscreen() async {
+    final nextFullscreen = !_isFullscreen;
     if (_isDesktop) {
-      try { await _linuxChannel.invokeMethod('toggleFullScreen'); } catch (_) {}
+      try {
+        await windowManager.setFullScreen(nextFullscreen);
+      } catch (e) {
+        debugPrint('Windows fullscreen error: $e');
+      }
+    } else {
+      if (nextFullscreen) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      }
     }
-    setState(() => _isFullscreen = !_isFullscreen);
-    if (_isFullscreen && !_isDesktop) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else if (!_isDesktop) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (mounted) {
+      setState(() => _isFullscreen = nextFullscreen);
     }
-    // Orientation is always controlled by the device sensor — never forced.
   }
 
   @override
