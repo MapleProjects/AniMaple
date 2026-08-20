@@ -212,9 +212,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (!_isPipMode) {
           _savedWindowSize = await windowManager.getSize();
           _savedWindowPosition = await windowManager.getPosition();
+          await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
           await windowManager.setAlwaysOnTop(true);
-          await windowManager.setSize(const Size(440, 248));
-          await windowManager.setMinimumSize(const Size(280, 160));
+          await windowManager.setAspectRatio(16 / 9);
+          await windowManager.setMinimumSize(const Size(320, 180));
+          await windowManager.setSize(const Size(480, 270));
           setState(() {
             _isPipMode = true;
             _controlsVisible = false;
@@ -238,7 +240,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<void> _exitPipDesktop() async {
     if (!_isDesktop) return;
     try {
+      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
       await windowManager.setAlwaysOnTop(false);
+      await windowManager.setAspectRatio(0);
       await windowManager.setMinimumSize(const Size(800, 500));
       if (_savedWindowSize != null) {
         await windowManager.setSize(_savedWindowSize!);
@@ -838,7 +842,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       alignment: Alignment.center,
       children: [
         // Video surface
-        _player.buildView(fit: BoxFit.contain),
+        _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
 
         // ── Everything below is hidden in PiP mode ──
         if (!_isPipMode) ...[
