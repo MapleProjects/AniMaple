@@ -133,11 +133,10 @@ class MediaKitAppPlayer implements AppPlayer {
     try {
       final platform = _player.platform;
       if (platform != null) {
-        await (platform as dynamic).command(['set', 'user-agent', userAgent]);
+        await (platform as dynamic)._setPropertyString('user-agent', userAgent);
         if (referer.isNotEmpty) {
-          await (platform as dynamic).command(['set', 'referrer', referer]);
-          await (platform as dynamic).command(['set', 'http-header-fields', 'Referer: $referer\r\nUser-Agent: $userAgent\r\nOrigin: $referer\r\n']);
-          await (platform as dynamic).command(['set', 'demuxer-lavf-o', 'headers=Referer: $referer\r\nUser-Agent: $userAgent\r\nOrigin: $referer\r\n']);
+          await (platform as dynamic)._setPropertyString('referrer', referer);
+          await (platform as dynamic)._setPropertyString('http-header-fields', 'Referer: $referer\r\nUser-Agent: $userAgent\r\n');
         }
       }
     } catch (_) {}
