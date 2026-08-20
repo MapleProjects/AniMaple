@@ -7,6 +7,7 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
 import '../widgets/error_dialog.dart';
+import 'package:window_manager/window_manager.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
 
@@ -201,11 +202,58 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
+  Size? _savedWindowSize;
+  Offset? _savedWindowPosition;
+  bool _pipHovered = false;
+
   Future<void> _enterPip() async {
+    if (_isDesktop) {
+      try {
+        if (!_isPipMode) {
+          _savedWindowSize = await windowManager.getSize();
+          _savedWindowPosition = await windowManager.getPosition();
+          await windowManager.setAlwaysOnTop(true);
+          await windowManager.setSize(const Size(440, 248));
+          await windowManager.setMinimumSize(const Size(280, 160));
+          setState(() {
+            _isPipMode = true;
+            _controlsVisible = false;
+          });
+        } else {
+          await _exitPipDesktop();
+        }
+      } catch (e) {
+        debugPrint('Windows PiP error: $e');
+      }
+      return;
+    }
+
     try {
       await _pipChannel.invokeMethod('enterPip');
     } catch (e) {
       debugPrint('PiP enter error: $e');
+    }
+  }
+
+  Future<void> _exitPipDesktop() async {
+    if (!_isDesktop) return;
+    try {
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setMinimumSize(const Size(800, 500));
+      if (_savedWindowSize != null) {
+        await windowManager.setSize(_savedWindowSize!);
+      }
+      if (_savedWindowPosition != null) {
+        await windowManager.setPosition(_savedWindowPosition!);
+      }
+    } catch (e) {
+      debugPrint('Error exiting Desktop PiP: $e');
+    }
+    if (mounted) {
+      setState(() {
+        _isPipMode = false;
+        _controlsVisible = true;
+      });
     }
   }
 
@@ -427,6 +475,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.positionMs.removeListener(_onPositionChanged);
     _player.durationMs.removeListener(_onDurationChanged);
     _player.dispose();
+    if (_isDesktop && _isPipMode) {
+      _exitPipDesktop();
+    }
     _syncPipState(false);
     _dismissMediaNotification();
     if (_isFullscreen && !_isDesktop) {
@@ -987,7 +1038,88 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // PiP mode is handled natively by Android — no Flutter overlay
         ], // end if (!_isPipMode)
 
+        // Desktop PiP interactive overlay (hover controls, dragging, restore, close)
+        if (_isPipMode && _isDesktop)
+          Positioned.fill(
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _pipHovered = true),
+              onExit: (_) => setState(() => _pipHovered = false),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: (_) => windowManager.startDragging(),
+                onDoubleTap: _exitPipDesktop,
+                child: AnimatedOpacity(
+                  opacity: _pipHovered ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                    ),
+                    child: Stack(
+                      children: [
+                        // Top action bar
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 18),
+                                tooltip: 'Restaurar ventana',
+                                onPressed: _exitPipDesktop,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
+                                tooltip: 'Cerrar',
+                                onPressed: () {
+                                  _exitPipDesktop();
+                                  Navigator.maybePop(context);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Center Play/Pause button
+                        Center(
+                          child: IconButton(
+                            iconSize: 44,
+                            icon: Icon(
+                              _player.isPlaying.value ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                              color: const Color(0xFFa78bfa),
+                            ),
+                            onPressed: _togglePlayPause,
+                          ),
+                        ),
+                        // Bottom progress indicator
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: ValueListenableBuilder<int>(
+                            valueListenable: _player.positionMs,
+                            builder: (context, pos, _) {
+                              final dur = _player.durationMs.value;
+                              final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+                              return LinearProgressIndicator(
+                                value: progress,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8b5cf6)),
+                                minHeight: 3,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
         // Bottom controls bar with drag bubble
+        if (!_isPipMode)
         IgnorePointer(
           ignoring: !_controlsVisible,
           child: FadeTransition(
