@@ -195,7 +195,20 @@ class MediaKitAppPlayer implements AppPlayer {
       s.cancel();
     }
     _subscriptions.clear();
-    _player.dispose();
+    // Detener la reproducción primero para liberar el pipeline de renderizado
+    // y programar el dispose de libmpv tras el desmontaje del widget Video,
+    // evitando el crash por Access Violation en DirectX11 de Windows.
+    _player.stop().then((_) {
+      Future.delayed(const Duration(milliseconds: 200), () {
+        try {
+          _player.dispose();
+        } catch (_) {}
+      });
+    }).catchError((_) {
+      try {
+        _player.dispose();
+      } catch (_) {}
+    });
   }
 
   @override
