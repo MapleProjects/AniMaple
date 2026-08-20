@@ -452,7 +452,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       debugPrint('Reconnect intent: $url (resume ${_lastPositionMs}ms)');
       try {
         _pendingSeek = _lastPositionMs; // restaurar al volver a playing
-        _player.open(url, headers: _lastVideoHeaders);
+        _player.open(url, headers: _lastVideoHeaders, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         _player.play();
       } catch (e) {
         debugPrint('Reconnect open error: $e');
@@ -474,10 +474,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onPositionChanged() {
+    if (_pendingSeek > 0 && _player.positionMs.value > 0) {
+      final target = _pendingSeek;
+      _pendingSeek = -1;
+      _player.seekTo(target);
+    }
     if (mounted) setState(() {});
   }
 
   void _onDurationChanged() {
+    if (_pendingSeek > 0 && _player.durationMs.value > 0) {
+      final target = _pendingSeek;
+      _pendingSeek = -1;
+      _player.seekTo(target);
+    }
     if (mounted) setState(() {});
   }
 
@@ -617,7 +627,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // propósito.
         _stopReconnect();
 
-        await _player.open(videoUrl, headers: headers);
+        await _player.open(videoUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
