@@ -93,7 +93,7 @@ class MediaKitAppPlayer implements AppPlayer {
   }
 
   static const String _defaultUserAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+      'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
   @override
   ValueListenable<bool> get isPlaying => _isPlaying;
@@ -128,29 +128,37 @@ class MediaKitAppPlayer implements AppPlayer {
             : (url.contains('mp4upload')
                 ? 'https://www.mp4upload.com/'
                 : ''));
-    final userAgent = headers?['User-Agent'] ?? _defaultUserAgent;
+
+    final effectiveHeaders = <String, String>{
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'Accept': '*/*',
+      'Accept-Language': 'es-EC,es-419;q=0.9,es;q=0.8',
+      'User-Agent': _defaultUserAgent,
+      if (referer.isNotEmpty) 'Referer': referer,
+      if (referer.isNotEmpty) 'Origin': referer.endsWith('/') ? referer.substring(0, referer.length - 1) : referer,
+      ...?headers,
+    };
+
+    final ua = effectiveHeaders['User-Agent']!;
+    final ref = effectiveHeaders['Referer'] ?? '';
+    final headerString = effectiveHeaders.entries.map((e) => '${e.key}: ${e.value}').join(r'\r\n') + r'\r\n';
 
     try {
       final platform = _player.platform;
       if (platform != null) {
-        await (platform as dynamic)._setPropertyString('user-agent', userAgent);
-        if (referer.isNotEmpty) {
-          await (platform as dynamic)._setPropertyString('referrer', referer);
-          await (platform as dynamic)._setPropertyString('http-header-fields', 'Referer: $referer\r\nUser-Agent: $userAgent\r\n');
+        await (platform as dynamic)._setPropertyString('user-agent', ua);
+        if (ref.isNotEmpty) {
+          await (platform as dynamic)._setPropertyString('referrer', ref);
         }
+        await (platform as dynamic)._setPropertyString('demuxer-lavf-o', 'headers=$headerString');
       }
     } catch (_) {}
 
-    final mergedHeaders = <String, String>{
-      'User-Agent': userAgent,
-      if (referer.isNotEmpty) 'Referer': referer,
-      if (referer.isNotEmpty) 'Origin': referer,
-      ...?headers,
-    };
-
     final media = mk.Media(
       url,
-      httpHeaders: mergedHeaders,
+      httpHeaders: effectiveHeaders,
     );
     await _player.open(media, play: true);
   }
