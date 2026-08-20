@@ -285,7 +285,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _positionTimer?.cancel();
     _syncPipState(false);
     _dismissMediaNotification();
-    if (mounted) Navigator.pop(context);
+    if (_isDesktop) {
+      if (_isFullscreen) {
+        windowManager.setFullScreen(false);
+        windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+      }
+      if (_isPipMode) {
+        _exitPipDesktop();
+      }
+    }
+    if (mounted) Navigator.maybePop(context);
   }
 
   void _onStateChanged() {
@@ -713,7 +722,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         backgroundColor: const Color(0xFF0a0812),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _closePlayback,
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,10 +742,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             : _buildNarrowLayout(ep, filteredEmbeds, anime),
     );
 
+    final wrapped = PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _player.close();
+          _syncPipState(false);
+          _dismissMediaNotification();
+          if (_isDesktop && _isFullscreen) {
+            windowManager.setFullScreen(false);
+            windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+          }
+        }
+      },
+      child: scaffold,
+    );
+
     if (_isDesktop) {
-      return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: scaffold);
+      return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: wrapped);
     }
-    return scaffold;
+    return wrapped;
   }
 
   Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
@@ -1495,7 +1520,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
-          onTap: () => Navigator.pop(context),
+          onTap: _closePlayback,
           child: Text(widget.animeTitle, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFFe8e4f0))),
         ),
         const SizedBox(height: 4),
