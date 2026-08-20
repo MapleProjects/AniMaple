@@ -21,7 +21,7 @@ abstract class AppPlayer {
 
   bool get isDisposed;
 
-  Future<void> open(String url, {Map<String, String>? headers});
+  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs});
   Future<void> play();
   Future<void> pause();
   Future<void> seekTo(int positionMs);
@@ -136,7 +136,7 @@ class MediaKitAppPlayer implements AppPlayer {
   bool get isDisposed => _disposed;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
     if (_disposed) return;
     _error.value = null;
     _isLoading.value = true;
@@ -178,6 +178,9 @@ class MediaKitAppPlayer implements AppPlayer {
     final media = mk.Media(
       url,
       httpHeaders: effectiveHeaders,
+      start: (startPositionMs != null && startPositionMs > 0)
+          ? Duration(milliseconds: startPositionMs)
+          : null,
     );
     await _player.open(media, play: true);
   }
@@ -312,10 +315,13 @@ class VideoViewAppPlayer implements AppPlayer {
   bool get isDisposed => _disposed;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
     if (_disposed) return;
     _error.value = null;
     _vvController.open(url, headers: headers);
+    if (startPositionMs != null && startPositionMs > 0) {
+      _vvController.seekTo(startPositionMs);
+    }
   }
 
   @override
