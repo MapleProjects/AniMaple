@@ -11,10 +11,12 @@ import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
 import 'pages/history_page.dart';
 import 'pages/following_page.dart';
+import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   ApiService.init();
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.

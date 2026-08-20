@@ -3,10 +3,9 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:video_view/video_view.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
-import '../services/hls_proxy.dart';
+import '../services/app_player.dart';
 import '../widgets/error_dialog.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
@@ -72,13 +71,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   int _countdownSeconds = 5;
   Timer? _countdownTimer;
 
-  // Position update timer (video_view doesn't auto-rebuild on position change)
+  // Position update timer
   Timer? _positionTimer;
 
   // ── Reconexión + preservación de progreso ──
-  // Posición vista (ms) rastreada continuamente. Se usa para restaurar el
-  // progreso tras pérdida de internet (reconexión) y al cambiar de servidor
-  // o de idioma (Doblaje ↔ Subtitulado).
   int _lastPositionMs = 0;
 
   // Último source abierto, para reintentar la reconexión indefinidamente.
@@ -101,23 +97,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
 
-  late final VideoController _player;
-  final HlsProxy _hlsProxy = HlsProxy();
+  late final AppPlayer _player;
 
   @override
   void initState() {
     super.initState();
     _currentEp = widget.episodeNumber;
-    _player = VideoController(autoPlay: true, cancelableNotification: true);
+    _player = AppPlayer.create();
     _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
     _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _seekFadeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300), value: 1.0);
-    _player.playbackState.addListener(_onStateChanged);
-    _player.finishedTimes.addListener(_onFinished);
+    _player.isPlaying.addListener(_onStateChanged);
+    _player.finishedCount.addListener(_onFinished);
     _player.error.addListener(_onError);
-    _player.loading.addListener(_onLoading);
-    _player.videoSize.addListener(_onVideoSize);
-    _player.mediaInfo.addListener(_onMediaInfo);
+    _player.isLoading.addListener(_onLoading);
+    _player.positionMs.addListener(_onPositionChanged);
+    _player.durationMs.addListener(_onDurationChanged);
     _startPositionTimer();
     _load();
     _initPip();
@@ -223,7 +218,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onStateChanged() {
-    final playing = _player.playbackState.value == VideoControllerPlaybackState.playing;
+    final playing = _player.isPlaying.value;
     if (playing) {
       _startPositionTimer();
       // Auto-hide controls when video starts playing
@@ -231,7 +226,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
       // Restaurar la posición pendiente cuando el video vuelve a estar
       // reproduciéndose (tras reconexión o cambio de servidor/idioma).
-      if (_pendingSeek > 0 && _pendingSeek != _player.position.value) {
+      if (_pendingSeek > 0 && _pendingSeek != _player.positionMs.value) {
         final target = _pendingSeek;
         _pendingSeek = -1; // consumir antes del seek (evitar loops)
         _player.seekTo(target);
@@ -255,8 +250,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   /// Cancela el reintento de reconexión si el video ya está reproduciéndose.
   void _stopReconnectIfPlaying() {
-    if (_reconnecting &&
-        _player.playbackState.value == VideoControllerPlaybackState.playing) {
+    if (_reconnecting && _player.isPlaying.value) {
       _reconnecting = false;
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
@@ -273,8 +267,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _updateMediaSession(bool playing) {
     try {
-      final duration = _player.mediaInfo.value?.duration ?? 0;
-      final position = _player.position.value;
+      final duration = _player.durationMs.value;
+      final position = _player.positionMs.value;
       final animeDetail = _animeDetail;
       _mediaChannel.invokeMethod('updateMediaSession', {
         'title': widget.animeTitle,
@@ -294,7 +288,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onFinished() {
-    if (_player.finishedTimes.value > 0 && mounted && !_autoPlayedNext) {
+    if (_player.finishedCount.value > 0 && mounted && !_autoPlayedNext) {
       _autoPlayedNext = true;
       final has = _animeDetail != null && _currentEp < _animeDetail!.episodes.length;
       if (has) {
@@ -333,7 +327,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onError() {
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
-      debugPrint('VIDEO_VIEW ERROR: $err');
+      debugPrint('VIDEO ERROR: $err');
       // Pérdida de conexión durante la reproducción → reconexión automática
       // indefinida (cada 1s) hasta que el video vuelva, restaurando el
       // progreso visto. Solo si ya había un source cargado.
@@ -357,26 +351,24 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   /// Reintenta abrir el último source cada segundo, indefinidamente, hasta
   /// que la conexión vuelva y el video se reproduzca de nuevo. Al lograrlo,
-  /// [playbackState] cambia a playing y [seekTo] restaura la posición.
+  /// [isPlaying] cambia a playing y [seekTo] restaura la posición.
   void _startReconnect() {
     if (_reconnecting) return;
     _reconnecting = true;
     _videoErrorShown = false;
     // Guardar el progreso justo antes de caer, por si el timer no lo capturó.
-    final pos = _player.position.value;
+    final pos = _player.positionMs.value;
     if (pos > 0) _lastPositionMs = pos;
     if (mounted) setState(() {});
 
     _reconnectTimer?.cancel();
-    // Intento cada 8 s: a 1 s el video apenas llegaba a cargar cuando ya se
-    // relanzaba el siguiente intento, así que nunca llegaba a reproducirse.
     _reconnectTimer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (!mounted || _player.disposed) {
+      if (!mounted || _player.isDisposed) {
         _reconnectTimer?.cancel();
         return;
       }
       // Si el player ya volvió a reproducir, no reintentar más.
-      if (_player.playbackState.value == VideoControllerPlaybackState.playing) {
+      if (_player.isPlaying.value) {
         _stopReconnectIfPlaying();
         return;
       }
@@ -390,8 +382,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       try {
         _pendingSeek = _lastPositionMs; // restaurar al volver a playing
         _player.open(url, headers: _lastVideoHeaders);
-        // Forzar reproducción: con autoPlay soló se reproducía en el primer
-        // open; en la reconexión quedaba pausado y el usuario debía tocar.
         _player.play();
       } catch (e) {
         debugPrint('Reconnect open error: $e');
@@ -412,13 +402,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() {});
   }
 
-  void _onVideoSize() {
-    debugPrint('VIDEO_VIEW videoSize: ${_player.videoSize.value}');
+  void _onPositionChanged() {
     if (mounted) setState(() {});
   }
 
-  void _onMediaInfo() {
-    debugPrint('VIDEO_VIEW mediaInfo: ${_player.mediaInfo.value?.duration}');
+  void _onDurationChanged() {
     if (mounted) setState(() {});
   }
 
@@ -432,14 +420,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
-    _player.playbackState.removeListener(_onStateChanged);
-    _player.finishedTimes.removeListener(_onFinished);
+    _player.isPlaying.removeListener(_onStateChanged);
+    _player.finishedCount.removeListener(_onFinished);
     _player.error.removeListener(_onError);
-    _player.loading.removeListener(_onLoading);
-    _player.videoSize.removeListener(_onVideoSize);
-    _player.mediaInfo.removeListener(_onMediaInfo);
+    _player.isLoading.removeListener(_onLoading);
+    _player.positionMs.removeListener(_onPositionChanged);
+    _player.durationMs.removeListener(_onDurationChanged);
     _player.dispose();
-    _hlsProxy.stop(); // cerrar proxy local de HLS
     _syncPipState(false);
     _dismissMediaNotification();
     if (_isFullscreen && !_isDesktop) {
@@ -535,31 +522,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                 : null;
 
-        // Asegurar que el proxy local esté iniciado para inyectar headers
-        // (Referer/User-Agent) y corregir Content-Type en Windows y Android.
-        await _hlsProxy.start();
-        final playableUrl = videoType == 'hls'
-            ? _hlsProxy.proxyM3U8(videoUrl, referer: headers?['Referer'])
-            : (_isDesktop
-                ? _hlsProxy.proxyVideo(videoUrl, referer: headers?['Referer'])
-                : videoUrl);
-
         // Cambio de servidor/idioma: conservar la posición actual para
         // restaurarla cuando el nuevo source empiece a reproducirse.
-        final before = _player.position.value;
+        final before = _player.positionMs.value;
         if (before > 0) _lastPositionMs = before;
         _pendingSeek = _lastPositionMs;
 
         // Registrar el source activo: permite reconectar automáticamente si
         // el usuario pierde internet durante la reproducción.
-        _lastVideoUrl = playableUrl;
-        _lastVideoHeaders = _isDesktop ? null : headers;
+        _lastVideoUrl = videoUrl;
+        _lastVideoHeaders = headers;
 
         // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
         // propósito.
         _stopReconnect();
 
-        _player.open(playableUrl, headers: _isDesktop ? null : headers);
+        await _player.open(videoUrl, headers: headers);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
@@ -714,12 +692,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       if (!mounted) return;
       // Cargar el progreso visto para restaurarlo (reconexión / cambio de
       // servidor / cambio de idioma). Solo se guarda en reproducción.
-      if (_player.playbackState.value == VideoControllerPlaybackState.playing) {
-        _lastPositionMs = _player.position.value;
+      if (_player.isPlaying.value) {
+        _lastPositionMs = _player.positionMs.value;
       }
       // Clear _dragValue when player position catches up after seek
       if (_dragValue != null && !_isDragging) {
-        final pos = _player.position.value;
+        final pos = _player.positionMs.value;
         if ((pos - _dragValue!).abs() < 1500) {
           _dragValue = null;
         }
@@ -746,8 +724,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _togglePlayPause() {
-    final ps = _player.playbackState.value;
-    if (ps == VideoControllerPlaybackState.playing) {
+    final ps = _player.isPlaying.value;
+    if (ps) {
       _player.pause();
       if (!_isPipMode) {
         setState(() => _controlsVisible = true);
@@ -763,8 +741,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _seekRelative(int deltaMs) {
     final now = DateTime.now();
-    final pos = _player.position.value;
-    final dur = _player.mediaInfo.value?.duration ?? 0;
+    final pos = _player.positionMs.value;
+    final dur = _player.durationMs.value;
 
     // Accumulate seeks within the time window
     if (_lastSeekTapTime != null && now.difference(_lastSeekTapTime!) < _seekAccumulationWindow) {
@@ -804,18 +782,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // ── Video player with overlay controls ──
 
   Widget _buildVideoPlayer() {
-    final isPlaying = _player.playbackState.value == VideoControllerPlaybackState.playing;
+    final isPlaying = _player.isPlaying.value;
     final playerWidget = Stack(
       alignment: Alignment.center,
       children: [
         // Video surface
-        VideoView(controller: _player),
+        _player.buildView(fit: BoxFit.contain),
 
         // ── Everything below is hidden in PiP mode ──
         if (!_isPipMode) ...[
 
         // Loading spinner
-        if (_player.loading.value)
+        if (_player.isLoading.value)
           const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
 
         // Reconexión automática (pérdida de internet): aviso al usuario
@@ -841,7 +819,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ),
 
         // Big center play/pause (when paused)
-        if (!isPlaying && !_player.loading.value)
+        if (!isPlaying && !_player.isLoading.value)
           GestureDetector(
             onTap: _togglePlayPause,
             child: Container(
@@ -1016,8 +994,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             opacity: _controlsAnim!,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final dur = _player.mediaInfo.value?.duration ?? 0;
-                final pos = _player.position.value;
+                final dur = _player.durationMs.value;
+                final pos = _player.positionMs.value;
                 final dv = _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
                 final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
                 // Position bubble above thumb. Account for slider padding (16px each side).
