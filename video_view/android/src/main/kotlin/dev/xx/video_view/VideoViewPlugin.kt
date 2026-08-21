@@ -94,13 +94,15 @@ class VideoController(
 				".ism/manifest" -> MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_SS).build()
 				else -> MediaItem.fromUri(url)
 			}
-			if (headers != null && headers.isNotEmpty()) {
-				// DataSource con User-Agent de navegador y headers de referer,
-				// aplicado a CUALQUIER tipo (MP4 y HLS). Cloudflare bloquea los
-				// clientes sin headers de navegador (Sec-Fetch-*, UA real, etc.),
-				// no por fingerprint TLS — por eso ExoPlayer puede reproducir HLS
-				// de zilla si se envían los headers correctos.
-				val effectiveHeaders = headers.toMutableMap()
+			if (networking) {
+				val effectiveHeaders = (headers ?: emptyMap()).toMutableMap()
+				if (!effectiveHeaders.containsKey("Referer")) {
+					if (url.contains("mp4upload")) {
+						effectiveHeaders["Referer"] = "https://www.mp4upload.com/"
+					} else if (url.contains("zilla")) {
+						effectiveHeaders["Referer"] = "https://player.zilla-networks.com/"
+					}
+				}
 				if (!effectiveHeaders.containsKey("Sec-Fetch-Dest")) {
 					effectiveHeaders["Sec-Fetch-Dest"] = "empty"
 				}
@@ -122,10 +124,8 @@ class VideoController(
 						"(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 				}
 				val httpFactory = DefaultHttpDataSource.Factory()
-					.setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
+					.setUserAgent(effectiveHeaders["User-Agent"]!!)
 					.setDefaultRequestProperties(effectiveHeaders)
-				// DefaultMediaSourceFactory detecta el tipo (Progressive/HLS/DASH)
-				// y usa el DataSource con headers para m3u8 y mp4 por igual.
 				val mediaSource = DefaultMediaSourceFactory(httpFactory)
 					.createMediaSource(mediaItem)
 				exoPlayer.setMediaSource(mediaSource)

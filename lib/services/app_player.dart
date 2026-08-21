@@ -327,7 +327,17 @@ class VideoViewAppPlayer implements AppPlayer {
   Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
     if (_disposed) return;
     _error.value = null;
-    _vvController.open(url, headers: headers);
+    final referer = headers?['Referer'] ??
+        (url.contains('zilla')
+            ? 'https://player.zilla-networks.com/'
+            : (url.contains('mp4upload')
+                ? 'https://www.mp4upload.com/'
+                : ''));
+    final effectiveHeaders = <String, String>{
+      if (referer.isNotEmpty) 'Referer': referer,
+      ...?headers,
+    };
+    _vvController.open(url, headers: effectiveHeaders);
     if (startPositionMs != null && startPositionMs > 0) {
       _vvController.seekTo(startPositionMs);
     }
