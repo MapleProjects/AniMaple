@@ -21,8 +21,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
+    MediaKit.ensureInitialized();
   }
-  MediaKit.ensureInitialized();
   ApiService.init();
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
