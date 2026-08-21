@@ -26,6 +26,7 @@ class VideoControllerImplementation extends VideoController {
 
   StreamSubscription? _eventSubscription;
   String? _source;
+  Map<String, String>? _headers;
   var _seeking = false;
   var _position = 0;
 
@@ -138,7 +139,7 @@ class VideoControllerImplementation extends VideoController {
               }
             });
         if (_source != null) {
-          open(_source!);
+          open(_source!, headers: _headers);
           if (_position > 0) {
             seekTo(_position);
           }
@@ -202,6 +203,7 @@ class VideoControllerImplementation extends VideoController {
   open(source, {Map<String, String>? headers}) {
     if (!disposed) {
       _source = source;
+      _headers = headers;
       if (_id != null) {
         error.value = null;
         _close();
