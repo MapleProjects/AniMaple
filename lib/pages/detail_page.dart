@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/download_service.dart';
+import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import 'episode_page.dart';
 
@@ -17,11 +20,27 @@ class _DetailPageState extends State<DetailPage> {
   bool _loading = true;
   bool _followed = false;
   Set<int> _watchedEpisodes = {};
+  final DownloadService _dl = DownloadService.instance;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Redibujar al cambiar el estado de descargas (badges de la grilla).
+    // SOLO version: cambios estructurales (encolar, terminar, borrar).
+    // El progreso continuo NO reconstruye esta página (ahorro en gama baja);
+    // el porcentaje vivo vive en el FAB y en el gestor.
+    _dl.version.addListener(_onDownloadsChanged);
+  }
+
+  @override
+  void dispose() {
+    _dl.version.removeListener(_onDownloadsChanged);
+    super.dispose();
+  }
+
+  void _onDownloadsChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -188,6 +207,26 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ),
                   ]),
+                  const SizedBox(height: 12),
+                  // Download row
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => DownloadSheet.show(context, anime),
+                        icon: const Icon(Icons.download_rounded,
+                            color: Color(0xFFa78bfa)),
+                        label: Text(
+                          _downloadLabel(anime.slug),
+                          style: const TextStyle(color: Color(0xFFa78bfa)),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFF2a2240)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ]),
                   const SizedBox(height: 16),
                   // Genres
                   if (anime.genres.isNotEmpty) Wrap(spacing: 6, runSpacing: 4, children: anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))).toList()),
@@ -216,6 +255,10 @@ class _DetailPageState extends State<DetailPage> {
                 (ctx, i) {
                   final ep = anime.episodes[i];
                   final isWatched = _watchedEpisodes.contains(ep.number);
+                  final isDownloaded = _dl.isDownloaded(anime.slug, ep.number);
+                  final isQueued = _dl.isQueued(anime.slug, ep.number);
+                  final epProgress =
+                      _dl.progress.value['${anime.slug}#${ep.number}'];
                   return InkWell(
                     onTap: () => _playEpisode(anime, ep.number),
                     borderRadius: BorderRadius.circular(8),
@@ -224,17 +267,21 @@ class _DetailPageState extends State<DetailPage> {
                         color: const Color(0xFF110e1a),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isWatched
-                              ? const Color(0xFF8b5cf6)
-                              : const Color(0xFF1e1832),
-                          width: isWatched ? 2 : 1,
+                          color: isQueued
+                              ? const Color(0xFFf59e0b)
+                              : isDownloaded
+                                  ? const Color(0xFF22c55e)
+                                  : isWatched
+                                      ? const Color(0xFF8b5cf6)
+                                      : const Color(0xFF1e1832),
+                          width: isWatched || isDownloaded || isQueued ? 2 : 1,
                         ),
                       ),
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          Text('${ep.number}', style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
-                          if (isWatched)
+                          Text('${ep.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isDownloaded ? const Color(0xFF22c55e) : const Color(0xFFe8e4f0))),
+                          if (isWatched && !isDownloaded)
                             Positioned(
                               top: 2, right: 2,
                               child: Container(
@@ -243,6 +290,34 @@ class _DetailPageState extends State<DetailPage> {
                                   color: Color(0xFF8b5cf6),
                                   shape: BoxShape.circle,
                                 ),
+                              ),
+                            ),
+                          if (isWatched && isDownloaded)
+                            Positioned(
+                              top: 2, right: 2,
+                              child: Container(width: 8, height: 8,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF8b5cf6),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: const Color(0xFF0a0812), width: 1.5),
+                                ),
+                              ),
+                            ),
+                          if (isDownloaded && !isQueued)
+                            Positioned(
+                              bottom: 2, left: 2,
+                              child: Icon(Icons.download_done_rounded,
+                                  size: 11, color: const Color(0xFF22c55e)),
+                            ),
+                          if (isQueued)
+                            Padding(
+                              padding: const EdgeInsets.all(7),
+                              child: CircularProgressIndicator(
+                                value: (epProgress != null && epProgress > 0 && epProgress <= 1)
+                                    ? epProgress
+                                    : null,
+                                strokeWidth: 2,
+                                color: const Color(0xFFf59e0b),
                               ),
                             ),
                         ],
@@ -258,6 +333,16 @@ class _DetailPageState extends State<DetailPage> {
         ],
       ),
     );
+  }
+
+  /// Etiqueta del botón de descargas según estado del anime.
+  String _downloadLabel(String slug) {
+    final n = _dl.downloadedEpisodes(slug).length;
+    if (_dl.isQueued(slug, -1) || _dl.progress.value.keys.any((k) => k.startsWith('$slug#'))) {
+      if (n == 0) return 'Descargando…';
+    }
+    if (n > 0) return 'Descargas ($n)';
+    return 'Descargar';
   }
 
   void _playEpisode(AnimeDetail anime, int episodeNumber) {
