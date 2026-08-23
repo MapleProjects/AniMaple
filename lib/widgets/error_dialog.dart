@@ -14,6 +14,15 @@ import 'package:flutter/services.dart';
 
 void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
     {String? title, String? slug}) {
+  // Guardas anti-saturación: nunca dos hojas a la vez ni más de una cada
+  // 8 s. Sin esto, un arranque sin Internet apila decenas de hojas por
+  // segundo (una por cada reintento o imagen que falla).
+  if (_sheetOpen) return;
+  final now = DateTime.now();
+  if (now.difference(_lastSheetShown) < const Duration(seconds: 8)) return;
+  _sheetOpen = true;
+  _lastSheetShown = now;
+
   final detail = _formatError(error, stackTrace, slug: slug);
   showModalBottomSheet(
     context: context,
@@ -27,7 +36,28 @@ void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
       error: error,
       detail: detail,
     ),
-  );
+  ).whenComplete(() => _sheetOpen = false);
+}
+
+bool _sheetOpen = false;
+DateTime _lastSheetShown = DateTime.fromMillisecondsSinceEpoch(0);
+
+/// True si el error es puramente de red/conexión (sin Internet, DNS,
+/// socket, timeout). Estos errores son ESPERADOS en modo offline: no deben
+/// mostrarse como error, la app funciona sin conexión y reintenta sola.
+bool isConnectivityError(Object error) {
+  final s = error.toString().toLowerCase();
+  return s.contains('socketexception') ||
+      s.contains('connection') ||
+      s.contains('failed host lookup') ||
+      s.contains('network is unreachable') ||
+      s.contains('timed out') ||
+      s.contains('timeout') ||
+      s.contains('handshake') ||
+      s.contains('software caused connection abort') ||
+      s.contains('connection refused') ||
+      s.contains('connection reset') ||
+      s.contains('errno');
 }
 
 String _formatError(Object error, StackTrace? stackTrace, {String? slug}) {
@@ -208,6 +238,9 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
     FlutterError.onError = (details) {
       debugPrint('FLUTTER ERROR: ${details.exception}');
       debugPrint('${details.stack}');
+      // Errores de red de Image.network etc. (offline esperado): solo log,
+      // NUNCA hoja de error — saturarían la app en modo sin conexión.
+      if (isConnectivityError(details.exception)) return;
       if (mounted) {
         showErrorSheet(
           context,

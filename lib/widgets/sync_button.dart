@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../services/sync_service.dart';
@@ -19,10 +21,17 @@ class _SyncButtonState extends State<SyncButton> {
   String? _name;
   String? _photoUrl;
 
+  /// Cuenta recordada de una sesión anterior (persistente). Mientras la
+  /// sesión real no se restaure (p.ej. arranque sin Internet), el avatar
+  /// aparece "con sesión": al tocar, en vez del login, reintenta la
+  /// restauración silenciosa — igual que Windows, que carga directo.
+  bool _remembered = false;
+
   @override
   void initState() {
     super.initState();
     _refreshFromService();
+    _loadRemembered();
 
     // Escuchar eventos de auth/sign-out y cambios de estado en vivo.
     // google_sign_in no existe para Windows/Linux → solo en plataformas
@@ -36,6 +45,13 @@ class _SyncButtonState extends State<SyncButton> {
     SyncService.stateVersion.addListener(_onStateChanged);
   }
 
+  Future<void> _loadRemembered() async {
+    final has = await SyncService.hasRememberedAccount();
+    if (mounted && has != _remembered) {
+      setState(() => _remembered = has);
+    }
+  }
+
   @override
   void dispose() {
     SyncService.stateVersion.removeListener(_onStateChanged);
@@ -45,6 +61,7 @@ class _SyncButtonState extends State<SyncButton> {
   void _onStateChanged() {
     if (!mounted) return;
     _refreshFromService();
+    _loadRemembered();
   }
 
   void _refreshFromService() {
@@ -57,7 +74,7 @@ class _SyncButtonState extends State<SyncButton> {
   }
 
   Future<void> _handleTap() async {
-    if (!_signedIn) {
+    if (!_signedIn && !_remembered) {
       // Iniciar sesión y arrancar la sincronización automática.
       final ok = await SyncService.signIn();
       if (!mounted) return;
@@ -77,6 +94,22 @@ class _SyncButtonState extends State<SyncButton> {
       } else {
         _showErrorOnly();
       }
+      return;
+    }
+
+    if (!_signedIn && _remembered) {
+      // Cuenta recordada aún no restaurada (sin red al abrir, etc.):
+      // reintentar la restauración silenciosa, sin pedir login de nuevo.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reconectando con tu cuenta…'),
+          backgroundColor: Color(0xFF8b5cf6),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      unawaited(SyncService.attemptRestoreAndSync().then((_) {
+        if (mounted) _refreshFromService();
+      }));
       return;
     }
 
@@ -180,7 +213,7 @@ class _SyncButtonState extends State<SyncButton> {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: _handleTap,
-      child: _signedIn
+      child: (_signedIn || _remembered)
           ? Padding(
               padding: const EdgeInsets.all(4),
               child: CircleAvatar(

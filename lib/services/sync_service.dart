@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
 import 'api_service.dart';
 import 'gdrive_config.dart';
@@ -208,6 +209,11 @@ class SyncService {
     _authHeaders = null;
     _fileId = null;
     _lastRemoteVersion = null;
+    // Olvidar la cuenta recordada: el usuario cerró sesión a propósito.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_rememberedAccountKey);
+    } catch (_) {}
     lastError = null;
     stateVersion.value++;
   }
@@ -318,14 +324,54 @@ class SyncService {
   /// Restaura la sesión (si es posible) y sincroniza. Se llama al arranque y
   /// desde el watcher de conectividad cuando la red vuelve. No muestra UI:
   /// si no hay credencial guardada termina silenciosamente (login manual).
+  ///
+  /// Anti-martillo: sin Internet, el reintento de restauración ocurre cada
+  /// ≥10 s (no en cada tick del polling). La sesión recordada se marca en
+  /// SharedPreferences para que el arranque SIN red sepa que hay cuenta y
+  /// muestre el avatar aunque la restauración silenciosa aún no logre
+  /// contactar a Google.
+  static const _rememberedAccountKey = 'sync_remembered_account';
+
   static Future<void> attemptRestoreAndSync() async {
     if (isSignedIn) {
       sync(forcePush: true); // ya hay sesión → publicar/traer de inmediato
       return;
     }
+    // Martillado: como máximo un intento de restore cada 10 s. El polling
+    // de 10 s y el watcher de conectividad llaman aquí; sin este guard, un
+    // arranque offline dispararía intentos en ráfaga cada segundo.
+    final now = DateTime.now();
+    if (_lastRestoreAttempt != null &&
+        now.difference(_lastRestoreAttempt!) < const Duration(seconds: 10)) {
+      return;
+    }
+    _lastRestoreAttempt = now;
+
     final restored = await tryRestoreSession().catchError((_) => false);
     if (restored == true) {
+      // Recordar la cuenta para futuros arranques (persistente).
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+            _rememberedAccountKey, accountEmail ?? 'signed-in');
+      } catch (_) {}
       sync(forcePush: true);
+    }
+  }
+
+  static DateTime? _lastRestoreAttempt;
+
+  /// ¿Hay una cuenta recordada de una sesión anterior? Fuente persistente
+  /// para la UI mientras la sesión real aún no se restaura (p.ej. arranque
+  /// sin Internet: el avatar aparece con sesión desde el primer frame).
+  static Future<bool> hasRememberedAccount() async {
+    if (isSignedIn) return true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString(_rememberedAccountKey);
+      return v != null && v.isNotEmpty;
+    } catch (_) {
+      return false;
     }
   }
 
