@@ -1,7 +1,7 @@
 name: animaple
 description: "AniMaple — Anime streaming app"
 publish_to: 'none'
-version: 1.2.10+18
+version: 1.2.12+24
 
 environment:
   sdk: ^3.10.0
@@ -31,6 +31,8 @@ dependencies:
   # flujo Authorization Code + PKCE (loopback 127.0.0.1). Este crypto es solo
   # para generar el code_challenge de PKCE.
   crypto: ^3.0.3
+  # Descargas offline: resuelve directorios de datos de la app (Android/desktop).
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

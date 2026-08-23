@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 import 'services/api_service.dart';
+import 'services/download_service.dart';
 import 'services/sync_service.dart';
 import 'services/notification_service.dart';
 import 'services/update_service.dart';
@@ -14,6 +15,7 @@ import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
 import 'pages/history_page.dart';
 import 'pages/following_page.dart';
+import 'widgets/downloads_fab.dart';
 import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
 
@@ -24,6 +26,9 @@ void main() async {
     MediaKit.ensureInitialized();
   }
   ApiService.init();
+  // Descargas offline: cargar índice y limpiar .part huérfanos de sesiones
+  // anteriores (crash/apagado a mitad de descarga).
+  unawaited(DownloadService.instance.init());
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
   // Patrón oficial google_sign_in v7: initialize() → attemptLightweightAuthentication()
@@ -272,6 +277,7 @@ class _MainShellState extends State<MainShell> {
           ),
         ],
       ),
+      floatingActionButton: const DownloadsFab(),
     );
   }
 }

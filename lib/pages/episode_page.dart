@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
+import '../services/download_service.dart';
+import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -17,11 +19,17 @@ class EpisodePage extends StatefulWidget {
   final int episodeNumber;
   final String animeTitle;
 
+  /// true cuando se abre desde la biblioteca de descargas: la grilla muestra
+  /// SOLO los capítulos descargados y Anterior/Siguiente navegan dentro de
+  /// ese conjunto (el salto automático respeta el mismo filtro).
+  final bool offlineLibrary;
+
   const EpisodePage({
     super.key,
     required this.animeSlug,
     required this.episodeNumber,
     required this.animeTitle,
+    this.offlineLibrary = false,
   });
 
   @override
@@ -32,6 +40,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
+
+  // ── Modo offline ──
+  // Ruta del archivo local si el episodio está descargado. En modo offline no
+  // se llama a la API: el detalle del episodio se sintetiza y la reproducción
+  // abre el archivo directo (video_view resuelve file:// internamente).
+  // addHistory se registra igual para sincronizar al volver la conexión.
+  // ignore: unused_field
+  String? _offlinePath;
 
   String? _activeServer;
   String _activeVariant = 'DUB';
@@ -535,6 +551,56 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _load() async {
+    // ── 0. Detalle offline del anime (sin API): reconstruido de meta.json.
+    // Da sinopsis, etiquetas y grilla de capítulos en modo sin conexión.
+    if (_animeDetail == null) {
+      try {
+        final local = await DownloadService.instance.animeDetailFor(widget.animeSlug);
+        if (local != null) _animeDetail = local;
+      } catch (_) {}
+    }
+
+    // ── 1. Offline-first: ¿existe descarga local de este episodio? ──
+    final localPath = await DownloadService.instance
+        .videoPath(widget.animeSlug, _currentEp);
+    if (localPath != null) {
+      if (!mounted) return;
+      setState(() {
+        _offlinePath = localPath;
+        _episode = EpisodeDetail(
+          id: 0,
+          mediaId: (_animeDetail?.id ?? 0),
+          number: _currentEp,
+          variants: const ['DUB'],
+          filler: false,
+          embeds: const [],
+          downloads: const [],
+        );
+        _loading = false;
+        _autoPlayedNext = false;
+      });
+      ApiService.addHistory(
+        _animeDetail?.id ?? 0,
+        widget.animeSlug,
+        widget.animeTitle,
+        _currentEp,
+      );
+      try {
+        final history = await ApiService.fetchHistory();
+        _watchedEpisodes = history
+            .where((h) => h.animeSlug == widget.animeSlug)
+            .map((h) => h.episodeNumber)
+            .toSet();
+        _watchedEpisodes.add(_currentEp);
+      } catch (_) {}
+      // Ruta absoluta sin esquema: video_view la convierte a file:// en
+      // Android (open: `!source.contains("://")` → "file://$source") y usa
+      // media_kit/libmpv directamente en desktop.
+      unawaited(_player.open(localPath));
+      return;
+    }
+
+    // ── 2. Streaming normal (online) ──
     const maxRetries = 15;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
@@ -650,12 +716,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _switchEpisode(int newEp) {
     final detail = _animeDetail;
     if (detail == null) return;
+    if (widget.offlineLibrary &&
+        !DownloadService.instance.isDownloaded(widget.animeSlug, newEp)) {
+      return; // Modo biblioteca: navegar solo entre capítulos descargados.
+    }
     if (newEp < 1 || newEp > detail.episodes.length) return;
     if (newEp == _currentEp) return;
     setState(() {
       _currentEp = newEp;
       _loading = true;
       _userStartedPlayback = false;
+      // Reset del estado offline: el nuevo capítulo se resuelve en _load().
+      _offlinePath = null;
     });
     // Cancelar reconexión y reiniciar la posición: es otro capítulo, no
     // debe heredar el progreso del anterior.
@@ -1540,11 +1612,75 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         ],
         if (anime != null && anime.episodes.isNotEmpty) ...[
           const SizedBox(height: 20),
-          const Text('Episodios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFe8e4f0))),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Episodios',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFe8e4f0))),
+              ),
+              // Botón "Descargar": abre el selector de capítulos con el
+              // capítulo actual ya marcado (mismo menú del detail page).
+              ValueListenableBuilder<Map<String, double>>(
+                valueListenable: DownloadService.instance.progress,
+                builder: (context, progress, _) {
+                  final dl = DownloadService.instance;
+                  final n = ep.number;
+                  final slug = widget.animeSlug;
+                  final isDownloaded = dl.isDownloaded(slug, n);
+                  final isQueued = dl.isQueued(slug, n);
+
+                  // Sin detalle del anime no se puede abrir el selector.
+                  if (_animeDetail == null) {
+                    return const SizedBox.shrink();
+                  }
+
+                  // Descargado o en cola: solo estado, sin acción de descarga.
+                  if (isDownloaded || isQueued) {
+                    return Icon(
+                      isDownloaded
+                          ? Icons.check_circle_rounded
+                          : Icons.downloading_rounded,
+                      size: 20,
+                      color: isDownloaded
+                          ? const Color(0xFF22c55e)
+                          : const Color(0xFFf59e0b),
+                    );
+                  }
+
+                  return OutlinedButton.icon(
+                    onPressed: () => DownloadSheet.show(
+                      context,
+                      _animeDetail!,
+                      preselected: {n},
+                    ),
+                    icon: const Icon(Icons.download_rounded, size: 17),
+                    label: const Text('Descargar'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFa78bfa),
+                      side: const BorderSide(color: Color(0xFF3b2f5c)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      minimumSize: const Size(0, 34),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: anime.episodes.map((e) {
+          Wrap(spacing: 8, runSpacing: 8, children: anime.episodes
+              .where((e) =>
+                  !widget.offlineLibrary ||
+                  DownloadService.instance.isDownloaded(
+                      widget.animeSlug, e.number))
+              .map((e) {
             final isCurrent = e.number == ep.number;
             final isWatched = _watchedEpisodes.contains(e.number) && !isCurrent;
+            final isDownloaded =
+                DownloadService.instance.isDownloaded(widget.animeSlug, e.number);
             return GestureDetector(
               onTap: () {
                 if (!isCurrent) _switchEpisode(e.number);
@@ -1555,8 +1691,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   color: isCurrent ? const Color(0xFF8b5cf6) : const Color(0xFF110e1a),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isCurrent ? const Color(0xFF8b5cf6) : isWatched ? const Color(0xFF8b5cf6) : const Color(0xFF1e1832),
-                    width: isWatched ? 2 : 1,
+                    color: isCurrent
+                        ? const Color(0xFF8b5cf6)
+                        : isDownloaded
+                            ? const Color(0xFF22c55e)
+                            : isWatched
+                                ? const Color(0xFF8b5cf6)
+                                : const Color(0xFF1e1832),
+                    width: isWatched || isDownloaded ? 2 : 1,
                   ),
                 ),
                 child: Stack(
