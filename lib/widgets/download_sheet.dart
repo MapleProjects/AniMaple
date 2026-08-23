@@ -295,63 +295,18 @@ class _DownloadSheetState extends State<DownloadSheet> {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: downloaded.isEmpty
-                          ? null
-                          : () async {
-                              final ok = await showDialog<bool>(
-                                context: context,
-                                builder: (ctx) => AlertDialog(
-                                  backgroundColor: const Color(0xFF110e1a),
-                                  title: const Text('Borrar todas las descargas',
-                                      style: TextStyle(
-                                          color: Color(0xFFe8e4f0))),
-                                  content: Text(
-                                      '¿Eliminar las ${downloaded.length} descargas de este anime?',
-                                      style: const TextStyle(
-                                          color: Color(0xFFa99fc0))),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, false),
-                                      child: const Text('Cancelar',
-                                          style: TextStyle(
-                                              color: Color(0xFF6d6488))),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(ctx, true),
-                                      child: const Text('Eliminar',
-                                          style: TextStyle(
-                                              color: Color(0xFFef4444))),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (ok == true) {
-                                await _dl.deleteAnime(slug);
-                                if (mounted) setState(() {});
-                              }
-                            },
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      label: const Text('Borrar'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFef4444),
-                        side: const BorderSide(color: Color(0xFF2a1520)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
                       onPressed: pendingCount == 0
                           ? null
-                          : () => _enqueue({
-                                for (final e in eps)
-                                  if (!downloaded.contains(e.number) &&
-                                      !_dl.isQueued(slug, e.number))
-                                    e.number
+                          : () => setState(() {
+                                _selected = {
+                                  for (final e in eps)
+                                    if (!downloaded.contains(e.number) &&
+                                        !_dl.isQueued(slug, e.number))
+                                      e.number
+                                };
                               }),
                       icon: const Icon(Icons.select_all, size: 18),
-                      label: const Text('Todo'),
+                      label: const Text('Seleccionar todo'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFFa78bfa),
                         side: const BorderSide(color: Color(0xFF3b2f5c)),

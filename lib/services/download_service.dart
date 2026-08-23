@@ -62,6 +62,13 @@ class DownloadService {
       ValueNotifier<List<Map<String, dynamic>>>([]);
 
   final List<_Job> _queue = [];
+
+  /// Claves `slug#ep` que fallaron en su último intento y deben reencolarse
+  /// al final de la cola (reintento con jerarquía). Se marca al fallar sin
+  /// cancelación del usuario; _pump lo consume y vuelve a poner el job al
+  /// final. Si falla de nuevo, se repite el ciclo (siempre al final).
+  final Set<String> _failedJobs = {};
+
   _Job? _current;
   Timer? _stallTimer;
 
@@ -578,6 +585,13 @@ class DownloadService {
       } finally {
         if (_current?.key == job.key) _current = null;
         _setProgress(job.key, null);
+        // Reintento con jerarquía: si el capítulo falló (sin cancelación
+        // del usuario), vuelve a encolarse AL FINAL de su anime. Así el 6
+        // fallido deja pasar al 7 y recupera su lugar cuando llegue su turno.
+        if (_failedJobs.remove(job.key)) {
+          _queue.add(job);
+          debugPrint('REQUEUE RETRY: ${job.key}');
+        }
         _notify();
         _pump();
       }
@@ -774,7 +788,11 @@ class DownloadService {
       debugPrint('DOWNLOAD OK: ${job.key} ($size bytes)');
     } catch (e) {
       debugPrint('DOWNLOAD FAIL: ${job.key} → $e');
-      if (!_cancelRequested) _markFailure(job.key, '$e');
+      if (!_cancelRequested) {
+        _markFailure(job.key, '$e');
+        // Marcar para reencolado al final (reintento con jerarquía).
+        _failedJobs.add(job.key);
+      }
       // Limpiar parciales para no dejar basura.
       for (final p in [videoTmp.path, tmpPlaylist.path]) {
         try {
