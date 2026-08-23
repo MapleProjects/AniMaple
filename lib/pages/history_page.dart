@@ -30,7 +30,11 @@ class HistoryPageState extends State<HistoryPage> {
       setState(() { _history = h; _loading = false; });
     } catch (e, st) {
       debugPrint('HISTORY ERROR: $e');
-      if (mounted) showErrorSheet(context, e, st);
+      // Offline esperado: sin hoja de error; el historial es local y la app
+      // reintenta sola al volver la red.
+      if (mounted && !isConnectivityError(e)) {
+        showErrorSheet(context, e, st);
+      }
       setState(() => _loading = false);
     }
   }

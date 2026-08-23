@@ -70,7 +70,13 @@ class _DetailPageState extends State<DetailPage> {
     } catch (e, st) {
       debugPrint('DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e');
       debugPrint('DETAIL STACKTRACE: $st');
-      if (attempt == 0 && mounted) showErrorSheet(context, e, st, slug: widget.slug);
+      // Offline esperado: sin hoja de error, la app funciona sin conexión y
+      // reintenta sola. Solo errores reales (no de red) muestran el reporte.
+      if (attempt == 0 &&
+          mounted &&
+          !isConnectivityError(e)) {
+        showErrorSheet(context, e, st, slug: widget.slug);
+      }
       await Future.delayed(const Duration(seconds: 3));
     }
     }

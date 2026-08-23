@@ -60,7 +60,11 @@ class _HomePageState extends State<HomePage> {
         return;
       } catch (e, st) {
         debugPrint('HOME RETRY: $e');
-        if (attempt == 0 && mounted) showErrorSheet(context, e, st);
+        // Offline esperado: sin hoja de error (la app funciona sin conexión
+        // y reintenta sola); solo errores reales muestran el reporte.
+        if (attempt == 0 && mounted && !isConnectivityError(e)) {
+          showErrorSheet(context, e, st);
+        }
         await Future.delayed(const Duration(seconds: 3));
       }
     }

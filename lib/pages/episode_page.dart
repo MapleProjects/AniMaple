@@ -639,7 +639,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         return;
       } catch (e, st) {
         debugPrint('EPISODE LOAD RETRY: $e');
-        if (attempt == 0 && mounted) showErrorSheet(context, e, st, slug: widget.animeSlug);
+        // Offline esperado al cargar el episodio: sin hoja de error, reintenta
+        // solo. Solo errores reales (no de red) muestran el reporte.
+        if (attempt == 0 &&
+            mounted &&
+            !isConnectivityError(e)) {
+          showErrorSheet(context, e, st, slug: widget.animeSlug);
+        }
         await Future.delayed(const Duration(seconds: 3));
       }
     }
