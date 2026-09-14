@@ -35,11 +35,13 @@ class MainActivity : FlutterActivity() {
     private val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
     private val NOTIF_CHANNEL = "com.mapleprojects.animaple/notifications"
     private val UPDATE_CHANNEL = "com.mapleprojects.animaple/updater"
+    private val DOWNLOAD_CHANNEL = "com.mapleprojects.animaple/downloads"
 
     private var pipMethodChannel: MethodChannel? = null
     private var mediaMethodChannel: MethodChannel? = null
     private var notifMethodChannel: MethodChannel? = null
     private var updateMethodChannel: MethodChannel? = null
+    private var downloadMethodChannel: MethodChannel? = null
 
     // ── PiP State ──
     private var isPipSupported = false
@@ -233,6 +235,35 @@ class MainActivity : FlutterActivity() {
                 }
                 "requestBatteryOptimizationExemption" -> {
                     requestBatteryOptimizationExemption()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // ── Download Channel ──
+        downloadMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DOWNLOAD_CHANNEL)
+        downloadMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startDownloadService" -> {
+                    val title = call.argument<String>("title") ?: "Anime"
+                    val episode = call.argument<Int>("episode") ?: 1
+                    val slug = call.argument<String>("slug") ?: ""
+                    DownloadForegroundService.start(this, title, episode, slug)
+                    result.success(true)
+                }
+                "updateDownloadProgress" -> {
+                    val title = call.argument<String>("title") ?: "Anime"
+                    val episode = call.argument<Int>("episode") ?: 1
+                    val progress = call.argument<Int>("progress") ?: 0
+                    val status = call.argument<String>("status") ?: ""
+                    DownloadForegroundService.update(this, title, episode, progress, status)
+                    result.success(true)
+                }
+                "stopDownloadService" -> {
+                    val completedTitle = call.argument<String>("completedTitle")
+                    val completedEp = call.argument<Int>("completedEp")
+                    DownloadForegroundService.stop(this, completedTitle, completedEp)
                     result.success(true)
                 }
                 else -> result.notImplemented()

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/anime.dart';
@@ -34,11 +35,112 @@ class DownloadService {
 
   static const _rootName = 'animaple_downloads';
   static const _indexFile = 'index.json';
+  static const _queueFile = 'queue.json';
   static const _partSuffix = '.part';
+
+  static const MethodChannel _downloadChannel =
+      MethodChannel('com.mapleprojects.animaple/downloads');
+
+  static Future<void> _startNativeForeground(String title, int episode, String slug) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      await _downloadChannel.invokeMethod('startDownloadService', {
+        'title': title,
+        'episode': episode,
+        'slug': slug,
+      });
+    } catch (e) {
+      debugPrint('DownloadService native start error: $e');
+    }
+  }
+
+  static DateTime? _lastNativeUpdate;
+  static double? _lastNativeProgress;
+
+  static Future<void> _updateNativeForeground(
+    String title,
+    int episode,
+    int progressPercent,
+    String status, {
+    bool force = false,
+  }) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    final now = DateTime.now();
+    if (!force &&
+        _lastNativeUpdate != null &&
+        now.difference(_lastNativeUpdate!).inMilliseconds < 400 &&
+        _lastNativeProgress != null &&
+        (progressPercent - _lastNativeProgress!).abs() < 2) {
+      return;
+    }
+    _lastNativeUpdate = now;
+    _lastNativeProgress = progressPercent.toDouble();
+    try {
+      await _downloadChannel.invokeMethod('updateDownloadProgress', {
+        'title': title,
+        'episode': episode,
+        'progress': progressPercent,
+        'status': status,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> _stopNativeForeground({String? completedTitle, int? completedEp}) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    _lastNativeUpdate = null;
+    _lastNativeProgress = null;
+    try {
+      await _downloadChannel.invokeMethod('stopDownloadService', {
+        if (completedTitle != null) 'completedTitle': completedTitle,
+        if (completedEp != null) 'completedEp': completedEp,
+      });
+    } catch (_) {}
+  }
 
   Directory? _root;
   Map<String, Map<String, dynamic>> _index = {};
   bool _loaded = false;
+
+  File _queuePath(Directory root) => File('${root.path}/$_queueFile');
+
+  Future<void> _saveQueue() async {
+    try {
+      final root = await _ensureRoot();
+      final list = <Map<String, dynamic>>[];
+      if (_current != null && !_cancelRequested) {
+        list.add(_current!.toJson());
+      }
+      for (final j in _queue) {
+        list.add(j.toJson());
+      }
+      final file = _queuePath(root);
+      final tmp = File('${file.path}.tmp');
+      await tmp.writeAsString(jsonEncode(list));
+      if (await file.exists()) await file.delete();
+      await tmp.rename(file.path);
+    } catch (e) {
+      debugPrint('DownloadService error saving queue: $e');
+    }
+  }
+
+  Future<void> _loadQueue(Directory root) async {
+    try {
+      final file = _queuePath(root);
+      if (!await file.exists()) return;
+      final raw = await file.readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final job = _Job.fromJson(item.cast<String, dynamic>());
+        if (isDownloaded(job.slug, job.episode)) continue;
+        if (isQueued(job.slug, job.episode)) continue;
+        _queue.add(job);
+      }
+    } catch (e) {
+      debugPrint('DownloadService error loading queue: $e');
+    }
+  }
 
   // ── Estado reactivo para la UI ──────────────────────────────────────────
   /// Eventos de cambio: tras completar/borrar/encolar cualquier episodio.
@@ -89,8 +191,13 @@ class DownloadService {
     final root = await _ensureRoot();
     await _loadIndex(root);
     await _cleanupPartials(root);
+    await _loadQueue(root);
     _loaded = true;
     version.value++;
+    // Reanudar automáticamente si había elementos pendientes en la cola
+    if (_queue.isNotEmpty) {
+      _pump();
+    }
   }
 
   void _touchLoaded() {
@@ -491,8 +598,9 @@ class DownloadService {
       if (isDownloaded(slug, ep)) continue;
       if (isQueued(slug, ep)) continue;
       _clearFailure(key);
-      _queue.add(_Job(key: key, slug: slug, episode: ep, preferDub: preferDub));
+      _queue.add(_Job(key: key, slug: slug, episode: ep, preferDub: preferDub, title: title));
     }
+    _saveQueue();
     _notify();
     _pump();
   }
@@ -507,6 +615,10 @@ class DownloadService {
         _current!.slug == slug &&
         (episode == null || _current!.episode == episode)) {
       _cancelRequested = true;
+    }
+    _saveQueue();
+    if (_queue.isEmpty && _current == null) {
+      _stopNativeForeground();
     }
     _notify();
   }
@@ -528,6 +640,7 @@ class DownloadService {
     if (await hls.exists()) await hls.delete(recursive: true);
     _rebuildIndexFromDisk(root, slug);
     await _saveIndex(root);
+    _saveQueue();
     _notify();
   }
 
@@ -541,6 +654,7 @@ class DownloadService {
     }
     _index.remove(slug);
     await _saveIndex(root);
+    _saveQueue();
     _notify();
   }
 
@@ -549,6 +663,7 @@ class DownloadService {
     final root = await _ensureRoot();
     _queue.clear();
     _cancelRequested = _current != null;
+    _stopNativeForeground();
     if (await root.exists()) {
       await for (final child in root.list()) {
         try {
@@ -559,6 +674,7 @@ class DownloadService {
     }
     _index.clear();
     await _saveIndex(root);
+    _saveQueue();
     _notify();
   }
 
@@ -570,16 +686,28 @@ class DownloadService {
 
   void _pump() {
     if (_current != null) return;
-    if (_queue.isEmpty) return;
+    if (_queue.isEmpty) {
+      _stopNativeForeground();
+      return;
+    }
     final job = _queue.removeAt(0);
     _current = job;
     _cancelRequested = false;
+    _saveQueue();
+    final animeTitle = job.title.isNotEmpty ? job.title : job.slug;
+    _startNativeForeground(animeTitle, job.episode, job.slug);
     _setProgress(job.key, 0.0);
     // El error del job ya quedó registrado en failures[]; aquí solo se
     // traga para no convertirse en excepción no manejada de la zona.
     () async {
       try {
         await _runJob(job);
+        if (_queue.isEmpty) {
+          _stopNativeForeground(
+            completedTitle: job.title.isNotEmpty ? job.title : job.slug,
+            completedEp: job.episode,
+          );
+        }
       } catch (e) {
         debugPrint('JOB DONE (fail): ${job.key}');
       } finally {
@@ -592,6 +720,7 @@ class DownloadService {
           _queue.add(job);
           debugPrint('REQUEUE RETRY: ${job.key}');
         }
+        _saveQueue();
         _notify();
         _pump();
       }
@@ -610,6 +739,11 @@ class DownloadService {
         return;
       }
       m[key] = value;
+      if (_current != null && _current!.key == key) {
+        final pct = (value * 100).clamp(0, 100).toInt();
+        final title = _current!.title.isNotEmpty ? _current!.title : _current!.slug;
+        _updateNativeForeground(title, _current!.episode, pct, '$pct%');
+      }
     }
     progress.value = m;
   }
@@ -1157,10 +1291,29 @@ class _Job {
   final String slug;
   final int episode;
   final bool preferDub;
+  final String title;
+
   _Job({
     required this.key,
     required this.slug,
     required this.episode,
     this.preferDub = false,
+    this.title = '',
   });
+
+  Map<String, dynamic> toJson() => {
+        'key': key,
+        'slug': slug,
+        'episode': episode,
+        'preferDub': preferDub,
+        'title': title,
+      };
+
+  factory _Job.fromJson(Map<String, dynamic> json) => _Job(
+        key: json['key'] as String? ?? '${json['slug']}#${json['episode']}',
+        slug: json['slug'] as String? ?? '',
+        episode: (json['episode'] as num?)?.toInt() ?? 1,
+        preferDub: json['preferDub'] as bool? ?? false,
+        title: json['title'] as String? ?? '',
+      );
 }

@@ -31,10 +31,8 @@ void main() async {
   unawaited(DownloadService.instance.init());
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
-  // Patrón oficial google_sign_in v7: initialize() → attemptLightweightAuthentication()
-  // UNA sola vez (tras el primer frame, cuando existe contexto de Activity).
-  // NO en bucle: cada llamada en Android puede abrir el selector de cuentas.
-  // El estado real (login/logout) se refleja vía authenticationEvents en la UI.
+  // google_sign_in 6.x usa signInSilently() (100% invisible en Android, sin
+  // ventanas emergentes de Credential Manager).
   unawaited(() async {
     await SyncService.initialize();
     // Arrancar SIEMPRE el polling de 10s y el watcher de conectividad, esté

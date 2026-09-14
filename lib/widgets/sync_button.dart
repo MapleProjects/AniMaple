@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import '../services/sync_service.dart';
 
 /// Avatar de perfil en el AppBar.
@@ -37,7 +36,7 @@ class _SyncButtonState extends State<SyncButton> {
     // google_sign_in no existe para Windows/Linux → solo en plataformas
     // soportadas; la app sigue funcionando local sin sincronización.
     if (SyncService.googleSignInSupported) {
-      GoogleSignIn.instance.authenticationEvents.listen((event) {
+      SyncService.onCurrentUserChanged.listen((account) {
         if (!mounted) return;
         _refreshFromService();
       });

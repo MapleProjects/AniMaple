@@ -1,7 +1,7 @@
 name: animaple
 description: "AniMaple — Anime streaming app"
 publish_to: 'none'
-version: 1.2.14+26
+version: 1.2.15+30
 
 environment:
   sdk: ^3.10.0
@@ -22,8 +22,9 @@ dependencies:
   media_kit_video: ^1.2.5
   media_kit_libs_windows_video: ^1.0.9
   window_manager: ^0.5.2
-  google_sign_in: ^7.2.0
-  # v7 requiere AGP 8.9.1+; el proyecto usa AGP 8.7.3 → serie 6.x (compatible)
+  wakelock_plus: ^1.2.8
+  google_sign_in: ^6.2.2
+  # 6.x usa silentSignIn sin ventanas emergentes de Credential Manager en Android
   connectivity_plus: ^6.0.0
   webview_flutter: ^4.14.1
   # OAuth de escritorio (Windows/Linux/macOS) para iniciar sesión con Google.
