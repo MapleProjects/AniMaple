@@ -72,7 +72,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   final FocusNode _focusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   Timer? _debounce;
-  Timer? _inactivityTimer;
+  bool _keyboardWasOpen = false;
 
   List<AnimeBasic> _items = [];
   bool _loading = true;
@@ -92,7 +92,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _ctrl.addListener(_onSearchChanged);
-    _focusNode.addListener(_onFocusChanged);
     _fetchPage(refresh: true);
   }
 
@@ -100,10 +99,8 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _debounce?.cancel();
-    _inactivityTimer?.cancel();
     _ctrl.removeListener(_onSearchChanged);
     _ctrl.dispose();
-    _focusNode.removeListener(_onFocusChanged);
     _focusNode.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -114,29 +111,18 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   void didChangeMetrics() {
     super.didChangeMetrics();
     final bottomInset = View.of(context).viewInsets.bottom;
-    if (bottomInset == 0 && _focusNode.hasFocus) {
+    final isOpen = bottomInset > 0;
+    if (_keyboardWasOpen && !isOpen && _focusNode.hasFocus) {
       _focusNode.unfocus();
     }
-  }
-
-  void _onFocusChanged() {
-    if (mounted) setState(() {});
+    _keyboardWasOpen = isOpen;
   }
 
   void _onSearchChanged() {
     _debounce?.cancel();
-    _inactivityTimer?.cancel();
-
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (mounted) {
         _fetchPage(refresh: true);
-      }
-    });
-
-    // Disable cursor and illumination 1.2 seconds after user stops typing
-    _inactivityTimer = Timer(const Duration(milliseconds: 1200), () {
-      if (mounted && _focusNode.hasFocus) {
-        _focusNode.unfocus();
       }
     });
   }
@@ -483,16 +469,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final query = _ctrl.text.trim();
     final showingSearch = query.isNotEmpty;
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
-    // Turn off illumination if keyboard closed
-    if (!keyboardVisible && _focusNode.hasFocus) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _focusNode.hasFocus) {
-          _focusNode.unfocus();
-        }
-      });
-    }
 
     final activeFilterCount =
         (_selectedStatus != null ? 1 : 0) + _selectedGenres.length;
@@ -517,7 +493,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                     child: TextField(
                       controller: _ctrl,
                       focusNode: _focusNode,
-                      showCursor: _focusNode.hasFocus && keyboardVisible,
                       onSubmitted: (_) => _focusNode.unfocus(),
                       style: const TextStyle(color: Color(0xFFe8e4f0)),
                       decoration: InputDecoration(
@@ -549,11 +524,8 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: keyboardVisible
-                                ? const Color(0xFF8b5cf6)
-                                : const Color(0xFF1e1832),
-                          ),
+                          borderSide:
+                              const BorderSide(color: Color(0xFF8b5cf6)),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 12),
