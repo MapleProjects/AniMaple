@@ -9,6 +9,7 @@ import '../services/app_player.dart';
 import '../services/download_service.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
@@ -316,6 +317,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onStateChanged() {
     final playing = _player.isPlaying.value;
     if (playing) {
+      WakelockPlus.enable();
       _startPositionTimer();
       // Auto-hide controls when video starts playing
       _startHideTimer();
@@ -334,6 +336,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       // correcto; el timer de reconexión se cancela aquí.
       _stopReconnectIfPlaying();
     } else {
+      WakelockPlus.disable();
       _positionTimer?.cancel();
     }
     // Only sync playing=true to native AFTER user explicitly started playback.
@@ -518,6 +521,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _hideTimer?.cancel();
     _countdownTimer?.cancel();
     _positionTimer?.cancel();

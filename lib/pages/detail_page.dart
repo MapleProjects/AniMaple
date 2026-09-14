@@ -20,6 +20,7 @@ class _DetailPageState extends State<DetailPage> {
   bool _loading = true;
   bool _followed = false;
   Set<int> _watchedEpisodes = {};
+  int? _lastWatchedEpisode;
   final DownloadService _dl = DownloadService.instance;
 
   @override
@@ -54,15 +55,25 @@ class _DetailPageState extends State<DetailPage> {
       debugPrint('DETAIL LOAD fetchFollowed OK: ${followed.length} entries');
       final history = await ApiService.fetchHistory();
       debugPrint('DETAIL LOAD fetchHistory OK: ${history.length} entries');
-      final watched = history
+      final animeHistory = history
           .where((h) => h.animeSlug == widget.slug)
-          .map((h) => h.episodeNumber)
-          .toSet();
+          .toList();
+      final watched = animeHistory.map((h) => h.episodeNumber).toSet();
+      int? lastWatched;
+      if (animeHistory.isNotEmpty) {
+        animeHistory.sort((a, b) {
+          final da = DateTime.tryParse(a.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final db = DateTime.tryParse(b.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da);
+        });
+        lastWatched = animeHistory.first.episodeNumber;
+      }
       if (mounted) {
       setState(() {
         _anime = anime;
         _followed = followed.any((f) => f.animeId == anime.id);
         _watchedEpisodes = watched;
+        _lastWatchedEpisode = lastWatched;
         _loading = false;
       });
       }
@@ -185,20 +196,31 @@ class _DetailPageState extends State<DetailPage> {
                   // Action buttons
                   Row(children: [
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          if (anime.episodes.isNotEmpty) {
-                            _playEpisode(anime, anime.episodes.last.number);
-                          }
+                      child: Builder(
+                        builder: (_) {
+                          final hasEpisodes = anime.episodes.isNotEmpty;
+                          final hasHistory = _lastWatchedEpisode != null &&
+                              anime.episodes.any((e) => e.number == _lastWatchedEpisode);
+                          final targetEpisode = hasHistory
+                              ? _lastWatchedEpisode!
+                              : (hasEpisodes ? anime.episodes.first.number : 1);
+                          final label = hasHistory
+                              ? 'Continuar Ep. $_lastWatchedEpisode'
+                              : 'Reproducir';
+                          return ElevatedButton.icon(
+                            onPressed: hasEpisodes
+                                ? () => _playEpisode(anime, targetEpisode)
+                                : null,
+                            icon: const Icon(Icons.play_arrow),
+                            label: Text(label),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF8b5cf6),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          );
                         },
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Reproducir'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8b5cf6),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -365,11 +387,25 @@ class _DetailPageState extends State<DetailPage> {
   Future<void> _refreshWatched() async {
     try {
       final history = await ApiService.fetchHistory();
-      final watched = history
+      final animeHistory = history
           .where((h) => h.animeSlug == widget.slug)
-          .map((h) => h.episodeNumber)
-          .toSet();
-      if (mounted) setState(() => _watchedEpisodes = watched);
+          .toList();
+      final watched = animeHistory.map((h) => h.episodeNumber).toSet();
+      int? lastWatched;
+      if (animeHistory.isNotEmpty) {
+        animeHistory.sort((a, b) {
+          final da = DateTime.tryParse(a.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final db = DateTime.tryParse(b.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da);
+        });
+        lastWatched = animeHistory.first.episodeNumber;
+      }
+      if (mounted) {
+        setState(() {
+          _watchedEpisodes = watched;
+          _lastWatchedEpisode = lastWatched;
+        });
+      }
     } catch (_) {}
   }
 

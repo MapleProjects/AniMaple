@@ -260,6 +260,7 @@ class VideoViewAppPlayer implements AppPlayer {
     _vvController = vv.VideoController(
       autoPlay: true,
       cancelableNotification: true,
+      keepScreenOn: true,
     );
 
     _vvController.playbackState.addListener(_onState);
@@ -384,6 +385,7 @@ class VideoViewAppPlayer implements AppPlayer {
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     return vv.VideoView(
       controller: _vvController,
+      keepScreenOn: true,
     );
   }
 }

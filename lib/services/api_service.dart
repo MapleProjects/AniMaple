@@ -307,16 +307,44 @@ class ApiService {
     });
   }
 
-  // ── Search ──────────────────────────────────────────
+  // ── Catalog & Search ─────────────────────────────────
 
-  static Future<List<AnimeBasic>> search(String query) async {
+  static Future<List<AnimeBasic>> fetchCatalog({
+    String? search,
+    dynamic genre,
+    List<String>? genres,
+    String? status,
+    int page = 1,
+    String order = 'latest_released',
+  }) async {
     return _retry(() async {
-      final resp = await _http.get(
-        Uri.parse(
-          '$_base/catalogo/__data.json',
-        ).replace(queryParameters: {'search': query}),
-        headers: _headers,
+      final queryParams = <String, dynamic>{};
+      final trimmedSearch = search?.trim();
+      if (trimmedSearch != null && trimmedSearch.isNotEmpty) {
+        queryParams['search'] = trimmedSearch;
+        if (page > 1) queryParams['page'] = page.toString();
+      } else {
+        if (order.isNotEmpty) queryParams['order'] = order;
+        final effectiveGenres = <String>[];
+        if (genres != null && genres.isNotEmpty) {
+          effectiveGenres.addAll(genres);
+        } else if (genre is List<String>) {
+          effectiveGenres.addAll(genre);
+        } else if (genre is String && genre.isNotEmpty) {
+          effectiveGenres.add(genre);
+        }
+        if (effectiveGenres.isNotEmpty) {
+          queryParams['genre'] = effectiveGenres;
+        }
+        if (status != null && status.isNotEmpty) queryParams['status'] = status;
+        if (page > 1) queryParams['page'] = page.toString();
+      }
+
+      final uri = Uri.parse('$_base/catalogo/__data.json').replace(
+        queryParameters: queryParams.isNotEmpty ? queryParams : null,
       );
+
+      final resp = await _http.get(uri, headers: _headers);
       final json = _jsonFrom(resp);
       final data = _getMainData(json);
       if (data == null) return [];
@@ -333,6 +361,10 @@ class ApiService {
       return _resolveAnimeList(data, indices);
     });
   }
+
+  static Future<List<AnimeBasic>> search(String query) =>
+      fetchCatalog(search: query);
+
 
   // ── Schedule ────────────────────────────────────────
 

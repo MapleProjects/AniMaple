@@ -92,14 +92,11 @@ class SyncService {
           defaultTargetPlatform == TargetPlatform.iOS ||
           defaultTargetPlatform == TargetPlatform.macOS);
 
-  /// Inicializa el singleton de Google Sign-In (o carga la sesión desktop).
-  /// Debe llamarse una sola vez, antes de cualquier otro método.
-  static Future<void> initialize() async {
-    if (!googleSignInSupported) {
-      await DesktopGoogleAuth.load();
-      return;
-    }
-    await GoogleSignIn.instance.initialize(
+  static GoogleSignIn? _googleSignIn;
+
+  static GoogleSignIn _getGoogleSignIn() {
+    return _googleSignIn ??= GoogleSignIn(
+      scopes: const [_scopeDriveAppdata],
       clientId: GDriveConfig.androidClientId.isEmpty
           ? null
           : GDriveConfig.androidClientId,
@@ -109,31 +106,35 @@ class SyncService {
     );
   }
 
-  /// Restaura una sesión previa (silencioso, sin UI). Patrón oficial v7:
-  /// attemptLightweightAuthentication() UNA vez. Devuelve true si hay sesión.
-  /// No depende de obtener el token de acceso al instante: la sesión se
-  /// considera restaurada aunque el token no esté cacheado todavía (se
-  /// obtiene bajo demanda en el primer sync). Si requiere UI (usuario no
-  /// autorizó aún, múltiples cuentas), se resuelve por authenticationEvents.
+  /// Stream de cambios de cuenta para la UI.
+  static Stream<GoogleSignInAccount?> get onCurrentUserChanged =>
+      _getGoogleSignIn().onCurrentUserChanged;
+
+  /// Inicializa el singleton de Google Sign-In (o carga la sesión desktop).
+  /// Debe llamarse una sola vez, antes de cualquier otro método.
+  static Future<void> initialize() async {
+    if (!googleSignInSupported) {
+      await DesktopGoogleAuth.load();
+      return;
+    }
+    _getGoogleSignIn();
+  }
+
+  /// Restaura una sesión previa (silencioso, sin UI emergente).
+  /// En 6.x: signInSilently() consulta a Google Play Services en segundo plano
+  /// SIN mostrar ningún diálogo emergente ni ventana del sistema.
   static Future<bool> tryRestoreSession() async {
     if (!googleSignInSupported) {
       return DesktopGoogleAuth.tryRestore();
     }
     try {
-      final restored = await GoogleSignIn.instance
-          .attemptLightweightAuthentication();
+      final restored = await _getGoogleSignIn().signInSilently(reAuthenticate: false);
       if (restored == null) return false;
       _account = restored;
       _lastRemoteVersion = null;
-      // Token opcional en el arranque: si no está disponible sin UI,
-      // se cacheará en el primer pull/push (con prompt si hace falta).
       await _cacheAuthHeaders(prompt: false);
       _notifySessionChanged();
       return true;
-    } on GoogleSignInException catch (e) {
-      // Falla silenciosa esperada si no hay sesión guardada aún.
-      debugPrint('Sync: restore skipped: ${e.code} ${e.description}');
-      return false;
     } catch (e) {
       // Sin red o sin sesión aún — no es un error fatal.
       debugPrint('Sync: restore session skipped: $e');
@@ -175,9 +176,10 @@ class SyncService {
       return false;
     }
     try {
-      final account = await GoogleSignIn.instance.authenticate(
-        scopeHint: const [_scopeDriveAppdata],
-      );
+      final account = await _getGoogleSignIn().signIn();
+      if (account == null) {
+        return false;
+      }
       _account = account;
       _lastRemoteVersion = null;
       if (!await _cacheAuthHeaders(prompt: true)) {
@@ -185,12 +187,9 @@ class SyncService {
         return false;
       }
       startAutoSync(); // arrancar sincronización automática
+      _notifySessionChanged();
       debugPrint('Sync: signed in as ${account.email}');
       return true;
-    } on GoogleSignInException catch (e) {
-      lastError = 'Error al iniciar sesión con Google: ${e.description}';
-      debugPrint('Sync signIn error: ${e.code} ${e.description}');
-      return false;
     } catch (e) {
       lastError = 'Error al iniciar sesión con Google: $e';
       debugPrint('Sync signIn error: $e');
@@ -201,7 +200,7 @@ class SyncService {
   static Future<void> signOut() async {
     stopAutoSync();
     if (googleSignInSupported) {
-      await GoogleSignIn.instance.signOut();
+      await _getGoogleSignIn().signOut();
     } else {
       await DesktopGoogleAuth.signOut();
     }
@@ -230,11 +229,8 @@ class SyncService {
     final account = _account;
     if (account == null) return false;
     try {
-      final headers = await account.authorizationClient.authorizationHeaders(
-        const [_scopeDriveAppdata],
-        promptIfNecessary: prompt,
-      );
-      if (headers == null) return false;
+      final headers = await account.authHeaders;
+      if (headers.isEmpty) return false;
       _authHeaders = headers;
       return true;
     } catch (e) {
