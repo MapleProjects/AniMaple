@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaSession
@@ -14,6 +15,7 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
@@ -34,6 +36,7 @@ class PlaybackService : Service() {
 
     private var mediaSession: MediaSession? = null
     private var notificationManager: NotificationManager? = null
+    private var sessionActivityIntent: PendingIntent? = null
 
     // Último estado recibido desde Dart.
     private var lastTitle = ""
@@ -101,6 +104,14 @@ class PlaybackService : Service() {
                 MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS or
                 MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
             )
+            // Session activity: al tocar la notificación reabre la app. Sin
+            // esta referencia el sistema puede no publicar la media notification.
+            sessionActivityIntent = PendingIntent.getActivity(
+                this@PlaybackService, 0,
+                packageManager.getLaunchIntentForPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            setSessionActivity(sessionActivityIntent)
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() = sendToDart("mediaTogglePlayPause")
                 override fun onPause() = sendToDart("mediaTogglePlayPause")
@@ -131,11 +142,12 @@ class PlaybackService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID, "Reproducción de video",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Controles de reproducción de AniMaple"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setSound(null, null)
             }
             notificationManager?.createNotificationChannel(channel)
         }
@@ -180,6 +192,10 @@ class PlaybackService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val contentIntent = sessionActivityIntent
+
+        // notificationManager primero, startForeground después: el orden
+        // notify→startForeground es el patrón de androidx/media (issue #192).
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -201,6 +217,7 @@ class PlaybackService : Service() {
             .setContentText("Episodio $lastEpisode")
             .setOngoing(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setContentIntent(contentIntent)
             .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopIntent)
             .setStyle(
@@ -213,9 +230,20 @@ class PlaybackService : Service() {
 
         Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null} sessionActive=${session.isActive}")
         try {
-            startForeground(NOTIFICATION_ID, notification)
-            Log.d(TAG, "startForeground OK")
+            // 1) Notificar primero (evita que el sistema descarte la media
+            //    notification); 2) promocionar el servicio a foreground.
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            setLog("startForeground OK (notify+startForeground, type=mediaPlayback)")
         } catch (e: Exception) {
+            setLog("startForeground FAIL: ${e.message}")
             Log.e(TAG, "startForeground FAILED: ${e.message}", e)
             // Fallback: si FGS no es posible, al menos publicar la notificación.
             notificationManager?.notify(NOTIFICATION_ID, notification)
@@ -264,7 +292,18 @@ class PlaybackService : Service() {
         @Volatile
         private var running = false
 
+        @Volatile
+        private var lastLogMsg: String = ""
+
         fun isRunning() = running
+
+        /** Último log para diagnóstico visible en la UI. */
+        fun getLastLog(): String = lastLogMsg
+
+        private fun setLog(msg: String) {
+            lastLogMsg = msg
+            Log.d(TAG, msg)
+        }
 
         /** Actualiza el estado y asegura el service en primer plano. */
         fun update(
@@ -280,7 +319,7 @@ class PlaybackService : Service() {
             // reproducción real: evita una notificación media "pausada" eterna
             // por el simple hecho de abrir la pantalla del reproductor.
             if (!running && !playing) {
-                Log.d(TAG, "skip start (idle)")
+                setLog("skip start (idle): playing=false y servicio no activo")
                 return
             }
             running = true
@@ -298,18 +337,18 @@ class PlaybackService : Service() {
                 } else {
                     context.startService(intent)
                 }
-                Log.d(TAG, "update -> startForegroundService title=$title playing=$playing")
+                setLog("startForegroundService OK (title=$title, playing=$playing)")
             } catch (e: Exception) {
                 // Android 12+: si la app está en background, startForegroundService
                 // lanza ForegroundServiceStartNotAllowedException. El servicio ya
                 // está vivo y en foreground: basta re-invocar onStartCommand con
                 // startService (permitido para un FGS ya activo).
-                Log.e(TAG, "startForegroundService FAILED: ${e.message}")
+                setLog("startForegroundService FAIL: ${e.message}")
                 try {
                     context.startService(intent)
-                    Log.d(TAG, "fallback startService OK")
+                    setLog("fallback startService OK")
                 } catch (e2: Exception) {
-                    Log.e(TAG, "fallback startService FAILED: ${e2.message}")
+                    setLog("fallback startService FAIL: ${e2.message}")
                 }
             }
         }
