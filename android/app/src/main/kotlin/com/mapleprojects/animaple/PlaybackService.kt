@@ -92,6 +92,15 @@ class PlaybackService : Service() {
     private fun setupSession() {
         mediaSession?.release()
         mediaSession = MediaSession(this, "AniMapleMediaSession").apply {
+            // Flags REQUERIDAS para que el sistema trate la sesión como media
+            // transport: sin FLAG_HANDLES_TRANSPORT_CONTROLS Android no dibuja
+            // la barra de progreso ni aplica la exención de POST_NOTIFICATIONS
+            // (la notificación puede terminar bloqueada por el permiso y no
+            // verse en el shade).
+            setFlags(
+                MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS or
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
+            )
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() = sendToDart("mediaTogglePlayPause")
                 override fun onPause() = sendToDart("mediaTogglePlayPause")
@@ -179,6 +188,13 @@ class PlaybackService : Service() {
         }
         if (poster != null) builder.setLargeIcon(poster)
 
+        // Android 12+: la notificación FGS media NO debe mostrarse con retraso
+        // ni en una "caja" temporal: FOREGROUND_SERVICE_IMMEDIATE la publica
+        // de inmediato en el shade como media notification permanente.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
         val notification = builder
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(lastTitle)
@@ -195,8 +211,15 @@ class PlaybackService : Service() {
             .setPriority(Notification.PRIORITY_LOW)
             .build()
 
-        Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null}")
-        startForeground(NOTIFICATION_ID, notification)
+        Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null} sessionActive=${session.isActive}")
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+            Log.d(TAG, "startForeground OK")
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground FAILED: ${e.message}", e)
+            // Fallback: si FGS no es posible, al menos publicar la notificación.
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun loadPoster(animeId: Int) {
@@ -269,10 +292,25 @@ class PlaybackService : Service() {
                 putExtra(EXTRA_DURATION, duration)
                 putExtra(EXTRA_ANIME_ID, animeId)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                Log.d(TAG, "update -> startForegroundService title=$title playing=$playing")
+            } catch (e: Exception) {
+                // Android 12+: si la app está en background, startForegroundService
+                // lanza ForegroundServiceStartNotAllowedException. El servicio ya
+                // está vivo y en foreground: basta re-invocar onStartCommand con
+                // startService (permitido para un FGS ya activo).
+                Log.e(TAG, "startForegroundService FAILED: ${e.message}")
+                try {
+                    context.startService(intent)
+                    Log.d(TAG, "fallback startService OK")
+                } catch (e2: Exception) {
+                    Log.e(TAG, "fallback startService FAILED: ${e2.message}")
+                }
             }
         }
 
