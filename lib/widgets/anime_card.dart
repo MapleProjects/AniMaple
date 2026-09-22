@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 
@@ -22,11 +23,15 @@ class AnimeCard extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: anime.poster != null
-                ? Image.network(
-                    anime.poster!,
+                ? CachedNetworkImage(
+                    imageUrl: anime.poster!,
                     fit: BoxFit.cover,
                     width: double.infinity,
-                    errorBuilder: (_, __, ___) => const Center(
+                    // Fade suave al cargar: evita que las portadas "popen".
+                    fadeInDuration: const Duration(milliseconds: 250),
+                    fadeInCurve: Curves.easeOut,
+                    placeholder: (_, __) => const SizedBox.shrink(),
+                    errorWidget: (_, __, ___) => const Center(
                       child: Icon(Icons.broken_image, color: Color(0xFF4a4260)),
                     ),
                   )
