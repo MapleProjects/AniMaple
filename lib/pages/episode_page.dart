@@ -13,8 +13,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
-
-
 class EpisodePage extends StatefulWidget {
   final String animeSlug;
   final int episodeNumber;
@@ -76,7 +74,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // PiP
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
   bool _isPipMode = false;
-  bool _userStartedPlayback = false;
 
   // Watched episodes indicator
   Set<int> _watchedEpisodes = {};
@@ -182,6 +179,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       switch (call.method) {
         case 'mediaTogglePlayPause':
           _togglePlayPause();
+          break;
+        case 'mediaSeekTo':
+          // Usuario arrastró la barra en la notificación media.
+          final ms = (call.arguments as num?)?.toInt() ?? 0;
+          _player.seekTo(ms);
           break;
         case 'mediaStop':
           _player.pause();
@@ -339,9 +341,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       WakelockPlus.disable();
       _positionTimer?.cancel();
     }
-    // Only sync playing=true to native AFTER user explicitly started playback.
-    // Prevents auto-PiP when video loads slowly in the background.
-    if (playing && _userStartedPlayback) _syncPipState(true);
+    // Sincronizar SIEMPRE el estado real del reproductor con el nativo. Sin
+    // esto, con autoplay _userStartedPlayback queda false y el nativo nunca
+    // sabe que está reproduciendo → onUserLeaveHint no entra en PiP hasta que
+    // el usuario toca play manual una vez.
+    _syncPipState(playing);
     // Update media notification with current state
     _updateMediaSession(playing);
     if (mounted) setState(() {});
@@ -735,7 +739,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     setState(() {
       _currentEp = newEp;
       _loading = true;
-      _userStartedPlayback = false;
       // Reset del estado offline: el nuevo capítulo se resuelve en _load().
       _offlinePath = null;
     });
@@ -951,7 +954,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
       _hideTimer?.cancel();
     } else {
-      _userStartedPlayback = true;
       _player.play();
       if (!_isPipMode) _startHideTimer();
     }

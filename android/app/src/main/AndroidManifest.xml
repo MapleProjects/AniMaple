@@ -50,6 +50,14 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <!-- Servicio foreground mediaPlayback: publica la notificación de
+             reproducción con barra de progreso y controles (la forma correcta
+             de mostrar la media notification en Android moderno). -->
+        <service
+            android:name=".PlaybackService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
