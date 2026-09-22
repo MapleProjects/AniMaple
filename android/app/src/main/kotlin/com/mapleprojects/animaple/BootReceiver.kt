@@ -23,5 +23,6 @@ class BootReceiver : BroadcastReceiver() {
         Log.d("AniMaple", "BootReceiver: reinicio detectado")
         EpisodeCheckWorker.enqueueImmediate(context)
         EpisodeCheckWorker.enqueuePeriodic(context)
+        EpisodeCheckWorker.enqueueAlarm(context)
     }
 }
