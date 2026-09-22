@@ -64,8 +64,21 @@ class PlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let { applyState(it) }
-        // El service queda en foreground mientras la notificación exista.
-        publishNotification()
+        // Solo re-publicar la notificación si cambió contenido o estado.
+        // Re-publicar cada segundo (solo avanza la posición) hace que
+        // OneUI re-anime la tarjeta entera: título parpadeando, etc.
+        val changed =
+            lastTitle != lastNotifiedTitle ||
+            lastEpisode != lastNotifiedEpisode ||
+            lastNotifiedPlaying == null ||
+            lastPlaying != lastNotifiedPlaying
+        if (changed) {
+            publishNotification()
+        } else {
+            // Solo avanza la posición: sincronizar la sesión sin re-publicar
+            // (re-publicar cada segundo hace que OneUI re-anime la tarjeta).
+            syncSession()
+        }
         return START_STICKY
     }
 
@@ -113,8 +126,11 @@ class PlaybackService : Service() {
             )
             setSessionActivity(sessionActivityIntent)
             setCallback(object : MediaSession.Callback() {
-                override fun onPlay() = sendToDart("mediaTogglePlayPause")
-                override fun onPause() = sendToDart("mediaTogglePlayPause")
+                // Comandos EXPLÍCITOS (no toggle): si el sistema reenvía dos
+                // veces play/pause, cada orden es idempotente en Dart y no se
+                // invierte el estado.
+                override fun onPlay() = sendToDart("mediaPlay")
+                override fun onPause() = sendToDart("mediaPause")
                 override fun onStop() {
                     sendToDart("mediaStop")
                     stopSelf()
@@ -153,7 +169,93 @@ class PlaybackService : Service() {
         }
     }
 
+    /** Estado de la sesión publicado por última vez (para saber cuándo hay
+     *  que re-publicar la notificación: cambio de título/episodio/state). */
+    private var lastNotifiedTitle = ""
+    private var lastNotifiedEpisode = -1
+    private var lastNotifiedPlaying: Boolean? = null
+
+    /** Publica la notificación completa (solo cuando hay cambios grandes).
+     *  El resto del tiempo se usa [syncSession] para mover la barra sin
+     *  tocar notify(): re-publicar cada segundo hace que OneUI re-anime la
+     *  tarjeta entera. */
     private fun publishNotification() {
+        val session = mediaSession ?: return
+
+        // SIEMPRE sincronizar la sesión antes de publicar: si el PlaybackState
+        // queda desactualizado, el sistema envía el comando contrario (onPause
+        // en vez de onPlay) y el botón no hace nada.
+        syncSession()
+
+        val contentIntent = sessionActivityIntent
+
+        // Sin addAction manuales: con MediaStyle.setMediaSession, el sistema
+        // dibuja y gestiona los controles play/pause vía el MediaSession.Callback.
+        // Añadir PendingIntent broadcast aquí duplica el toggle (el sistema lo
+        // reenvía por el callback Y por el action) y el estado queda invertido.
+        // notificationManager primero, startForeground después: el orden
+        // notify→startForeground es el patrón de androidx/media (issue #192).
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        val poster = posterBitmap
+        if (poster != null) builder.setLargeIcon(poster)
+
+        // Android 12+: la notificación FGS media NO debe mostrarse con retraso
+        // ni en una "caja" temporal: FOREGROUND_SERVICE_IMMEDIATE la publica
+        // de inmediato en el shade como media notification permanente.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_stat_play)
+            .setContentTitle(lastTitle)
+            .setContentText("Episodio $lastEpisode")
+            .setOngoing(true)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setContentIntent(contentIntent)
+            .setStyle(
+                Notification.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0)
+            )
+            .setPriority(Notification.PRIORITY_LOW)
+            .build()
+
+        lastNotifiedTitle = lastTitle
+        lastNotifiedEpisode = lastEpisode
+        lastNotifiedPlaying = lastPlaying
+
+        Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null} sessionActive=${session.isActive}")
+        try {
+            // 1) Notificar primero (evita que el sistema descarte la media
+            //    notification); 2) promocionar el servicio a foreground.
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            setLog("startForeground OK (notify+startForeground, type=mediaPlayback)")
+        } catch (e: Exception) {
+            setLog("startForeground FAIL: ${e.message}")
+            Log.e(TAG, "startForeground FAILED: ${e.message}", e)
+            // Fallback: si FGS no es posible, al menos publicar la notificación.
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+        }
+    }
+
+        /** Sincroniza el MediaSession con la realidad SIEMPRE: PlaybackState
+     *  (barra + estado play/pause) y metadata (título, portada, duración).
+     *  SystemUI anima la barra sola desde el PlaybackState. */
+    private fun syncSession() {
         val session = mediaSession ?: return
 
         val state = PlaybackState.Builder()
@@ -179,75 +281,6 @@ class PlaybackService : Service() {
         val poster = posterBitmap
         if (poster != null) metaBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, poster)
         session.setMetadata(metaBuilder.build())
-
-        val playPauseIcon = if (lastPlaying) R.drawable.ic_stat_pause else R.drawable.ic_stat_play
-        val playPauseLabel = if (lastPlaying) "Pausar" else "Reproducir"
-
-        val playPauseIntent = PendingIntent.getBroadcast(
-            this, 0, Intent(ACTION_PLAY_PAUSE).setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val stopIntent = PendingIntent.getBroadcast(
-            this, 1, Intent(ACTION_STOP).setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val contentIntent = sessionActivityIntent
-
-        // notificationManager primero, startForeground después: el orden
-        // notify→startForeground es el patrón de androidx/media (issue #192).
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        if (poster != null) builder.setLargeIcon(poster)
-
-        // Android 12+: la notificación FGS media NO debe mostrarse con retraso
-        // ni en una "caja" temporal: FOREGROUND_SERVICE_IMMEDIATE la publica
-        // de inmediato en el shade como media notification permanente.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-        }
-
-        val notification = builder
-            .setSmallIcon(R.drawable.ic_stat_play)
-            .setContentTitle(lastTitle)
-            .setContentText("Episodio $lastEpisode")
-            .setOngoing(true)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setContentIntent(contentIntent)
-            .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
-            .addAction(R.drawable.ic_stat_stop, "Detener", stopIntent)
-            .setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(session.sessionToken)
-                    .setShowActionsInCompactView(0)
-            )
-            .setPriority(Notification.PRIORITY_LOW)
-            .build()
-
-        Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null} sessionActive=${session.isActive}")
-        try {
-            // 1) Notificar primero (evita que el sistema descarte la media
-            //    notification); 2) promocionar el servicio a foreground.
-            notificationManager?.notify(NOTIFICATION_ID, notification)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-            setLog("startForeground OK (notify+startForeground, type=mediaPlayback)")
-        } catch (e: Exception) {
-            setLog("startForeground FAIL: ${e.message}")
-            Log.e(TAG, "startForeground FAILED: ${e.message}", e)
-            // Fallback: si FGS no es posible, al menos publicar la notificación.
-            notificationManager?.notify(NOTIFICATION_ID, notification)
-        }
     }
 
     private fun loadPoster(animeId: Int) {

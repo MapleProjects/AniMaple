@@ -177,8 +177,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _initMediaSession() {
     _mediaChannel.setMethodCallHandler((call) async {
       switch (call.method) {
-        case 'mediaTogglePlayPause':
-          _togglePlayPause();
+        case 'mediaPlay':
+          // Comando EXPLÍCITO: no togglear. Si ya está reproduciendo, no hace
+          // nada (evita que un reenvío doble del sistema invierta el estado).
+          if (!_player.isPlaying.value) _togglePlayPause();
+          break;
+        case 'mediaPause':
+          if (_player.isPlaying.value) _togglePlayPause();
           break;
         case 'mediaSeekTo':
           // Usuario arrastró la barra en la notificación media.
