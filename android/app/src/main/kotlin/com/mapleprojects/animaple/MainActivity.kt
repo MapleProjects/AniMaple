@@ -48,8 +48,6 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val TAG = "AniMaple"
         private const val PREFS_NOTIF = "animaple_notif"
-        private const val ACTION_MEDIA_PLAY_PAUSE = "com.mapleprojects.animaple.MEDIA_PLAY_PAUSE"
-        private const val ACTION_MEDIA_STOP = "com.mapleprojects.animaple.MEDIA_STOP"
     }
 
     // ── Broadcast Receivers ──
@@ -61,19 +59,9 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private val mediaReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_MEDIA_PLAY_PAUSE -> {
-                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
-                }
-                ACTION_MEDIA_STOP -> {
-                    PlaybackService.stop(this@MainActivity)
-                    mediaMethodChannel?.invokeMethod("mediaStop", null)
-                }
-            }
-        }
-    }
+    // Sin mediaReceiver: los controles play/pause/stop de la notificación los
+    // maneja el sistema vía MediaSession.Callback (PlaybackService). Añadir
+    // broadcasts manuales duplicaba el toggle y el estado quedaba invertido.
 
     // ── Engine Configuration ──
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -85,15 +73,8 @@ class MainActivity : FlutterActivity() {
         FlutterEngineCache.getInstance().put("animaple_main_engine", flutterEngine)
 
         try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
-        try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
 
         registerReceiver(pipPauseReceiver, IntentFilter("com.mapleprojects.animaple.PIP_PAUSE"), RECEIVER_EXPORTED)
-
-        val mediaFilter = IntentFilter().apply {
-            addAction(ACTION_MEDIA_PLAY_PAUSE)
-            addAction(ACTION_MEDIA_STOP)
-        }
-        registerReceiver(mediaReceiver, mediaFilter, RECEIVER_EXPORTED)
 
         // ── PiP Channel ──
         pipMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PIP_CHANNEL)
@@ -130,8 +111,10 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: ""
                     val episode = call.argument<Int>("episode") ?: 0
                     val playing = call.argument<Boolean>("playing") ?: false
-                    val position = call.argument<Long>("position") ?: 0L
-                    val duration = call.argument<Long>("duration") ?: 0L
+                    // Flutter envía ints pequeños como Integer (no Long).
+                    // argument<Long> revienta con ClassCastException.
+                    val position = (call.argument<Number>("position") ?: 0L).toLong()
+                    val duration = (call.argument<Number>("duration") ?: 0L).toLong()
                     val animeId = call.argument<Int>("animeId") ?: 0
                     PlaybackService.update(this, title, episode, playing, position, duration, animeId)
                     result.success(true)
@@ -392,8 +375,8 @@ class MainActivity : FlutterActivity() {
     // La notificación de reproducción con barra de progreso y controles se
     // publica desde PlaybackService (foreground service mediaPlayback), la
     // única forma de que Android la muestre de forma fiable y con timeline.
-    // MainActivity solo reenvía el estado de Dart y los controles llegan de
-    // vuelta por el canal media_session (play/pause/stop del broadcast mediaReceiver).
+    // MainActivity solo reenvía el estado de Dart y los controles vuelven por
+    // el canal media_session (play/pause/stop desde el MediaSession.Callback).
 
     // ══════════════════════════════════════════════
     //  PICTURE-IN-PICTURE
@@ -496,7 +479,6 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
-        try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
         PlaybackService.stop(this)
         super.onDestroy()
     }
