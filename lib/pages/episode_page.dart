@@ -389,14 +389,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   bool _mediaLogChecked = false;
 
+  /// Consulta el log nativo del servicio UN tiempo después del arranque
+  /// (el intent se procesa asíncrono; consultar al instante lee el estado
+  /// anterior). Si el servicio reporta fallo, lo muestra en pantalla.
   Future<void> _checkMediaLogOnce() async {
     if (_mediaLogChecked) return;
     _mediaLogChecked = true;
+    await Future<void>.delayed(const Duration(seconds: 2));
     try {
       final log = await _mediaChannel
           .invokeMethod<String>('getMediaNotificationLog');
-      if (log != null && log.contains('FAIL')) {
-        if (mounted) {
+      if (mounted && log != null) {
+        if (log.contains('FAIL')) {
           _videoErrorShown = true;
           showErrorSheet(context, log, null, title: 'Notificación de reproducción');
         }

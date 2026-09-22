@@ -180,7 +180,7 @@ class PlaybackService : Service() {
         if (poster != null) metaBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, poster)
         session.setMetadata(metaBuilder.build())
 
-        val playPauseIcon = if (lastPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseIcon = if (lastPlaying) R.drawable.ic_stat_pause else R.drawable.ic_stat_play
         val playPauseLabel = if (lastPlaying) "Pausar" else "Reproducir"
 
         val playPauseIntent = PendingIntent.getBroadcast(
@@ -212,14 +212,14 @@ class PlaybackService : Service() {
         }
 
         val notification = builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_play)
             .setContentTitle(lastTitle)
             .setContentText("Episodio $lastEpisode")
             .setOngoing(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setContentIntent(contentIntent)
             .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopIntent)
+            .addAction(R.drawable.ic_stat_stop, "Detener", stopIntent)
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.sessionToken)
