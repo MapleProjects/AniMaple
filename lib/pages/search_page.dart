@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shimmer/shimmer.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../widgets/anime_card.dart';
@@ -76,9 +77,33 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
 
   List<AnimeBasic> _items = [];
   bool _loading = true;
+  bool _refreshing = false;
   bool _loadingMore = false;
   bool _hasMore = true;
   int _page = 1;
+
+  // Identifica la última consulta/filtros enviados, para no refetchear
+  // cuando el estado no cambió de verdad (p.ej. limpiar el campo vacío).
+  String _lastFetchedQuery = '';
+  String? _lastFetchedStatus;
+  Set<String> _lastFetchedGenres = {};
+
+  // Número de secuencia de petición: descarta respuestas obsoletas que
+  // lleguen fuera de orden (tecleo rápido) y evita que pisen resultados.
+  int _requestSeq = 0;
+
+  // Se incrementa al aplicar resultados nuevos de un refresh; la key del
+  // fade de la grilla depende de este valor, así la animación ocurre
+  // exactamente cuando llegan los datos, no al teclear.
+  int _refreshTick = 0;
+
+  bool _filtersOrQueryChanged() {
+    final sameGenres = _lastFetchedGenres.length == _selectedGenres.length &&
+        _lastFetchedGenres.containsAll(_selectedGenres);
+    return _lastFetchedQuery != _ctrl.text.trim() ||
+        _lastFetchedStatus != _selectedStatus ||
+        !sameGenres;
+  }
 
   String? _selectedStatus; // 'emision' or 'finalizado'
   Set<String> _selectedGenres = {}; // multi-genre slugs
@@ -121,9 +146,11 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   void _onSearchChanged() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
-      if (mounted) {
-        _fetchPage(refresh: true);
-      }
+      if (!mounted) return;
+      // Si el texto y los filtros no cambiaron de verdad, no recargar.
+      // Evita refetches al tocar/salir del campo sin modificar nada.
+      if (!_filtersOrQueryChanged()) return;
+      _fetchPage(refresh: true);
     });
   }
 
@@ -140,15 +167,25 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   }
 
   Future<void> _fetchPage({bool refresh = false}) async {
+    final query = _ctrl.text.trim();
+    final int seq = ++_requestSeq;
+
     if (refresh) {
+      // Conservar la grilla visible mientras llegan resultados nuevos.
+      // Solo la primera carga (sin items) usa el spinner de pantalla completa.
       setState(() {
-        _loading = true;
         _page = 1;
         _hasMore = true;
+        if (_items.isEmpty) {
+          _loading = true;
+        } else {
+          _refreshing = true;
+        }
       });
+    } else {
+      setState(() => _loadingMore = true);
     }
 
-    final query = _ctrl.text.trim();
     try {
       final List<AnimeBasic> results;
       if (query.isNotEmpty) {
@@ -165,26 +202,45 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
         );
       }
 
-      if (!mounted) return;
+      // Descarta respuestas fuera de orden: solo aplica la petición más reciente.
+      if (!mounted || seq != _requestSeq) return;
+
       setState(() {
         if (refresh) {
           _items = results;
+          _lastFetchedQuery = query;
+          _lastFetchedStatus = _selectedStatus;
+          _lastFetchedGenres = Set<String>.from(_selectedGenres);
+          _page = 1;
+          _refreshTick++; // dispara el fade de la grilla con los datos nuevos
         } else {
           _items.addAll(results);
         }
         _loading = false;
+        _refreshing = false;
         _loadingMore = false;
         if (results.length < 20) {
           _hasMore = false;
         }
       });
+
+      if (refresh && _scrollController.hasClients) {
+        // Vuelve al tope con animación para que el cambio de resultados
+        // no parezca un salto seco.
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        );
+      }
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || seq != _requestSeq) return;
       setState(() {
-        if (refresh) _items = [];
+        if (refresh && _items.isEmpty) _items = [];
         _loading = false;
+        _refreshing = false;
         _loadingMore = false;
-        _hasMore = false;
+        if (refresh) _hasMore = false;
       });
     }
   }
@@ -482,8 +538,16 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
         appBar: AppBar(
           title: const Text('Catálogo'),
         ),
-        body: Column(
-          children: [
+        // El teclado anima el body en vez de saltar el layout de golpe.
+        resizeToAvoidBottomInset: false,
+        body: AnimatedPadding(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: Column(
+            children: [
             // Search & filter bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -654,11 +718,8 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
 
             // Catalog / Search Grid
             Expanded(
-              child: _loading
-                  ? const Center(
-                      child:
-                          CircularProgressIndicator(color: Color(0xFF8b5cf6)),
-                    )
+              child: _loading && _items.isEmpty
+                  ? const _CatalogShimmer()
                   : _items.isEmpty
                       ? Center(
                           child: Text(
@@ -668,49 +729,105 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                             style: const TextStyle(color: Color(0xFF6d6488)),
                           ),
                         )
-                      : RefreshIndicator(
-                          color: const Color(0xFF8b5cf6),
-                          onRefresh: () => _fetchPage(refresh: true),
-                          child: GridView.builder(
-                            controller: _scrollController,
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.all(12),
-                            gridDelegate:
-                                const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 200,
-                              childAspectRatio: 0.65,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                            ),
-                            itemCount: _items.length + (_loadingMore ? 1 : 0),
-                            itemBuilder: (ctx, i) {
-                              if (i >= _items.length) {
-                                return const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(16),
-                                    child: CircularProgressIndicator(
-                                      color: Color(0xFF8b5cf6),
-                                      strokeWidth: 2,
+                      : TweenAnimationBuilder<double>(
+                          // Cada refresh con datos nuevos reemplaza la grilla
+                          // con un fade suave en lugar de un salto seco.
+                          key: ValueKey(_refreshTick),
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOut,
+                          tween: Tween(begin: 0, end: 1),
+                          builder: (context, opacity, child) =>
+                              Opacity(opacity: opacity, child: child),
+                          child: Column(
+                            children: [
+                              // Barra fina de progreso mientras se refresca
+                              // con la grilla anterior aún visible.
+                              if (_refreshing)
+                                const LinearProgressIndicator(
+                                  minHeight: 2,
+                                  color: Color(0xFF8b5cf6),
+                                  backgroundColor: Color(0xFF1e1832),
+                                ),
+                              Expanded(
+                                child: RefreshIndicator(
+                                  color: const Color(0xFF8b5cf6),
+                                  onRefresh: () => _fetchPage(refresh: true),
+                                  child: GridView.builder(
+                                    controller: _scrollController,
+                                    keyboardDismissBehavior:
+                                        ScrollViewKeyboardDismissBehavior.onDrag,
+                                    padding: const EdgeInsets.all(12),
+                                    gridDelegate:
+                                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 200,
+                                      childAspectRatio: 0.65,
+                                      crossAxisSpacing: 10,
+                                      mainAxisSpacing: 10,
                                     ),
-                                  ),
-                                );
-                              }
-                              return AnimeCard(
-                                anime: _items[i],
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        DetailPage(slug: _items[i].slug),
+                                    itemCount: _items.length +
+                                        (_loadingMore ? 1 : 0),
+                                    itemBuilder: (ctx, i) {
+                                      if (i >= _items.length) {
+                                        return const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(16),
+                                            child: CircularProgressIndicator(
+                                              color: Color(0xFF8b5cf6),
+                                              strokeWidth: 2,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      return AnimeCard(
+                                        anime: _items[i],
+                                        onTap: () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => DetailPage(
+                                                slug: _items[i].slug),
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           ),
                         ),
             ),
           ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Placeholder shimmer para la primera carga del catálogo.
+class _CatalogShimmer extends StatelessWidget {
+  const _CatalogShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: const Color(0xFF191428),
+      highlightColor: const Color(0xFF251d3a),
+      child: GridView.builder(
+        padding: const EdgeInsets.all(12),
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 200,
+          childAspectRatio: 0.65,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+        ),
+        itemCount: 10,
+        itemBuilder: (_, __) => Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF191428),
+            borderRadius: BorderRadius.circular(8),
+          ),
         ),
       ),
     );
