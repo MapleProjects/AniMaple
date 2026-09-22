@@ -140,6 +140,9 @@ class MainActivity : FlutterActivity() {
                     PlaybackService.stop(this)
                     result.success(true)
                 }
+                "getMediaNotificationLog" -> {
+                    result.success(PlaybackService.getLastLog())
+                }
                 "requestNotificationPermission" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)

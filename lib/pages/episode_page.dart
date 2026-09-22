@@ -381,6 +381,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         'duration': duration,
         'animeId': animeDetail?.id ?? 0,
       });
+      // Diagnóstico visible: si el servicio nativo reporta que no pudo
+      // publicar la notificación, mostrarlo (no tragar errores en silencio).
+      if (playing && mounted) _checkMediaLogOnce();
+    } catch (_) {}
+  }
+
+  bool _mediaLogChecked = false;
+
+  Future<void> _checkMediaLogOnce() async {
+    if (_mediaLogChecked) return;
+    _mediaLogChecked = true;
+    try {
+      final log = await _mediaChannel
+          .invokeMethod<String>('getMediaNotificationLog');
+      if (log != null && log.contains('FAIL')) {
+        if (mounted) {
+          _videoErrorShown = true;
+          showErrorSheet(context, log, null, title: 'Notificación de reproducción');
+        }
+      }
     } catch (_) {}
   }
 
