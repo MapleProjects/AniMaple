@@ -1,10 +1,8 @@
 package com.mapleprojects.animaple
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.NotificationManager
 import android.app.RemoteAction
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,9 +10,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
-import android.media.MediaMetadata
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -25,6 +20,7 @@ import android.util.Log
 import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -49,26 +45,8 @@ class MainActivity : FlutterActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingPip = false
 
-    // ── Media Session State ──
-    private var mediaSession: MediaSession? = null
-    private var notificationManager: NotificationManager? = null
-
-    // Estado último de la notificación media: permite re-publicarla cuando
-    // la portada termina de descargarse o cuando avanza la posición.
-    private var lastTitle = ""
-    private var lastEpisode = 0
-    private var lastPlaying = false
-    private var lastPosition = 0L
-    private var lastDuration = 0L
-    private var lastAnimeId = 0
-    // Portada cacheada para no re-descargar en cada actualización de posición.
-    private var posterBitmap: android.graphics.Bitmap? = null
-    private var posterAnimeId = 0
-
     companion object {
         private const val TAG = "AniMaple"
-        private const val MEDIA_CHANNEL_ID = "animaple_media_playback"
-        private const val NOTIFICATION_ID = 1001
         private const val PREFS_NOTIF = "animaple_notif"
         private const val ACTION_MEDIA_PLAY_PAUSE = "com.mapleprojects.animaple.MEDIA_PLAY_PAUSE"
         private const val ACTION_MEDIA_STOP = "com.mapleprojects.animaple.MEDIA_STOP"
@@ -90,7 +68,7 @@ class MainActivity : FlutterActivity() {
                     mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
                 }
                 ACTION_MEDIA_STOP -> {
-                    dismissMediaNotification()
+                    PlaybackService.stop(this@MainActivity)
                     mediaMethodChannel?.invokeMethod("mediaStop", null)
                 }
             }
@@ -101,6 +79,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         isPipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+
+        // Cachear el engine: PlaybackService lo usa para reenviar a Dart los
+        // controles de la notificación media (play/pause/stop/seek).
+        FlutterEngineCache.getInstance().put("animaple_main_engine", flutterEngine)
 
         try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
@@ -120,7 +102,7 @@ class MainActivity : FlutterActivity() {
                 "enterPip" -> {
                     if (isPipSupported && !isInPictureInPictureMode) {
                         isPlaying = true
-                        val params = buildPipParams(autoEnter = true)
+                        val params = buildPipParams()
                         enterPictureInPictureMode(params)
                         result.success(true)
                     } else {
@@ -138,6 +120,9 @@ class MainActivity : FlutterActivity() {
         }
 
         // ── Media Session Channel ──
+        // La notificación media vive en PlaybackService (foreground service
+        // mediaPlayback, la forma correcta de mostrar barra+controles). Aquí
+        // solo se reenvía el estado desde Dart.
         mediaMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL)
         mediaMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -148,11 +133,11 @@ class MainActivity : FlutterActivity() {
                     val position = call.argument<Long>("position") ?: 0L
                     val duration = call.argument<Long>("duration") ?: 0L
                     val animeId = call.argument<Int>("animeId") ?: 0
-                    showMediaNotification(title, episode, playing, position, duration, animeId)
+                    PlaybackService.update(this, title, episode, playing, position, duration, animeId)
                     result.success(true)
                 }
                 "dismissMediaNotification" -> {
-                    dismissMediaNotification()
+                    PlaybackService.stop(this)
                     result.success(true)
                 }
                 "requestNotificationPermission" -> {
@@ -169,7 +154,6 @@ class MainActivity : FlutterActivity() {
         Notifier.ensureNewEpisodeChannel(this)
         setupNotificationChannel(flutterEngine)
         setupUpdateChannel(flutterEngine)
-        setupMediaSession()
     }
 
     // ── Updater Channel ──
@@ -400,187 +384,27 @@ class MainActivity : FlutterActivity() {
     }
 
     // ══════════════════════════════════════════════
-    //  MEDIA SESSION (platform API, minSdk 21+)
+    //  MEDIA SESSION (moved to PlaybackService)
     // ══════════════════════════════════════════════
-
-    private fun setupMediaSession() {
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        createNotificationChannel()
-
-        mediaSession?.release()
-
-        mediaSession = MediaSession(this, "AniMapleMediaSession").apply {
-            setCallback(object : MediaSession.Callback() {
-                override fun onPlay() {
-                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
-                }
-                override fun onPause() {
-                    mediaMethodChannel?.invokeMethod("mediaTogglePlayPause", null)
-                }
-                override fun onStop() {
-                    dismissMediaNotification()
-                    mediaMethodChannel?.invokeMethod("mediaStop", null)
-                }
-            })
-            isActive = true
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                MEDIA_CHANNEL_ID,
-                "Reproducción de video",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Controles de reproducción de AniMaple"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            notificationManager?.createNotificationChannel(channel)
-        }
-    }
-
-    private fun showMediaNotification(title: String, episode: Int, playing: Boolean, position: Long, duration: Long, animeId: Int) {
-        // Guardar el último estado para re-publicar cuando la portada esté
-        // lista o cuando la posición avance desde Dart.
-        lastTitle = title
-        lastEpisode = episode
-        lastPlaying = playing
-        lastPosition = position
-        lastDuration = duration
-        lastAnimeId = animeId
-
-        // La portada se descarga en hilo de fondo: en el main thread la red
-        // lanza NetworkOnMainThreadException (que el catch anterior tragaba
-        // silenciosamente → la imagen nunca aparecía). Cachear: solo se
-        // descarga cuando cambia el anime.
-        if (posterBitmap == null || posterAnimeId != animeId) {
-            posterAnimeId = animeId
-            posterBitmap = null
-            loadPosterInBackground(animeId)
-        }
-
-        publishMediaNotification()
-    }
-
-    private fun publishMediaNotification() {
-        val session = mediaSession ?: return
-
-        // Playback state con posición: el sistema dibuja la barra de progreso
-        // (timeline) y la avanza mientras el estado es STATE_PLAYING.
-        val state = PlaybackState.Builder()
-            .setActions(
-                PlaybackState.ACTION_PLAY or
-                PlaybackState.ACTION_PAUSE or
-                PlaybackState.ACTION_STOP or
-                PlaybackState.ACTION_SEEK_TO
-            )
-            .setState(
-                if (lastPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                lastPosition, if (lastPlaying) 1.0f else 0.0f
-            )
-            .setActiveQueueItemId(0)
-            .build()
-        session.setPlaybackState(state)
-
-        // Metadata con duración y portada: la imagen del capítulo aparece en
-        // la notificación extendida (album art).
-        val metadataBuilder = MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, lastTitle)
-            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Episodio $lastEpisode")
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, "AniMaple")
-            .putLong(MediaMetadata.METADATA_KEY_DURATION, lastDuration)
-        val poster = posterBitmap
-        if (poster != null) {
-            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, poster)
-        }
-        session.setMetadata(metadataBuilder.build())
-
-        val playPauseIcon = if (lastPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseLabel = if (lastPlaying) "Pausar" else "Reproducir"
-
-        val playPauseIntent = PendingIntent.getBroadcast(
-            this, NOTIFICATION_ID,
-            Intent(ACTION_MEDIA_PLAY_PAUSE).setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val stopIntent = PendingIntent.getBroadcast(
-            this, NOTIFICATION_ID + 1,
-            Intent(ACTION_MEDIA_STOP).setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, MEDIA_CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        if (poster != null) builder.setLargeIcon(poster)
-
-        val notification = builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(lastTitle)
-            .setContentText("Episodio $lastEpisode")
-            .setOngoing(true)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopIntent)
-            .setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(session.getSessionToken())
-                    .setShowActionsInCompactView(0)
-            )
-            .setPriority(Notification.PRIORITY_LOW)
-            .build()
-
-        Log.d(TAG, "publishMediaNotification: title=$lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null}")
-        notificationManager?.notify(NOTIFICATION_ID, notification)
-    }
-
-    /** Descarga la portada en segundo plano y re-publica la notificación al
-     *  terminar. Nunca toca red en el hilo principal. */
-    private fun loadPosterInBackground(animeId: Int) {
-        Thread {
-            var bitmap: android.graphics.Bitmap? = null
-            try {
-                val url = java.net.URL("https://cdn.animeav1.com/covers/$animeId.jpg")
-                bitmap = android.graphics.BitmapFactory.decodeStream(url.openStream())
-            } catch (e: Exception) {
-                Log.w(TAG, "loadPosterInBackground error: ${e.message}")
-            }
-            val bmp = bitmap
-            handler.post {
-                if (bmp != null && posterAnimeId == animeId) {
-                    posterBitmap = bmp
-                    publishMediaNotification()
-                }
-            }
-        }.start()
-    }
-
-    private fun dismissMediaNotification() {
-        notificationManager?.cancel(NOTIFICATION_ID)
-        mediaSession?.setPlaybackState(
-            PlaybackState.Builder()
-                .setState(PlaybackState.STATE_NONE, 0, 0.0f)
-                .build()
-        )
-    }
+    // La notificación de reproducción con barra de progreso y controles se
+    // publica desde PlaybackService (foreground service mediaPlayback), la
+    // única forma de que Android la muestre de forma fiable y con timeline.
+    // MainActivity solo reenvía el estado de Dart y los controles llegan de
+    // vuelta por el canal media_session (play/pause/stop del broadcast mediaReceiver).
 
     // ══════════════════════════════════════════════
     //  PICTURE-IN-PICTURE
     // ══════════════════════════════════════════════
 
-    private fun buildPipParams(autoEnter: Boolean = isPlaying): PictureInPictureParams {
+    private fun buildPipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16, 9))
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setAutoEnterEnabled(autoEnter)
-        }
+        // NOTA: no se usa setAutoEnterEnabled. En Android 12+ ese flag solo
+        // surte efecto si el usuario ya entró en PiP manualmente al menos una
+        // vez (o lo habilitó en Ajustes), que es exactamente el bug reportado.
+        // La vía confiable es la llamada explícita enterPictureInPictureMode()
+        // desde onUserLeaveHint, que funciona en todas las versiones.
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val pauseIcon = Icon.createWithResource(this,
@@ -612,7 +436,7 @@ class MainActivity : FlutterActivity() {
     private fun tryEnterPip(source: String) {
         if (isPlaying && isPipSupported && !isInPictureInPictureMode && !isFinishing) {
             try {
-                val params = buildPipParams(autoEnter = true)
+                val params = buildPipParams()
                 val success = enterPictureInPictureMode(params)
                 Log.d(TAG, "tryEnterPip($source): success=$success")
             } catch (e: Exception) {
@@ -670,8 +494,7 @@ class MainActivity : FlutterActivity() {
         handler.removeCallbacksAndMessages(null)
         try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(mediaReceiver) } catch (_: Exception) {}
-        mediaSession?.release()
-        dismissMediaNotification()
+        PlaybackService.stop(this)
         super.onDestroy()
     }
 
