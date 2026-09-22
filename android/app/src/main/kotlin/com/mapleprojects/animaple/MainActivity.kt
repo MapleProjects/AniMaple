@@ -53,6 +53,18 @@ class MainActivity : FlutterActivity() {
     private var mediaSession: MediaSession? = null
     private var notificationManager: NotificationManager? = null
 
+    // Estado último de la notificación media: permite re-publicarla cuando
+    // la portada termina de descargarse o cuando avanza la posición.
+    private var lastTitle = ""
+    private var lastEpisode = 0
+    private var lastPlaying = false
+    private var lastPosition = 0L
+    private var lastDuration = 0L
+    private var lastAnimeId = 0
+    // Portada cacheada para no re-descargar en cada actualización de posición.
+    private var posterBitmap: android.graphics.Bitmap? = null
+    private var posterAnimeId = 0
+
     companion object {
         private const val TAG = "AniMaple"
         private const val MEDIA_CHANNEL_ID = "animaple_media_playback"
@@ -273,9 +285,11 @@ class MainActivity : FlutterActivity() {
 
     /** Registra el seguimiento periódico de capítulos (15 min). El
      *  PeriodicWorkRequest lo administra el sistema: sobrevive reinicios y
-     *  proceso muerto. KEEP: no se duplica en cada arranque. */
+     *  proceso muerto. KEEP: no se duplica en cada arranque. También se
+     *  agenda la alarma robusta que dispara en Doze (ver receiver). */
     private fun scheduleEpisodeCheck() {
         EpisodeCheckWorker.enqueuePeriodic(this)
+        EpisodeCheckWorker.enqueueAlarm(this)
     }
 
     // ── Permiso de notificaciones (Android 13+ / POST_NOTIFICATIONS) ──
@@ -428,9 +442,33 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun showMediaNotification(title: String, episode: Int, playing: Boolean, position: Long, duration: Long, animeId: Int) {
+        // Guardar el último estado para re-publicar cuando la portada esté
+        // lista o cuando la posición avance desde Dart.
+        lastTitle = title
+        lastEpisode = episode
+        lastPlaying = playing
+        lastPosition = position
+        lastDuration = duration
+        lastAnimeId = animeId
+
+        // La portada se descarga en hilo de fondo: en el main thread la red
+        // lanza NetworkOnMainThreadException (que el catch anterior tragaba
+        // silenciosamente → la imagen nunca aparecía). Cachear: solo se
+        // descarga cuando cambia el anime.
+        if (posterBitmap == null || posterAnimeId != animeId) {
+            posterAnimeId = animeId
+            posterBitmap = null
+            loadPosterInBackground(animeId)
+        }
+
+        publishMediaNotification()
+    }
+
+    private fun publishMediaNotification() {
         val session = mediaSession ?: return
 
-        // Update playback state with position for seekbar
+        // Playback state con posición: el sistema dibuja la barra de progreso
+        // (timeline) y la avanza mientras el estado es STATE_PLAYING.
         val state = PlaybackState.Builder()
             .setActions(
                 PlaybackState.ACTION_PLAY or
@@ -439,31 +477,28 @@ class MainActivity : FlutterActivity() {
                 PlaybackState.ACTION_SEEK_TO
             )
             .setState(
-                if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                position, if (playing) 1.0f else 0.0f
+                if (lastPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                lastPosition, if (lastPlaying) 1.0f else 0.0f
             )
             .setActiveQueueItemId(0)
             .build()
         session.setPlaybackState(state)
 
-        // Update metadata with big icon
+        // Metadata con duración y portada: la imagen del capítulo aparece en
+        // la notificación extendida (album art).
         val metadataBuilder = MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Episodio $episode")
+            .putString(MediaMetadata.METADATA_KEY_TITLE, lastTitle)
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Episodio $lastEpisode")
             .putString(MediaMetadata.METADATA_KEY_ARTIST, "AniMaple")
-            .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
-        // Load poster as big picture
-        val posterUrl = "https://cdn.animeav1.com/covers/$animeId.jpg"
-        try {
-            val bitmap = android.graphics.BitmapFactory.decodeStream(
-                java.net.URL(posterUrl).openStream()
-            )
-            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
-        } catch (_: Exception) {}
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, lastDuration)
+        val poster = posterBitmap
+        if (poster != null) {
+            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, poster)
+        }
         session.setMetadata(metadataBuilder.build())
 
-        val playPauseIcon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseLabel = if (playing) "Pausar" else "Reproducir"
+        val playPauseIcon = if (lastPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseLabel = if (lastPlaying) "Pausar" else "Reproducir"
 
         val playPauseIntent = PendingIntent.getBroadcast(
             this, NOTIFICATION_ID,
@@ -477,16 +512,18 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Build notification with platform API
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, MEDIA_CHANNEL_ID)
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
+        if (poster != null) builder.setLargeIcon(poster)
+
+        val notification = builder
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(title)
-            .setContentText("Episodio $episode")
+            .setContentTitle(lastTitle)
+            .setContentText("Episodio $lastEpisode")
             .setOngoing(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .addAction(playPauseIcon, playPauseLabel, playPauseIntent)
@@ -499,9 +536,29 @@ class MainActivity : FlutterActivity() {
             .setPriority(Notification.PRIORITY_LOW)
             .build()
 
-        Log.d(TAG, "showMediaNotification: title=$title ep=$episode playing=$playing pos=$position dur=$duration animeId=$animeId")
+        Log.d(TAG, "publishMediaNotification: title=$lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null}")
         notificationManager?.notify(NOTIFICATION_ID, notification)
-        Log.d(TAG, "showMediaNotification: notification sent")
+    }
+
+    /** Descarga la portada en segundo plano y re-publica la notificación al
+     *  terminar. Nunca toca red en el hilo principal. */
+    private fun loadPosterInBackground(animeId: Int) {
+        Thread {
+            var bitmap: android.graphics.Bitmap? = null
+            try {
+                val url = java.net.URL("https://cdn.animeav1.com/covers/$animeId.jpg")
+                bitmap = android.graphics.BitmapFactory.decodeStream(url.openStream())
+            } catch (e: Exception) {
+                Log.w(TAG, "loadPosterInBackground error: ${e.message}")
+            }
+            val bmp = bitmap
+            handler.post {
+                if (bmp != null && posterAnimeId == animeId) {
+                    posterBitmap = bmp
+                    publishMediaNotification()
+                }
+            }
+        }.start()
     }
 
     private fun dismissMediaNotification() {

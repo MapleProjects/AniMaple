@@ -898,12 +898,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _startPositionTimer() {
     _positionTimer?.cancel();
+    var lastMediaSync = DateTime.now();
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       // Cargar el progreso visto para restaurarlo (reconexión / cambio de
       // servidor / cambio de idioma). Solo se guarda en reproducción.
       if (_player.isPlaying.value) {
         _lastPositionMs = _player.positionMs.value;
+      }
+      // Sincronizar la notificación media (barra de progreso) ~1 vez por
+      // segundo mientras se reproduce, para que la timeline avance.
+      final now = DateTime.now();
+      if (now.difference(lastMediaSync).inMilliseconds >= 1000) {
+        lastMediaSync = now;
+        _updateMediaSession(_player.isPlaying.value);
       }
       // Clear _dragValue when player position catches up after seek
       if (_dragValue != null && !_isDragging) {

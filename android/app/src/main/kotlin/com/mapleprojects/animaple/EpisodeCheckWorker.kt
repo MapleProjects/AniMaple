@@ -68,6 +68,8 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         private const val WORK_NAME = "animaple_episode_check_periodic"
         // Revisión de 8 min (auto-reagendada) y revisión inmediata (boot).
         private const val WORK_NOW = "animaple_episode_check_now"
+        // One-off encolado por la alarma robusta (REPLACE, no acumula).
+        private const val WORK_ALARM = "animaple_episode_check_alarm"
 
         /**
          * Agenda la revisión periódica de capítulos como RED DE SEGURIDAD.
@@ -127,13 +129,44 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         /** Revisión inmediata. La usa BootReceiver tras un reinicio. */
         fun enqueueImmediate(ctx: Context) = enqueueDelayed(ctx, 0L)
 
-        /** Detiene todos los ciclos (al vaciarse la lista de seguidos). */
+        /**
+         * Encola el check inmediato en la cadena principal (REPLACE sobre la
+         * misma clave). Lo usa la alarma robusta: reemplaza el one-off de 8
+         * min pendiente en vez de acumular un segundo flujo.
+         */
+        fun enqueueFromAlarm(ctx: Context) {
+            try {
+                val request = OneTimeWorkRequestBuilder<EpisodeCheckWorker>()
+                    .setInitialDelay(0, TimeUnit.MINUTES)
+                    .build()
+                WorkManager.getInstance(ctx).enqueueUniqueWork(
+                    WORK_NOW,
+                    ExistingWorkPolicy.REPLACE,
+                    request,
+                )
+                Log.d(TAG, "EpisodeCheck: check inmediato (alarma)")
+            } catch (e: Exception) {
+                Log.e(TAG, "EpisodeCheck enqueueFromAlarm error: ${e.message}")
+            }
+        }
+
+        /**
+         * Programa la alarma robusta (dispara incluso en Doze y se re-agenda
+         * sola en cada disparo). Complementa al one-off y al periódico.
+         */
+        fun enqueueAlarm(ctx: Context) {
+            EpisodeCheckAlarmReceiver().schedule(ctx)
+        }
+
+        /** Cancela todas las cadenas (al vaciarse la lista de seguidos). */
         fun cancel(ctx: Context) {
             try {
                 val wm = WorkManager.getInstance(ctx)
                 wm.cancelUniqueWork(WORK_NAME)
                 wm.cancelUniqueWork(WORK_NOW)
                 wm.cancelUniqueWork(WORK_LEGACY)
+                wm.cancelUniqueWork(WORK_ALARM)
+                EpisodeCheckAlarmReceiver().cancel(ctx)
                 Log.d(TAG, "EpisodeCheck cancelado (sin seguidos)")
             } catch (e: Exception) {
                 Log.e(TAG, "EpisodeCheck cancel error: ${e.message}")
@@ -200,6 +233,9 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         // que la cadena se detiene sola. El periódico de 15 min queda como
         // red de seguridad administrada por el sistema tras reinicios.
         enqueueDelayed(ctx, CHECK_EVERY_MIN)
+        // Alarma robusta: dispara en Doze y se re-agenda sola. Si este
+        // work fue disparado por la propia alarma, esto la mantiene viva.
+        enqueueAlarm(ctx)
         return Result.success()
     }
 
