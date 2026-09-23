@@ -584,6 +584,32 @@ class ApiService {
 
   // ── Video URL extraction ────────────────────────────
 
+  /// Despierta el origin del video directo (mp4upload) antes de abrir el
+  /// player. El servidor a3.mp4upload.com:183 tarda ~20-35s en servir el
+  /// primer byte si está "frío"; tras un request Range: bytes=0-0 la misma
+  /// URL responde en ~7s. Este prewarm reduce la espera visible del usuario.
+  /// Devuelve true si el servidor está listo (cualquier 2xx/206), false si
+  /// falló (el player intentará igualmente).
+  static Future<bool> prewarmVideo(String url, {Map<String, String>? headers}) async {
+    try {
+      final reqHeaders = <String, String>{
+        'Range': 'bytes=0-0',
+        'User-Agent': _ua,
+        ...?headers,
+      };
+      final stopwatch = Stopwatch()..start();
+      final resp = await _http
+          .get(Uri.parse(url), headers: reqHeaders)
+          .timeout(const Duration(seconds: 30));
+      final ok = resp.statusCode >= 200 && resp.statusCode < 300;
+      debugPrint('Prewarm $url → ${resp.statusCode} (${stopwatch.elapsedMilliseconds}ms)');
+      return ok;
+    } catch (e) {
+      debugPrint('Prewarm failed: $e');
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>> fetchVideoUrl(String embedUrl) async {
     return _retry(() async {
       // HLS (zilla-networks)

@@ -9,7 +9,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.common.Player
@@ -126,6 +129,18 @@ class VideoController(
 				val httpFactory = DefaultHttpDataSource.Factory()
 					.setUserAgent(effectiveHeaders["User-Agent"]!!)
 					.setDefaultRequestProperties(effectiveHeaders)
+					// mp4upload (a3:183) tarda 20-35s en el primer byte si el
+					// origin está frío; con el timeout por defecto (8s) el
+					// player aborta antes de recibir nada. 40s cubre el peor
+					// caso observado.
+					.setConnectTimeoutMs(40_000)
+					.setReadTimeoutMs(40_000)
+					.setTransferListener(object : TransferListener {
+						override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+						override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+						override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+						override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {}
+					})
 				val mediaSource = DefaultMediaSourceFactory(httpFactory)
 					.createMediaSource(mediaItem)
 				exoPlayer.setMediaSource(mediaSource)
