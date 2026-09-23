@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
@@ -103,11 +104,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // Posición a restaurar (ms) al volver a playing. -1 = sin pendiente.
   int _pendingSeek = -1;
 
+  // Servidores que fallaron al arrancar en este episodio (para failover
+  // automático cuando el servidor activo está caído, p.ej. 522 de Zilla).
+  final Set<String> _failedServers = {};
+
+  // true cuando el source actual alcanzó el estado playing alguna vez.
+  // Distingue "el servidor nunca arrancó" (failover) de "se cortó a mitad"
+  // (reconexión del mismo source preservando progreso).
+  bool _sourceStarted = false;
+
   // Mouse hover (desktop only)
   bool _isHovering = false;
-
-  // Linux fullscreen via MethodChannel
-  static const _linuxChannel = MethodChannel('com.mapleprojects.animaple/linux_window');
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -324,6 +331,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onStateChanged() {
     final playing = _player.isPlaying.value;
     if (playing) {
+      _sourceStarted = true;
+      _rememberPreferredServer();
       WakelockPlus.enable();
       _startPositionTimer();
       // Auto-hide controls when video starts playing
@@ -460,15 +469,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO ERROR: $err');
-      // Pérdida de conexión durante la reproducción → reconexión automática
-      // indefinida (cada 1s) hasta que el video vuelva, restaurando el
-      // progreso visto. Solo si ya había un source cargado.
       final hadSource = _lastVideoUrl != null && _lastVideoUrl!.isNotEmpty;
-      if (hadSource && !_reconnecting) {
+
+      // El source NUNCA llegó a reproducirse: el servidor activo está caído
+      // (p.ej. Zilla devolviendo 522) — conmutar automáticamente al siguiente
+      // espejo disponible de la misma variante en vez de reconectar contra un
+      // servidor muerto.
+      if (hadSource && !_sourceStarted && !_reconnecting) {
+        if (_failoverToNextServer()) return;
+      }
+
+      // Pérdida de conexión durante la reproducción → reconexión automática
+      // indefinida (cada 8s) hasta que el video vuelva, restaurando el
+      // progreso visto. Solo si el source ya reproducía antes del corte.
+      if (hadSource && _sourceStarted && !_reconnecting) {
         _startReconnect();
         return;
       }
-      // Error sin source previo (o indisponible): mostrarlo una sola vez.
+
+      // Error sin source previo (o sin más espejos): mostrarlo una sola vez.
       if (mounted && !_videoErrorShown) {
         _videoErrorShown = true;
         showErrorSheet(
@@ -479,6 +498,49 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         );
       }
     }
+  }
+
+  /// Salta al siguiente servidor de la variante activa en orden automático,
+  /// marcando el actual como fallido. Al no quedar más espejos devuelve false
+  /// para que el error se muestre al usuario.
+  bool _failoverToNextServer() {
+    if (_activeServer != null) _failedServers.add(_activeServer!);
+    final ep = _episode;
+    if (ep == null) return false;
+
+    // El orden ya usa _failedServers (los excluye) y el preferido recordado:
+    // si el preferido es el que falló, pasa al siguiente automáticamente.
+    final next = _nextCandidateSync(ep);
+    if (next == null) return false;
+
+    debugPrint('FAILOVER: $_activeServer → ${next.server}');
+    // Sin progreso real que preservar: el source nunca arrancó.
+    _lastPositionMs = 0;
+    _pendingSeek = -1;
+    _lastVideoUrl = null;
+    _lastVideoHeaders = null;
+    _sourceStarted = false;
+    _videoErrorShown = false;
+    unawaited(_playServer(next));
+    return true;
+  }
+
+  /// Siguiente candidato SIN esperar SharedPreferences (failover síncrono):
+  /// prioriza HLS → MP4Upload → otros, excluyendo los fallidos.
+  ServerMirror? _nextCandidateSync(EpisodeDetail ep) {
+    final filtered = ep.embeds
+        .where((s) =>
+            s.variant == _activeVariant && !_failedServers.contains(s.server))
+        .toList();
+    final hls = filtered
+        .where((s) => s.server.toLowerCase().contains('hls'))
+        .toList();
+    final mp4 = filtered
+        .where((s) => s.server.toLowerCase().contains('mp4upload'))
+        .toList();
+    if (hls.isNotEmpty) return hls.first;
+    if (mp4.isNotEmpty) return mp4.first;
+    return filtered.isNotEmpty ? filtered.first : null;
   }
 
   /// Reintenta abrir el último source cada segundo, indefinidamente, hasta
@@ -521,13 +583,65 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     });
   }
 
-  /// Cancela la reconexión (se llama cuando el video ya se reprodujo).
+  /// Cancela la reconexión (se llama cuando el video ya se reprodució).
   void _stopReconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _reconnecting = false;
     _videoErrorShown = false;
     if (mounted) setState(() {});
+  }
+
+  // ── Servidor preferido (memoria) ─────────────────────────────
+  // Recuerda con qué servidor funcionó bien la última vez por anime, para
+  // arrancar directo en él y minimizar reintentos. La preferencia no bloquea:
+  // si ese servidor falla (caído/cambiado), se descarta y se usa el siguiente.
+
+  static const _prefKeyPrefix = 'preferred_server:';
+
+  Future<String?> _preferredServerFor(String slug) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('$_prefKeyPrefix$slug');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _rememberPreferredServer() async {
+    if (_activeServer == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('$_prefKeyPrefix${widget.animeSlug}', _activeServer!);
+    } catch (_) {}
+  }
+
+  /// Determina el orden de servidores a probar para [variant]:
+  /// preferido recordado (si existe en los embeds) → HLS → MP4Upload.
+  Future<List<ServerMirror>> _orderedServers(EpisodeDetail ep, String variant) async {
+    final filtered = ep.embeds
+        .where((s) => s.variant == variant && !_failedServers.contains(s.server))
+        .toList();
+    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
+    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
+    final others = filtered
+        .where((s) => !s.server.toLowerCase().contains('hls') && !s.server.toLowerCase().contains('mp4upload'))
+        .toList();
+    final ordered = <ServerMirror>[];
+    final preferred = await _preferredServerFor(widget.animeSlug);
+    if (preferred != null) {
+      final match = filtered.where((s) => s.server == preferred).toList();
+      if (match.isNotEmpty) ordered.add(match.first);
+    }
+    ordered.addAll(hls);
+    ordered.addAll(mp4);
+    // Servidores desconocidos/futuros al final, solo como último recurso.
+    for (final s in others) {
+      if (!ordered.contains(s)) ordered.add(s);
+    }
+    // Dedupe final por identidad.
+    final seen = <String>{};
+    return ordered.where((s) => seen.add('${s.server}:${s.url}')).toList();
   }
 
   void _onLoading() {
@@ -693,17 +807,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _autoPlay() {
     final ep = _episode;
     if (ep == null) return;
-    final filtered = ep.embeds.where((s) => s.variant == _activeVariant).toList();
-    // Only HLS and MP4Upload — ignore other servers
-    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
-    if (hls.isNotEmpty) { _playServer(hls.first); return; }
-    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
-    if (mp4.isNotEmpty) { _playServer(mp4.first); return; }
+    _failedServers.clear();
+    unawaited(_autoPlayResolved(ep));
+  }
+
+  Future<void> _autoPlayResolved(EpisodeDetail ep) async {
+    final ordered = await _orderedServers(ep, _activeVariant);
+    if (ordered.isEmpty) return;
+    await _playServer(ordered.first);
   }
 
   Future<void> _playServer(ServerMirror server) async {
     if (mounted) setState(() { _activeServer = server.server; _autoPlayedNext = false; });
     _videoErrorShown = false; // permitir mostrar un nuevo error
+    _sourceStarted = false;   // nuevo source: aún no ha reproducido
 
     while (mounted) {
       try {
@@ -779,6 +896,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _lastPositionMs = 0;
     _lastVideoUrl = null;
     _lastVideoHeaders = null;
+    _failedServers.clear();
+    _sourceStarted = false;
     _player.close();
     _load();
   }
@@ -1018,10 +1137,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _seekResetTimer = Timer(const Duration(milliseconds: 800), () {
       if (!mounted) return;
       _seekFadeAnim!.reverse().then((_) {
-        if (mounted) setState(() {
-          _seekAnimating = false;
-          _seekDelta = null;
-        });
+        if (mounted) {
+          setState(() {
+            _seekAnimating = false;
+            _seekDelta = null;
+          });
+        }
       });
     });
 
@@ -1577,62 +1698,34 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Widget _buildVariantAndServers(EpisodeDetail ep, List<ServerMirror> filteredEmbeds) {
-    return Column(
-      children: [
-        if (ep.variants.length > 1)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
-                const SizedBox(width: 8),
-                ...ep.variants.map((v) {
-                  final isActive = v == _activeVariant;
-                  final label = v == 'DUB' ? 'Doblaje' : 'Subtitulado';
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(label),
-                      selected: isActive,
-                      onSelected: (_) { setState(() => _activeVariant = v); _autoPlay(); },
-                      selectedColor: const Color(0xFF8b5cf6),
-                      backgroundColor: const Color(0xFF110e1a),
-                      labelStyle: TextStyle(color: isActive ? Colors.white : const Color(0xFFa99fc0), fontWeight: FontWeight.w600, fontSize: 13),
-                      side: const BorderSide(color: Color(0xFF1e1832)),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        if (filteredEmbeds.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.dns_outlined, color: Color(0xFF6d6488), size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Wrap(
-                    spacing: 8, runSpacing: 4,
-                    children: filteredEmbeds.map((s) {
-                      final isActive = _activeServer == s.server;
-                      return ChoiceChip(
-                        label: Text(s.server),
-                        selected: isActive,
-                        onSelected: (_) => _playServer(s),
-                        selectedColor: const Color(0xFF8b5cf6),
-                        backgroundColor: const Color(0xFF110e1a),
-                        labelStyle: TextStyle(color: isActive ? Colors.white : const Color(0xFFa99fc0), fontWeight: FontWeight.w600),
-                        side: const BorderSide(color: Color(0xFF1e1832)),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
+    // Selección únicamente de idioma (DUB/SUB). El servidor se elige
+    // automáticamente por lógica interna (preferido recordado → HLS → MP4Upload),
+    // con failover transparente si el activo se cae.
+    if (ep.variants.length <= 1) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
+          const SizedBox(width: 8),
+          ...ep.variants.map((v) {
+            final isActive = v == _activeVariant;
+            final label = v == 'DUB' ? 'Doblaje' : 'Subtitulado';
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(label),
+                selected: isActive,
+                onSelected: (_) { setState(() => _activeVariant = v); _autoPlay(); },
+                selectedColor: const Color(0xFF8b5cf6),
+                backgroundColor: const Color(0xFF110e1a),
+                labelStyle: TextStyle(color: isActive ? Colors.white : const Color(0xFFa99fc0), fontWeight: FontWeight.w600, fontSize: 13),
+                side: const BorderSide(color: Color(0xFF1e1832)),
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 

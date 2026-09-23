@@ -16,6 +16,10 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # El ejemplo del plugin video_view es un proyecto independiente con
+    # dependencias propias (inview_notifier_list, flutter_subtitle) que no
+    # forman parte de la app; no debe ensuciar el análisis del proyecto.
+    - video_view/example/**
 include: package:flutter_lints/flutter.yaml
 
 linter:
