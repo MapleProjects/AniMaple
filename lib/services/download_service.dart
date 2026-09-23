@@ -791,79 +791,136 @@ class DownloadService {
                   .where((v) => v.toUpperCase() != 'DUB')
                   .first
               : (detail.variants.isNotEmpty ? detail.variants.first : 'SUB');
-      ServerMirror? chosen;
-      for (final candidates in [
-        detail.embeds.where((s) => s.variant == variant).toList(),
-        detail.embeds.toList(), // fallback: cualquier variante
-      ]) {
-        final hls = candidates
-            .where((s) => s.server.toLowerCase().contains('hls'))
-            .toList();
-        if (hls.isNotEmpty) {
-          chosen = hls.first;
-          break;
-        }
-        final mp4u = candidates
-            .where((s) => s.server.toLowerCase().contains('mp4upload'))
-            .toList();
-        if (mp4u.isNotEmpty) {
-          chosen = mp4u.first;
-          break;
+      // Candidatos reproducibles: HLS y MP4Upload (los embeds iframe tipo
+      // Voe/Byse/UPNShare/Mega no son descargables por la app).
+      final playable = <ServerMirror>[];
+      for (final s in detail.embeds) {
+        final name = s.server.toLowerCase();
+        final url = s.url.toLowerCase();
+        if (s.variant != variant) continue;
+        if (name.contains('hls') ||
+            name.contains('mp4upload') ||
+            url.contains('.m3u8') ||
+            url.contains('mp4upload.com') ||
+            url.contains('.mp4')) {
+          playable.add(s);
         }
       }
+      // Fallback: si la variante pedida no tiene servidores descargables,
+      // probar cualquier variante (manteniendo preferencia DUB/SUB).
+      if (playable.isEmpty) {
+        for (final s in detail.embeds) {
+          final name = s.server.toLowerCase();
+          final url = s.url.toLowerCase();
+          if (name.contains('hls') ||
+              name.contains('mp4upload') ||
+              url.contains('.m3u8') ||
+              url.contains('mp4upload.com') ||
+              url.contains('.mp4')) {
+            playable.add(s);
+          }
+        }
+      }
+      if (playable.isEmpty) {
+        throw Exception('Sin fuente descargable para ep ${job.episode}');
+      }
+      // Orden: HLS primero (mejor calidad), MP4Upload después. El preferido
+      // recordado no aplica aquí: la descarga prioriza el stream robusto.
+      playable.sort((a, b) {
+        int rank(ServerMirror s) => s.server.toLowerCase().contains('hls') ? 0 : 1;
+        return rank(a).compareTo(rank(b));
+      });
+
+      // 2+3. Resolver URL real y descargar, con failover entre servidores.
+      // Si un servidor responde mal (p.ej. 522 de Zilla), marcar y probar el
+      // siguiente. Último error se lanza si todos fallan.
+      ServerMirror? chosen;
+      String? wonType;
+      String? lastError;
+      final sw = Stopwatch();
+      for (final candidate in playable) {
+        if (_cancelRequested) return;
+        chosen = candidate;
+        sw
+          ..reset()
+          ..start();
+        try {
+          final resolved = await ApiService.fetchVideoUrl(candidate.url);
+          final url = resolved['url'] as String?;
+          final type = resolved['type'] as String? ?? '';
+          if (url == null || url.isEmpty) {
+            throw Exception('URL de video vacía para ep ${job.episode}');
+          }
+          if (_cancelRequested) return;
+
+          if (type == 'hls') {
+            await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
+                () => _cancelRequested);
+          } else {
+            await _downloadDirect(
+              url,
+              videoTmp,
+              job.key,
+              referer: 'https://www.mp4upload.com/',
+            );
+          }
+
+          // Validación mínima: si el stream vino mal, no darlo por bueno.
+          if (type == 'hls') {
+            final pl = await tmpPlaylist.length();
+            if (pl < 200) throw Exception('Playlist HLS inválido ($pl B)');
+            final segCount = segsTmpDir.listSync().length;
+            if (segCount < 2) {
+              throw Exception('Segmentos insuficientes ($segCount)');
+            }
+          } else {
+            final size = await videoTmp.length();
+            if (size < 1024 * 1024) {
+              throw Exception(
+                  'Archivo demasiado pequeño ($size B), probablemente inválido');
+            }
+            if (!_looksLikeMp4(videoTmp)) {
+              throw Exception('El archivo descargado no parece video MP4');
+            }
+          }
+
+          // Éxito: salir del bucle con este servidor.
+          wonType = type;
+          break;
+        } catch (e) {
+          lastError = '$e';
+          debugPrint('DOWNLOAD server ${candidate.server} falló: $e');
+          // Limpiar parciales de este intento antes de probar el siguiente.
+          for (final p in [videoTmp.path, tmpPlaylist.path]) {
+            try {
+              final f = File(p);
+              if (await f.exists()) await f.delete();
+            } catch (_) {}
+          }
+          try {
+            if (await segsTmpDir.exists()) {
+              await segsTmpDir.delete(recursive: true);
+            }
+          } catch (_) {}
+        }
+      }
+      // Medir solo el tiempo del servidor ganador (reset/start por intento).
+      sw.stop();
       if (chosen == null) {
         throw Exception('Sin fuente descargable para ep ${job.episode}');
       }
-
-      // 2. Resolver URL real de video (misma ruta que fetchVideoUrl).
-      final resolved = await ApiService.fetchVideoUrl(chosen.url);
-      final url = resolved['url'] as String?;
-      final type = resolved['type'] as String? ?? '';
-      if (url == null || url.isEmpty) {
-        throw Exception('URL de video vacía para ep ${job.episode}');
+      if (lastError != null &&
+          !(await videoTmp.exists()) &&
+          !(await tmpPlaylist.exists())) {
+        throw Exception('Todas las fuentes fallaron para ep ${job.episode}: $lastError');
       }
       if (_cancelRequested) return;
-
-      // 3. Descargar según tipo.
-      final sw = Stopwatch()..start();
-      if (type == 'hls') {
-        await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
-            () => _cancelRequested);
-      } else {
-        await _downloadDirect(
-          url,
-          videoTmp,
-          job.key,
-          referer: 'https://www.mp4upload.com/',
-        );
-      }
-      sw.stop();
-      if (_cancelRequested) return;
-
-      // 4. Validación mínima.
-      if (type == 'hls') {
-        final pl = await tmpPlaylist.length();
-        if (pl < 200) throw Exception('Playlist HLS inválido ($pl B)');
-        final segCount = segsTmpDir.listSync().length;
-        if (segCount < 2) {
-          throw Exception('Segmentos insuficientes ($segCount)');
-        }
-      } else {
-        final size = await videoTmp.length();
-        if (size < 1024 * 1024) {
-          throw Exception('Archivo demasiado pequeño ($size B), probablemente inválido');
-        }
-        if (!_looksLikeMp4(videoTmp)) {
-          // No borrar aquí: la limpieza lo maneja el caller vía finally.
-          throw Exception('El archivo descargado no parece video MP4');
-        }
-      }
 
       // 5. Publicar el episodio en su destino final.
       // HLS → playlist local + segmentos (ExoPlayer calcula duración exacta
       // desde los EXTINF; seek correcto). MP4 → archivo único renombrado.
       int size;
-      if (type == 'hls') {
+      if (wonType == 'hls') {
         final dir = _hlsDir(root, job.slug, job.episode);
         if (await dir.exists()) {
           await dir.delete(recursive: true);
