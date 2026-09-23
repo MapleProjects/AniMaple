@@ -101,6 +101,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   bool _reconnecting = false;
   Timer? _reconnectTimer;
 
+  // true mientras se precalienta el origin del video (mp4upload lento).
+  bool _prewarming = false;
+
   // Posición a restaurar (ms) al volver a playing. -1 = sin pendiente.
   int _pendingSeek = -1;
 
@@ -530,7 +533,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   ServerMirror? _nextCandidateSync(EpisodeDetail ep) {
     final filtered = ep.embeds
         .where((s) =>
-            s.variant == _activeVariant && !_failedServers.contains(s.server))
+            s.variant == _activeVariant &&
+            !_failedServers.contains(s.server) &&
+            _isPlayableServer(s))
         .toList();
     final hls = filtered
         .where((s) => s.server.toLowerCase().contains('hls'))
@@ -616,11 +621,28 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     } catch (_) {}
   }
 
+  /// Servidores que la app puede reproducir nativamente.
+  /// Los embeds tipo iframe (Voe, Byse, UPNShare, Mega...) son páginas web
+  /// con DRM/captcha/blob encriptado que el player no puede parsear; solo
+  /// HLS (m3u8/zilla) y MP4Upload (mp4 directo) funcionan.
+  bool _isPlayableServer(ServerMirror s) {
+    final name = s.server.toLowerCase();
+    final url = s.url.toLowerCase();
+    if (name.contains('hls')) return true;
+    if (name.contains('mp4upload')) return true;
+    if (url.contains('.m3u8') || url.contains('zilla-networks')) return true;
+    if (url.contains('.mp4') || url.contains('mp4upload.com')) return true;
+    return false;
+  }
+
   /// Determina el orden de servidores a probar para [variant]:
   /// preferido recordado (si existe en los embeds) → HLS → MP4Upload.
   Future<List<ServerMirror>> _orderedServers(EpisodeDetail ep, String variant) async {
     final filtered = ep.embeds
-        .where((s) => s.variant == variant && !_failedServers.contains(s.server))
+        .where((s) =>
+            s.variant == variant &&
+            !_failedServers.contains(s.server) &&
+            _isPlayableServer(s))
         .toList();
     final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
     final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
@@ -635,7 +657,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
     ordered.addAll(hls);
     ordered.addAll(mp4);
-    // Servidores desconocidos/futuros al final, solo como último recurso.
+    // Futuros formatos directos (m3u8/mp4 de otros hosts), solo como último
+    // recurso; los iframe embeds ya están excluidos por _isPlayableServer.
     for (final s in others) {
       if (!ordered.contains(s)) ordered.add(s);
     }
@@ -861,6 +884,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
         // propósito.
         _stopReconnect();
+
+        // MP4Upload: el origin a3.mp4upload.com:183 tarda ~20-35s en el
+        // primer byte si está frío. Precalentar con Range 0-0 antes de abrir
+        // el player reduce el arranque a ~7s. Esperar hasta 32s (máximo
+        // observado) para que la request de apertura llegue contra un origin
+        // ya despierto; si el prewarm falla, abrir igual.
+        if (videoType == 'mp4') {
+          if (mounted) setState(() => _prewarming = true);
+          try {
+            await ApiService.prewarmVideo(videoUrl, headers: headers)
+                .timeout(const Duration(seconds: 32),
+                    onTimeout: () => false);
+          } finally {
+            if (mounted) setState(() => _prewarming = false);
+          }
+        }
 
         await _player.open(videoUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         return;
@@ -1165,6 +1204,30 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // Loading spinner
         if (_player.isLoading.value)
           const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+
+        // Precalentando servidor (mp4upload): aviso para que el usuario
+        // sepa que el origin lento está respondiendo. Sin esto, la espera
+        // de ~30s se ve como pantalla rota.
+        if (_prewarming)
+          Container(
+            color: Colors.black.withValues(alpha: 0.45),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+                SizedBox(height: 12),
+                Text(
+                  'Conectando con el servidor…',
+                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'El servidor puede tardar unos segundos (hasta 30s).',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
 
         // Reconexión automática (pérdida de internet): aviso al usuario
         if (_reconnecting)
