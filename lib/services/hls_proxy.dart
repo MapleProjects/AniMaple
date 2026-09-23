@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 
 /// Local HTTP proxy that fixes content-type and headers for HLS / MP4 streams.
 ///

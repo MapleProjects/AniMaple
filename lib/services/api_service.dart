@@ -182,9 +182,9 @@ class ApiService {
       final mins = diff.inMinutes.abs();
       final hours = diff.inHours.abs();
       final days = diff.inDays.abs();
-      if (mins < 60) return 'Hace ${mins} min';
-      if (hours < 24) return 'Hace ${hours}h';
-      if (days < 7) return 'Hace ${days} dia${days > 1 ? 's' : ''}';
+      if (mins < 60) return 'Hace $mins min';
+      if (hours < 24) return 'Hace $hours h';
+      if (days < 7) return 'Hace $days dia${days > 1 ? 's' : ''}';
       return 'Hace ${days ~/ 7} sem';
     } catch (_) {
       return dtStr;
@@ -277,8 +277,9 @@ class ApiService {
             final rawMedia = data[mediaIdx] as Map?;
             if (rawMedia != null) {
               final aidIdx = (rawMedia['id'] as num?)?.toInt();
-              if (aidIdx != null)
+              if (aidIdx != null) {
                 animeId = _resolveNumberChain(data, aidIdx) ?? 0;
+              }
               final pidIdx = (rawMedia['poster'] as num?)?.toInt();
               if (pidIdx != null) posterId = _resolveNumberChain(data, pidIdx);
               posterId ??= animeId;
