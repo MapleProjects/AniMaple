@@ -838,6 +838,28 @@ class DownloadService {
       String? wonType;
       String? lastError;
       final sw = Stopwatch();
+
+      // Precalentamiento temprano en paralelo: mientras el HLS intenta (y
+      // probablemente falla con 522), despertar el origin del MP4Upload
+      // (Range 0-0) para que cuando el failover salte, el primer byte llegue
+      // en ~7s y no en 20-35s. El prewarm nunca bloquea el bucle.
+      Future<void> prewarmMp4() async {
+        final mp4candidate = playable
+            .where((s) => s.server.toLowerCase().contains('mp4upload'))
+            .toList();
+        if (mp4candidate.isEmpty) return;
+        try {
+          final resolved = await ApiService.fetchVideoUrl(mp4candidate.first.url);
+          final u = resolved['url'] as String?;
+          if (u == null || u.isEmpty) return;
+          await ApiService.prewarmVideo(u,
+              headers: {'Referer': 'https://www.mp4upload.com/'});
+        } catch (_) {}
+      }
+      final earlyWarm = prewarmMp4();
+      // No bloquear: correr en paralelo con el primer intento del bucle.
+      // (El await real está al final si el ganador es MP4 sin haber calentado).
+
       for (final candidate in playable) {
         if (_cancelRequested) return;
         chosen = candidate;
@@ -857,6 +879,12 @@ class DownloadService {
             await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
                 () => _cancelRequested);
           } else {
+            // El prewarm temprano (earlyWarm) ya está calentando este mismo
+            // origin en paralelo; esperarlo aquí evita duplicar el request
+            // Range 0-0 y arranca la descarga contra un origin caliente.
+            try {
+              await earlyWarm.timeout(const Duration(seconds: 32));
+            } catch (_) {}
             await _downloadDirect(
               url,
               videoTmp,
@@ -1081,7 +1109,7 @@ class DownloadService {
     try {
       final req = await client.getUrl(Uri.parse(url));
       headers.forEach((k, v) => req.headers.set(k, v));
-      final resp = await req.close();
+      final resp = await req.close().timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) return null;
       final builder = BytesBuilder(copy: false);
       await for (final chunk in resp) {
