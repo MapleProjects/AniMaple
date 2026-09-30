@@ -23,6 +23,13 @@ void main() {
         'Range': 'bytes=0-100',
       });
       expect(head.statusCode, inInclusiveRange(200, 206));
+
+      // Test resolveHighestQualityHls chooses 1080p
+      final best = await ApiService.resolveHighestQualityHls(streamUrl, headers: {
+        'Referer': 'https://animeav1.uns.bio/',
+      });
+      expect(best['height'], 1080);
+      expect(best['url'], isNotEmpty);
     }, timeout: const Timeout(Duration(seconds: 45)));
 
     test('2. Voe resolver resolves to valid playable stream', () async {

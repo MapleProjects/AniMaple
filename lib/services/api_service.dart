@@ -612,6 +612,69 @@ class ApiService {
     }
   }
 
+  /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
+  /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
+  static Future<Map<String, dynamic>> resolveHighestQualityHls(
+    String masterUrl, {
+    Map<String, String>? headers,
+  }) async {
+    try {
+      final uri = Uri.parse(masterUrl);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(uri);
+      req.headers.set('User-Agent', _ua);
+      headers?.forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close().timeout(const Duration(seconds: 4));
+      if (resp.statusCode == 200) {
+        final body = await utf8.decodeStream(resp);
+        if (body.contains('#EXT-X-STREAM-INF')) {
+          final lines = body.split('\n');
+          int maxHeight = 0;
+          int maxBw = 0;
+          String? bestChild;
+
+          for (var i = 0; i < lines.length; i++) {
+            final line = lines[i].trim();
+            if (line.startsWith('#EXT-X-STREAM-INF')) {
+              int h = 0;
+              final resMatch = RegExp(r'RESOLUTION=\d+x(\d+)').firstMatch(line);
+              if (resMatch != null) {
+                h = int.tryParse(resMatch.group(1)!) ?? 0;
+              }
+              int bw = 0;
+              final bwMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(line);
+              if (bwMatch != null) {
+                bw = int.tryParse(bwMatch.group(1)!) ?? 0;
+              }
+
+              if (i + 1 < lines.length) {
+                final child = lines[i + 1].trim();
+                if (child.isNotEmpty && !child.startsWith('#')) {
+                  if (h > maxHeight || (h == maxHeight && bw > maxBw) || bestChild == null) {
+                    maxHeight = h;
+                    maxBw = bw;
+                    bestChild = child;
+                  }
+                }
+              }
+            }
+          }
+
+          client.close();
+          if (bestChild != null && !bestChild.startsWith('#')) {
+            return {
+              'url': uri.resolve(bestChild).toString(),
+              'height': maxHeight > 0 ? maxHeight : 720,
+              'bandwidth': maxBw,
+            };
+          }
+        }
+      }
+      client.close();
+    } catch (_) {}
+    return {'url': masterUrl, 'height': 720, 'bandwidth': 0};
+  }
+
   static Future<Map<String, dynamic>> fetchVideoUrl(String embedUrl) async {
     return _retry(() async {
       // UPNShare (uns.bio)
