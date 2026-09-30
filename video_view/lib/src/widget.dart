@@ -17,6 +17,7 @@ class VideoView extends StatefulWidget {
   final int? position;
   final bool? showSubtitle;
   final bool? keepScreenOn;
+  final bool? sgsrEnabled;
   final String? preferredSubtitleLanguage;
   final String? preferredAudioLanguage;
   final int? maxBitRate;
@@ -51,6 +52,7 @@ class VideoView extends StatefulWidget {
     this.position,
     this.showSubtitle,
     this.keepScreenOn,
+    this.sgsrEnabled,
     this.preferredSubtitleLanguage,
     this.preferredAudioLanguage,
     this.maxBitRate,
@@ -134,6 +136,7 @@ class _VideoViewState extends State<VideoView> {
         position: widget.position,
         showSubtitle: widget.showSubtitle,
         keepScreenOn: widget.keepScreenOn,
+        sgsrEnabled: widget.sgsrEnabled,
         preferredSubtitleLanguage: widget.preferredSubtitleLanguage,
         preferredAudioLanguage: widget.preferredAudioLanguage,
         maxBitRate: widget.maxBitRate,
@@ -153,6 +156,7 @@ class _VideoViewState extends State<VideoView> {
         position: widget.position,
         showSubtitle: widget.showSubtitle,
         keepScreenOn: widget.keepScreenOn,
+        sgsrEnabled: widget.sgsrEnabled,
         preferredSubtitleLanguage: widget.preferredSubtitleLanguage,
         preferredAudioLanguage: widget.preferredAudioLanguage,
         maxBitRate: widget.maxBitRate,
@@ -164,6 +168,7 @@ class _VideoViewState extends State<VideoView> {
     _runOnCreated();
     _controller.videoSize.addListener(_update);
     _controller.showSubtitle.addListener(_update);
+    _controller.sgsrEnabled.addListener(_update);
     if (kIsWeb) {
       _controller.displayMode.addListener(_fullscreenChange);
     }
@@ -176,6 +181,7 @@ class _VideoViewState extends State<VideoView> {
     } else if (!_controller.disposed) {
       _controller.videoSize.removeListener(_update);
       _controller.showSubtitle.removeListener(_update);
+      _controller.sgsrEnabled.removeListener(_update);
       if (kIsWeb) {
         _controller.displayMode.removeListener(_fullscreenChange);
         _clearOverlay();

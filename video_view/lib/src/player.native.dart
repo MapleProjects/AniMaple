@@ -29,6 +29,7 @@ class VideoControllerImplementation extends VideoController {
   Map<String, String>? _headers;
   var _seeking = false;
   var _position = 0;
+  var _sgsrEnabled = false;
 
   VideoControllerImplementation() : super.create() {
     if (kDebugMode && !_detectorStarted) {
@@ -171,6 +172,9 @@ class VideoControllerImplementation extends VideoController {
         }
         if (keepScreenOn.value) {
           _setKeepScreenOn();
+        }
+        if (_sgsrEnabled) {
+          _setSgsrEnabled();
         }
       }
     });
@@ -501,6 +505,22 @@ class VideoControllerImplementation extends VideoController {
     'id': _id,
     'value': keepScreenOn.value,
   });
+
+  void _setSgsrEnabled() => _methodChannel.invokeMethod('setSgsrEnabled', {
+    'id': _id,
+    'enabled': _sgsrEnabled,
+  });
+
+  @override
+  bool setSgsrEnabled(bool enabled) {
+    if (disposed) return false;
+    _sgsrEnabled = enabled;
+    sgsrEnabled.value = enabled;
+    if (_id != null) {
+      _setSgsrEnabled();
+    }
+    return true;
+  }
 
   void _play() {
     playbackState.value = .playing;

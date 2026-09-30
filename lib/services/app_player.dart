@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
 import 'package:video_view/video_view.dart' as vv;
@@ -288,6 +287,7 @@ class VideoViewAppPlayer implements AppPlayer {
       autoPlay: true,
       cancelableNotification: true,
       keepScreenOn: true,
+      sgsrEnabled: SgsrService.isEnabled.value,
     );
 
     _vvController.playbackState.addListener(_onState);
@@ -365,25 +365,17 @@ class VideoViewAppPlayer implements AppPlayer {
       if (referer.isNotEmpty) 'Referer': referer,
       ...?headers,
     };
+    _vvController.setSgsrEnabled(SgsrService.isEnabled.value);
     _vvController.open(url, headers: effectiveHeaders);
     if (startPositionMs != null && startPositionMs > 0) {
       _vvController.seekTo(startPositionMs);
-    }
-    if (SgsrService.isEnabled.value) {
-      unawaited(setSgsrEnabled(true));
     }
   }
 
   @override
   Future<void> setSgsrEnabled(bool enabled) async {
     try {
-      final id = (_vvController as dynamic).id as int?;
-      if (id != null) {
-        await const MethodChannel('VideoViewPlugin').invokeMethod('setSgsrEnabled', {
-          'id': id,
-          'enabled': enabled,
-        });
-      }
+      _vvController.setSgsrEnabled(enabled);
     } catch (e) {
       debugPrint('Error applying SGSR 2K in VideoViewAppPlayer: $e');
     }
@@ -431,6 +423,7 @@ class VideoViewAppPlayer implements AppPlayer {
     return vv.VideoView(
       controller: _vvController,
       keepScreenOn: true,
+      sgsrEnabled: SgsrService.isEnabled.value,
     );
   }
 }
