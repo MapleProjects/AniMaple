@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
@@ -612,6 +614,35 @@ class ApiService {
 
   static Future<Map<String, dynamic>> fetchVideoUrl(String embedUrl) async {
     return _retry(() async {
+      // UPNShare (uns.bio)
+      if (embedUrl.contains('uns.bio')) {
+        try {
+          return await _resolveUpnShare(embedUrl);
+        } catch (e) {
+          debugPrint('UPNShare resolve error: $e');
+        }
+      }
+
+      // Voe (voe.sx or redirect domains)
+      if (embedUrl.contains('voe.sx') || embedUrl.contains('/e/')) {
+        if (embedUrl.contains('voe.sx') || embedUrl.contains('voe')) {
+          try {
+            return await _resolveVoe(embedUrl);
+          } catch (e) {
+            debugPrint('Voe resolve error: $e');
+          }
+        }
+      }
+
+      // Byse (byselapuix.com / n1mwq.org)
+      if (embedUrl.contains('byselapuix.com') || embedUrl.contains('n1mwq.org')) {
+        try {
+          return await _resolveByse(embedUrl);
+        } catch (e) {
+          debugPrint('Byse resolve error: $e');
+        }
+      }
+
       // HLS (zilla-networks)
       if (embedUrl.contains('zilla-networks.com/play/')) {
         final id = embedUrl.split('/').last;
@@ -621,6 +652,9 @@ class ApiService {
           return {
             'url': 'https://player.zilla-networks.com/m3u8/$id?x.m3u8',
             'type': 'hls',
+            'headers': {
+              'Referer': 'https://player.zilla-networks.com/',
+            },
           };
         }
       }
@@ -635,14 +669,22 @@ class ApiService {
             r'src:\s*"(https://[^"]*\.mp4)"',
           ).firstMatch(body);
           if (match != null) {
-            return {'url': match.group(1)!, 'type': 'mp4'};
+            return {
+              'url': match.group(1)!,
+              'type': 'mp4',
+              'headers': {'Referer': 'https://www.mp4upload.com/'},
+            };
           }
           // Fallback: find any mp4upload mp4 URL
           final match2 = RegExp(
             r'(https://a\d+\.mp4upload\.com:\d+/d/[^"]*\.mp4)',
           ).firstMatch(body);
           if (match2 != null) {
-            return {'url': match2.group(1)!, 'type': 'mp4'};
+            return {
+              'url': match2.group(1)!,
+              'type': 'mp4',
+              'headers': {'Referer': 'https://www.mp4upload.com/'},
+            };
           }
         } catch (e) {
           debugPrint('MP4Upload extraction error: $e');
@@ -651,6 +693,303 @@ class ApiService {
 
       return {'url': embedUrl, 'type': 'embed'};
     });
+  }
+
+  static Future<Map<String, dynamic>> _resolveUpnShare(String embedUrl) async {
+    final id = embedUrl.contains('#')
+        ? embedUrl.split('#').last.split('&').first
+        : '';
+    if (id.isEmpty) return {'url': embedUrl, 'type': 'embed'};
+
+    final uri = Uri.parse('https://animeav1.uns.bio/api/v1/video?id=$id&w=1920&h=1080&r=');
+    final resp = await _http.get(uri, headers: {
+      'User-Agent': _ua,
+      'Referer': 'https://animeav1.uns.bio/',
+    });
+
+    if (resp.statusCode != 200) {
+      throw Exception('UPNShare API error: ${resp.statusCode}');
+    }
+
+    final hexBody = resp.body.trim();
+    final key = encrypt.Key.fromUtf8('kiemtienmua911ca');
+    final iv = encrypt.IV.fromUtf8('1234567890oiuytr');
+    final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
+    final decrypted = encrypter.decrypt(encrypt.Encrypted.fromBase16(hexBody), iv: iv);
+
+    final json = jsonDecode(decrypted) as Map<String, dynamic>;
+    final cfNative = json['cfNative'] as String?;
+    final source = json['source'] as String?;
+    final streamUrl = cfNative ?? source;
+
+    if (streamUrl != null && streamUrl.isNotEmpty) {
+      return {
+        'url': streamUrl,
+        'type': 'hls',
+        'headers': {
+          'Referer': 'https://animeav1.uns.bio/',
+        },
+      };
+    }
+
+    return {'url': embedUrl, 'type': 'embed'};
+  }
+
+  static Future<Map<String, dynamic>> _resolveVoe(String embedUrl) async {
+    var targetUrl = embedUrl;
+    var resp = await _http.get(Uri.parse(targetUrl), headers: {
+      'User-Agent': _ua,
+      'Referer': 'https://animeav1.com/',
+    });
+
+    var body = resp.body;
+    final redirMatch = RegExp(r"window\.location\.href\s*=\s*'([^']+)'").firstMatch(body);
+    if (redirMatch != null) {
+      targetUrl = redirMatch.group(1)!;
+      resp = await _http.get(Uri.parse(targetUrl), headers: {
+        'User-Agent': _ua,
+        'Referer': embedUrl,
+      });
+      body = resp.body;
+    }
+
+    final scriptMatch = RegExp(r'<script type="application/json">\s*\["([^"]+)"\]\s*</script>').firstMatch(body);
+    if (scriptMatch == null) {
+      final hlsMatch = RegExp(r"'(https://[^']*master\.m3u8[^']*)'").firstMatch(body);
+      if (hlsMatch != null) {
+        return {
+          'url': hlsMatch.group(1)!,
+          'type': 'hls',
+          'headers': {'Referer': targetUrl},
+        };
+      }
+      return {'url': embedUrl, 'type': 'embed'};
+    }
+
+    final rawPayload = scriptMatch.group(1)!;
+
+    // 1. ROT13 on ASCII letters
+    final rot13Buf = StringBuffer();
+    for (var i = 0; i < rawPayload.length; i++) {
+      var c = rawPayload.codeUnitAt(i);
+      if (c >= 65 && c <= 90) {
+        c = (c - 65 + 13) % 26 + 65;
+      } else if (c >= 97 && c <= 122) {
+        c = (c - 97 + 13) % 26 + 97;
+      }
+      rot13Buf.writeCharCode(c);
+    }
+    var s = rot13Buf.toString();
+
+    // 2. Remove separator tokens
+    for (final sep in const ['@\$', '^^', '~@', '%?', '*~', '!!', '#&']) {
+      s = s.replaceAll(sep, '');
+    }
+
+    // 3. Base64 decode to latin1
+    s = latin1.decode(base64.decode(s));
+
+    // 4. Shift charCode - 3
+    final shiftBuf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      shiftBuf.writeCharCode(s.codeUnitAt(i) - 3);
+    }
+    s = shiftBuf.toString();
+
+    // 5. Reverse string
+    s = s.split('').reversed.join('');
+
+    // 6. Base64 decode to utf8 JSON
+    final jsonStr = utf8.decode(base64.decode(s));
+    final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+
+    final source = data['source'] as String?;
+    final fallbackList = data['fallback'] as List?;
+    final fallbackMp4 = fallbackList != null && fallbackList.isNotEmpty
+        ? (fallbackList[0] as Map)['file'] as String?
+        : null;
+
+    final streamUrl = source ?? fallbackMp4;
+    if (streamUrl != null && streamUrl.isNotEmpty) {
+      final isHls = streamUrl.contains('.m3u8') || source != null;
+      return {
+        'url': streamUrl,
+        'type': isHls ? 'hls' : 'mp4',
+        'headers': {
+          'Referer': targetUrl,
+        },
+      };
+    }
+
+    return {'url': embedUrl, 'type': 'embed'};
+  }
+
+  static Future<Map<String, dynamic>> _resolveByse(String embedUrl) async {
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      try {
+        final streamUrl = await _resolveByseHeadless(embedUrl);
+        if (streamUrl != null && streamUrl.isNotEmpty) {
+          return {
+            'url': streamUrl,
+            'type': 'hls',
+            'headers': {
+              'Referer': 'https://n1mwq.org/',
+            },
+          };
+        }
+      } catch (e) {
+        debugPrint('Byse headless resolver error: $e');
+      }
+    }
+    return {'url': embedUrl, 'type': 'embed'};
+  }
+
+  static Future<String?> _resolveByseHeadless(String embedUrl) async {
+    String? chromePath;
+    final candidates = Platform.isWindows
+        ? const [
+            'chrome.exe',
+            'msedge.exe',
+            r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+            r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+          ]
+        : const [
+            'google-chrome-stable',
+            'google-chrome',
+            'chromium',
+            'chromium-browser',
+            'vivaldi',
+            'brave',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium',
+          ];
+
+    for (final c in candidates) {
+      try {
+        final res = await Process.run(Platform.isWindows ? 'where' : 'which', [c]);
+        if (res.exitCode == 0) {
+          chromePath = res.stdout.toString().trim().split('\n').first.trim();
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (chromePath == null) return null;
+
+    Process? proc;
+    try {
+      proc = await Process.start(chromePath, [
+        '--headless=new',
+        '--remote-debugging-port=0',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-extensions',
+        embedUrl,
+      ]);
+
+      final portCompleter = Completer<int>();
+      proc.stderr
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        final match = RegExp(r'DevTools listening on ws://127\.0\.0\.1:(\d+)/').firstMatch(line);
+        if (match != null && !portCompleter.isCompleted) {
+          portCompleter.complete(int.parse(match.group(1)!));
+        }
+      });
+
+      final port = await portCompleter.future.timeout(const Duration(seconds: 10));
+      final client = HttpClient();
+
+      // 1. Poll for iframe target
+      Map<String, dynamic>? iframeTarget;
+      final stopwatch = Stopwatch()..start();
+      while (stopwatch.elapsedMilliseconds < 15000) {
+        try {
+          final req = await client.getUrl(Uri.parse('http://127.0.0.1:$port/json'));
+          final resp = await req.close();
+          final body = await resp.transform(utf8.decoder).join();
+          final targets = jsonDecode(body) as List;
+          for (final t in targets) {
+            final url = t['url'] as String? ?? '';
+            if (url.contains('n1mwq.org')) {
+              iframeTarget = t as Map<String, dynamic>;
+              break;
+            }
+          }
+          if (iframeTarget != null) break;
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      if (iframeTarget == null) {
+        client.close();
+        return null;
+      }
+
+      final wsUrl = iframeTarget['webSocketDebuggerUrl'] as String;
+      final ws = await WebSocket.connect(wsUrl);
+      var msgId = 1;
+      final pending = <int, Completer<dynamic>>{};
+
+      ws.listen((data) {
+        try {
+          final msg = jsonDecode(data as String) as Map<String, dynamic>;
+          final id = msg['id'] as int?;
+          if (id != null && pending.containsKey(id)) {
+            pending.remove(id)!.complete(msg['result']);
+          }
+        } catch (_) {}
+      });
+
+      Future<dynamic> send(String method, [Map<String, dynamic>? params]) {
+        final id = msgId++;
+        final completer = Completer<dynamic>();
+        pending[id] = completer;
+        ws.add(jsonEncode({'id': id, 'method': method, 'params': params ?? {}}));
+        return completer.future;
+      }
+
+      // 2. Click play button inside iframe
+      stopwatch.reset();
+      while (stopwatch.elapsedMilliseconds < 10000) {
+        try {
+          final res = await send('Runtime.evaluate', {
+            'expression': '(() => { const b = document.querySelector("button"); if (b) { b.click(); return true; } return false; })()',
+          });
+          if (res != null && res['result']?['value'] == true) break;
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // 3. Poll for jwplayer m3u8 stream
+      String? streamUrl;
+      stopwatch.reset();
+      while (stopwatch.elapsedMilliseconds < 15000) {
+        try {
+          final res = await send('Runtime.evaluate', {
+            'expression': '(() => { try { return window.jwplayer().getConfig().playlist[0].sources[0].file; } catch(e) { return null; } })()',
+          });
+          final val = res?['result']?['value'] as String?;
+          if (val != null && val.isNotEmpty) {
+            streamUrl = val;
+            break;
+          }
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+
+      await ws.close();
+      client.close();
+      return streamUrl;
+    } catch (e) {
+      debugPrint('Headless resolution exception: $e');
+      return null;
+    } finally {
+      proc?.kill();
+    }
   }
 
   // ── History (local) ─────────────────────────────────
