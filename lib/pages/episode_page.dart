@@ -537,14 +537,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             !_failedServers.contains(s.server) &&
             _isPlayableServer(s))
         .toList();
-    final hls = filtered
-        .where((s) => s.server.toLowerCase().contains('hls'))
-        .toList();
-    final mp4 = filtered
-        .where((s) => s.server.toLowerCase().contains('mp4upload'))
-        .toList();
+    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
+    final upn = filtered.where((s) => s.server.toLowerCase().contains('upnshare') || s.url.toLowerCase().contains('uns.bio')).toList();
+    final voe = filtered.where((s) => s.server.toLowerCase().contains('voe') || s.url.toLowerCase().contains('voe.sx')).toList();
+    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
+    final byse = filtered.where((s) => s.server.toLowerCase().contains('byse') || s.url.toLowerCase().contains('byselapuix.com')).toList();
     if (hls.isNotEmpty) return hls.first;
+    if (upn.isNotEmpty) return upn.first;
+    if (voe.isNotEmpty) return voe.first;
     if (mp4.isNotEmpty) return mp4.first;
+    if (byse.isNotEmpty) return byse.first;
     return filtered.isNotEmpty ? filtered.first : null;
   }
 
@@ -622,21 +624,21 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   /// Servidores que la app puede reproducir nativamente.
-  /// Los embeds tipo iframe (Voe, Byse, UPNShare, Mega...) son páginas web
-  /// con DRM/captcha/blob encriptado que el player no puede parsear; solo
-  /// HLS (m3u8/zilla) y MP4Upload (mp4 directo) funcionan.
   bool _isPlayableServer(ServerMirror s) {
     final name = s.server.toLowerCase();
     final url = s.url.toLowerCase();
     if (name.contains('hls')) return true;
     if (name.contains('mp4upload')) return true;
+    if (name.contains('upnshare') || url.contains('uns.bio')) return true;
+    if (name.contains('voe') || url.contains('voe.sx')) return true;
+    if (name.contains('byse') || url.contains('byselapuix.com') || url.contains('n1mwq.org')) return true;
     if (url.contains('.m3u8') || url.contains('zilla-networks')) return true;
     if (url.contains('.mp4') || url.contains('mp4upload.com')) return true;
     return false;
   }
 
   /// Determina el orden de servidores a probar para [variant]:
-  /// preferido recordado (si existe en los embeds) → HLS → MP4Upload.
+  /// preferido recordado → HLS → UPNShare → Voe → MP4Upload → Byse.
   Future<List<ServerMirror>> _orderedServers(EpisodeDetail ep, String variant) async {
     final filtered = ep.embeds
         .where((s) =>
@@ -645,9 +647,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             _isPlayableServer(s))
         .toList();
     final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
+    final upn = filtered.where((s) => s.server.toLowerCase().contains('upnshare') || s.url.toLowerCase().contains('uns.bio')).toList();
+    final voe = filtered.where((s) => s.server.toLowerCase().contains('voe') || s.url.toLowerCase().contains('voe.sx')).toList();
     final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
+    final byse = filtered.where((s) => s.server.toLowerCase().contains('byse') || s.url.toLowerCase().contains('byselapuix.com')).toList();
     final others = filtered
-        .where((s) => !s.server.toLowerCase().contains('hls') && !s.server.toLowerCase().contains('mp4upload'))
+        .where((s) => !hls.contains(s) && !upn.contains(s) && !voe.contains(s) && !mp4.contains(s) && !byse.contains(s))
         .toList();
     final ordered = <ServerMirror>[];
     final preferred = await _preferredServerFor(widget.animeSlug);
@@ -656,9 +661,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       if (match.isNotEmpty) ordered.add(match.first);
     }
     ordered.addAll(hls);
+    ordered.addAll(upn);
+    ordered.addAll(voe);
     ordered.addAll(mp4);
-    // Futuros formatos directos (m3u8/mp4 de otros hosts), solo como último
-    // recurso; los iframe embeds ya están excluidos por _isPlayableServer.
+    ordered.addAll(byse);
     for (final s in others) {
       if (!ordered.contains(s)) ordered.add(s);
     }
@@ -862,13 +868,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // (UA real, Sec-Fetch-*, Accept-Language). ExoPlayer puede
         // descargarlos si se envían — Cloudflare NO bloquea por fingerprint
         // TLS (verificado: HTTP/1.1 con headers → 200).
-        final headers = videoType == 'hls'
-            ? <String, String>{
-                'Referer': 'https://player.zilla-networks.com/',
-              }
-            : videoType == 'mp4'
-                ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
-                : null;
+        final customHeaders = (data['headers'] as Map<String, dynamic>?)
+            ?.map((k, v) => MapEntry(k, v.toString()));
+
+        final headers = customHeaders ??
+            (videoType == 'hls'
+                ? <String, String>{
+                    'Referer': 'https://player.zilla-networks.com/',
+                  }
+                : videoType == 'mp4'
+                    ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
+                    : null);
 
         // Cambio de servidor/idioma: conservar la posición actual para
         // restaurarla cuando el nuevo source empiece a reproducirse.
@@ -981,8 +991,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
 
     final filteredEmbeds = ep.embeds.where((s) =>
-      s.variant == _activeVariant &&
-      (s.server.toLowerCase().contains('hls') || s.server.toLowerCase().contains('mp4upload'))
+      s.variant == _activeVariant && _isPlayableServer(s)
     ).toList();
     final anime = _animeDetail;
     final screenWidth = MediaQuery.of(context).size.width;

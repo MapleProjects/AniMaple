@@ -791,18 +791,23 @@ class DownloadService {
                   .where((v) => v.toUpperCase() != 'DUB')
                   .first
               : (detail.variants.isNotEmpty ? detail.variants.first : 'SUB');
-      // Candidatos reproducibles: HLS y MP4Upload (los embeds iframe tipo
-      // Voe/Byse/UPNShare/Mega no son descargables por la app).
-      final playable = <ServerMirror>[];
-      for (final s in detail.embeds) {
+      // Candidatos reproducibles: HLS, UPNShare, Voe, MP4Upload, Byse
+      bool isDownloadable(ServerMirror s) {
         final name = s.server.toLowerCase();
         final url = s.url.toLowerCase();
+        if (name.contains('hls')) return true;
+        if (name.contains('mp4upload')) return true;
+        if (name.contains('upnshare') || url.contains('uns.bio')) return true;
+        if (name.contains('voe') || url.contains('voe.sx')) return true;
+        if (name.contains('byse') || url.contains('byselapuix.com')) return true;
+        if (url.contains('.m3u8') || url.contains('mp4upload.com') || url.contains('.mp4')) return true;
+        return false;
+      }
+
+      final playable = <ServerMirror>[];
+      for (final s in detail.embeds) {
         if (s.variant != variant) continue;
-        if (name.contains('hls') ||
-            name.contains('mp4upload') ||
-            url.contains('.m3u8') ||
-            url.contains('mp4upload.com') ||
-            url.contains('.mp4')) {
+        if (isDownloadable(s)) {
           playable.add(s);
         }
       }
@@ -810,13 +815,7 @@ class DownloadService {
       // probar cualquier variante (manteniendo preferencia DUB/SUB).
       if (playable.isEmpty) {
         for (final s in detail.embeds) {
-          final name = s.server.toLowerCase();
-          final url = s.url.toLowerCase();
-          if (name.contains('hls') ||
-              name.contains('mp4upload') ||
-              url.contains('.m3u8') ||
-              url.contains('mp4upload.com') ||
-              url.contains('.mp4')) {
+          if (isDownloadable(s)) {
             playable.add(s);
           }
         }
@@ -824,10 +823,18 @@ class DownloadService {
       if (playable.isEmpty) {
         throw Exception('Sin fuente descargable para ep ${job.episode}');
       }
-      // Orden: HLS primero (mejor calidad), MP4Upload después. El preferido
-      // recordado no aplica aquí: la descarga prioriza el stream robusto.
+      // Orden: HLS (Zilla) -> UPNShare -> Voe -> MP4Upload -> Byse.
       playable.sort((a, b) {
-        int rank(ServerMirror s) => s.server.toLowerCase().contains('hls') ? 0 : 1;
+        int rank(ServerMirror s) {
+          final n = s.server.toLowerCase();
+          final u = s.url.toLowerCase();
+          if (n.contains('hls') || u.contains('zilla')) return 0;
+          if (n.contains('upnshare') || u.contains('uns.bio')) return 1;
+          if (n.contains('voe') || u.contains('voe.sx')) return 2;
+          if (n.contains('mp4upload')) return 3;
+          if (n.contains('byse') || u.contains('byselapuix.com')) return 4;
+          return 5;
+        }
         return rank(a).compareTo(rank(b));
       });
 
@@ -870,14 +877,17 @@ class DownloadService {
           final resolved = await ApiService.fetchVideoUrl(candidate.url);
           final url = resolved['url'] as String?;
           final type = resolved['type'] as String? ?? '';
-          if (url == null || url.isEmpty) {
-            throw Exception('URL de video vacía para ep ${job.episode}');
+          if (url == null || url.isEmpty || type == 'embed') {
+            throw Exception('URL no descargable directamente para ep ${job.episode} ($type)');
           }
+          final customHeaders = (resolved['headers'] as Map<String, dynamic>?)
+              ?.map((k, v) => MapEntry(k, v.toString()));
+
           if (_cancelRequested) return;
 
           if (type == 'hls') {
             await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
-                () => _cancelRequested);
+                () => _cancelRequested, headers: customHeaders);
           } else {
             // El prewarm temprano (earlyWarm) ya está calentando este mismo
             // origin en paralelo; esperarlo aquí evita duplicar el request
@@ -889,7 +899,7 @@ class DownloadService {
               url,
               videoTmp,
               job.key,
-              referer: 'https://www.mp4upload.com/',
+              referer: customHeaders?['Referer'] ?? 'https://www.mp4upload.com/',
             );
           }
 
@@ -1216,13 +1226,14 @@ class DownloadService {
     File playlistOut,
     Directory segsDir,
     String progressKey,
-    bool Function() cancelled,
-  ) async {
-    final headers = _zillaHeaders();
+    bool Function() cancelled, {
+    Map<String, String>? headers,
+  }) async {
+    final reqHeaders = headers ?? _zillaHeaders();
 
     // 1. Obtener el playlist de medios (resuelve master multi-variante).
     var mediaUrl = masterUrl;
-    final masterBytes = await _fetchBytes(mediaUrl, headers: headers);
+    final masterBytes = await _fetchBytes(mediaUrl, headers: reqHeaders);
     if (masterBytes == null) {
       throw Exception('No se pudo bajar el playlist HLS');
     }
@@ -1240,7 +1251,7 @@ class DownloadService {
         throw Exception('Master HLS sin variantes');
       }
       mediaUrl = Uri.parse(masterUrl).resolve(child).toString();
-      final mediaBytes = await _fetchBytes(mediaUrl, headers: headers);
+      final mediaBytes = await _fetchBytes(mediaUrl, headers: reqHeaders);
       if (mediaBytes == null) throw Exception('No se pudo bajar la variante HLS');
       playlist = utf8.decode(mediaBytes, allowMalformed: true);
     }
@@ -1313,7 +1324,7 @@ class DownloadService {
     try {
       Future<void> fetchSeg(Uri uri, File out) async {
         final req = await client.getUrl(uri);
-        headers.forEach((k, v) => req.headers.set(k, v));
+        reqHeaders.forEach((k, v) => req.headers.set(k, v));
         final resp = await req.close();
         if (resp.statusCode != 200) {
           throw Exception('HTTP ${resp.statusCode} en $uri');
