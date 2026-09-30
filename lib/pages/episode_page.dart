@@ -354,7 +354,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final playing = _player.isPlaying.value;
     if (playing) {
       _sourceStarted = true;
-      _rememberPreferredServer();
       WakelockPlus.enable();
       _startPositionTimer();
       // Auto-hide controls when video starts playing
@@ -527,7 +526,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   /// para que el error se muestre al usuario.
   bool _failoverToNextServer() {
     if (_activeServer != null) _failedServers.add(_activeServer!);
-    _forgetPreferredServer();
     final ep = _episode;
     if (ep == null) return false;
 
@@ -597,25 +595,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _reconnecting = false;
     _videoErrorShown = false;
     if (mounted) setState(() {});
-  }
-
-  // ── Servidor preferido de sesión (memoria volátil) ───────────────────
-  // Almacena en memoria durante la ejecución de la app el servidor que funcionó
-  // correctamente para cada anime. Se reinicia al cerrar la app o al caerse
-  // el servidor (failover), volviendo a probar todos simultáneamente.
-  static final Map<String, String> _sessionPreferredServers = {};
-
-  String? _preferredServerFor(String slug) {
-    return _sessionPreferredServers[slug];
-  }
-
-  void _rememberPreferredServer() {
-    if (_activeServer == null) return;
-    _sessionPreferredServers[widget.animeSlug] = _activeServer!;
-  }
-
-  void _forgetPreferredServer() {
-    _sessionPreferredServers.remove(widget.animeSlug);
   }
 
   /// Prueba un servidor individual de forma asíncrona, midiendo su latencia
@@ -706,11 +685,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         .where((s) => !hls.contains(s) && !upn.contains(s) && !voe.contains(s) && !mp4.contains(s) && !byse.contains(s))
         .toList();
     final ordered = <ServerMirror>[];
-    final preferred = _preferredServerFor(widget.animeSlug);
-    if (preferred != null) {
-      final match = filtered.where((s) => s.server == preferred).toList();
-      if (match.isNotEmpty) ordered.add(match.first);
-    }
     ordered.addAll(upn);
     ordered.addAll(hls);
     ordered.addAll(voe);
@@ -892,22 +866,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _autoPlayResolved(EpisodeDetail ep) async {
-    // 1. Si ya se guardó un servidor preferido en la sesión y no ha fallado, usarlo.
-    final sessionPref = _preferredServerFor(widget.animeSlug);
-    if (sessionPref != null && !_failedServers.contains(sessionPref)) {
-      final match = ep.embeds
-          .where((s) =>
-              s.variant == _activeVariant &&
-              s.server == sessionPref &&
-              _isPlayableServer(s))
-          .toList();
-      if (match.isNotEmpty) {
-        await _playServer(match.first);
-        return;
-      }
-    }
-
-    // 2. Probar todos los servidores candidatos simultáneamente.
+    // Probar todos los servidores candidatos simultáneamente en cada capítulo para
+    // elegir el que responda más rápido con la mejor calidad disponible.
     final candidates = ep.embeds
         .where((s) =>
             s.variant == _activeVariant &&
@@ -920,12 +880,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final valid = results.whereType<_ServerQualityCandidate>().toList();
 
     if (valid.isNotEmpty) {
-      // Ordenar por calidad mayor (1080 > 720 > 480), mayor bitrate, menor latencia de respuesta
+      // Ordenar: mayor calidad (1080 > 720 > 480) y menor tiempo de respuesta
       valid.sort((a, b) {
         if (a.height != b.height) return b.height.compareTo(a.height);
-        if (a.bandwidth != b.bandwidth && a.bandwidth > 0 && b.bandwidth > 0) {
-          return b.bandwidth.compareTo(a.bandwidth);
-        }
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 

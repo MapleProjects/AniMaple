@@ -795,11 +795,11 @@ class DownloadService {
       bool isDownloadable(ServerMirror s) {
         final name = s.server.toLowerCase();
         final url = s.url.toLowerCase();
-        if (name.contains('hls')) return true;
+        if (name.contains('hls') || url.contains('zilla-networks')) return true;
         if (name.contains('mp4upload')) return true;
         if (name.contains('upnshare') || url.contains('uns.bio')) return true;
         if (name.contains('voe') || url.contains('voe.sx')) return true;
-        if (name.contains('byse') || url.contains('byselapuix.com')) return true;
+        if (name.contains('byse') || url.contains('byselapuix.com') || url.contains('n1mwq.org')) return true;
         if (url.contains('.m3u8') || url.contains('mp4upload.com') || url.contains('.mp4')) return true;
         return false;
       }
@@ -823,33 +823,80 @@ class DownloadService {
       if (playable.isEmpty) {
         throw Exception('Sin fuente descargable para ep ${job.episode}');
       }
-      // Orden: UPNShare (1080p nativo) -> HLS (Zilla) -> Voe -> MP4Upload -> Byse.
-      playable.sort((a, b) {
-        int rank(ServerMirror s) {
-          final n = s.server.toLowerCase();
-          final u = s.url.toLowerCase();
-          if (n.contains('upnshare') || u.contains('uns.bio')) return 0;
-          if (n.contains('hls') || u.contains('zilla')) return 1;
-          if (n.contains('voe') || u.contains('voe.sx')) return 2;
-          if (n.contains('mp4upload')) return 3;
-          if (n.contains('byse') || u.contains('byselapuix.com')) return 4;
-          return 5;
+
+      // Probar todos los servidores candidatos simultáneamente para elegir
+      // el que responda más rápido con la mejor calidad disponible.
+      Future<_DownloadCandidate?> probeCandidate(ServerMirror s) async {
+        final swProbe = Stopwatch()..start();
+        try {
+          final resolved = await ApiService.fetchVideoUrl(s.url)
+              .timeout(const Duration(seconds: 10));
+          final url = resolved['url'] as String?;
+          final type = resolved['type'] as String? ?? '';
+          if (url == null || url.isEmpty || type == 'embed') return null;
+
+          final customHeaders = (resolved['headers'] as Map<String, dynamic>?)
+              ?.map((k, v) => MapEntry(k, v.toString()));
+
+          int height = 720;
+          if (type == 'hls') {
+            final q = await ApiService.resolveHighestQualityHls(
+              url,
+              headers: customHeaders ?? (s.url.contains('zilla') ? _zillaHeaders() : null),
+            ).timeout(const Duration(seconds: 5));
+            height = q['height'] as int? ?? 720;
+          } else if (type == 'mp4') {
+            final lower = ('${s.server} $url').toLowerCase();
+            if (lower.contains('1080')) {
+              height = 1080;
+            } else if (lower.contains('720')) {
+              height = 720;
+            } else if (lower.contains('480')) {
+              height = 480;
+            }
+          }
+          swProbe.stop();
+          return _DownloadCandidate(
+            mirror: s,
+            videoUrl: url,
+            videoType: type,
+            headers: customHeaders,
+            height: height,
+            responseTimeMs: swProbe.elapsedMilliseconds,
+          );
+        } catch (_) {
+          return null;
         }
-        return rank(a).compareTo(rank(b));
+      }
+
+      final probedList = (await Future.wait(playable.map(probeCandidate)))
+          .whereType<_DownloadCandidate>()
+          .toList();
+
+      // Ordenar: mayor resolución (1080 > 720 > 480), luego menor tiempo de respuesta
+      probedList.sort((a, b) {
+        if (a.height != b.height) return b.height.compareTo(a.height);
+        return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
-      // 2+3. Resolver URL real y descargar, con failover entre servidores.
-      // Si un servidor responde mal (p.ej. 522 de Zilla), marcar y probar el
-      // siguiente. Último error se lanza si todos fallan.
+      // Lista ordenada de intentos: probados primero, luego cualquier resto como fallback
+      final attemptList = <({ServerMirror mirror, _DownloadCandidate? candidate})>[];
+      for (final p in probedList) {
+        attemptList.add((mirror: p.mirror, candidate: p));
+      }
+      for (final s in playable) {
+        if (!probedList.any((p) => p.mirror == s)) {
+          attemptList.add((mirror: s, candidate: null));
+        }
+      }
+
+      // 2+3. Descargar con failover entre candidatos ordenados.
       ServerMirror? chosen;
       String? wonType;
       String? lastError;
       final sw = Stopwatch();
 
-      // Precalentamiento temprano en paralelo: mientras el HLS intenta (y
-      // probablemente falla con 522), despertar el origin del MP4Upload
-      // (Range 0-0) para que cuando el failover salte, el primer byte llegue
-      // en ~7s y no en 20-35s. El prewarm nunca bloquea el bucle.
+      // Precalentamiento temprano en paralelo para MP4Upload si está en la lista
       Future<void> prewarmMp4() async {
         final mp4candidate = playable
             .where((s) => s.server.toLowerCase().contains('mp4upload'))
@@ -864,24 +911,33 @@ class DownloadService {
         } catch (_) {}
       }
       final earlyWarm = prewarmMp4();
-      // No bloquear: correr en paralelo con el primer intento del bucle.
-      // (El await real está al final si el ganador es MP4 sin haber calentado).
 
-      for (final candidate in playable) {
+      for (final attempt in attemptList) {
         if (_cancelRequested) return;
+        final candidate = attempt.mirror;
         chosen = candidate;
         sw
           ..reset()
           ..start();
         try {
-          final resolved = await ApiService.fetchVideoUrl(candidate.url);
-          final url = resolved['url'] as String?;
-          final type = resolved['type'] as String? ?? '';
-          if (url == null || url.isEmpty || type == 'embed') {
-            throw Exception('URL no descargable directamente para ep ${job.episode} ($type)');
+          String url;
+          String type;
+          Map<String, String>? customHeaders;
+
+          if (attempt.candidate != null) {
+            url = attempt.candidate!.videoUrl;
+            type = attempt.candidate!.videoType;
+            customHeaders = attempt.candidate!.headers;
+          } else {
+            final resolved = await ApiService.fetchVideoUrl(candidate.url);
+            url = resolved['url'] as String? ?? '';
+            type = resolved['type'] as String? ?? '';
+            if (url.isEmpty || type == 'embed') {
+              throw Exception('URL no descargable directamente para ep ${job.episode} ($type)');
+            }
+            customHeaders = (resolved['headers'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v.toString()));
           }
-          final customHeaders = (resolved['headers'] as Map<String, dynamic>?)
-              ?.map((k, v) => MapEntry(k, v.toString()));
 
           if (_cancelRequested) return;
 
@@ -889,9 +945,6 @@ class DownloadService {
             await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
                 () => _cancelRequested, headers: customHeaders);
           } else {
-            // El prewarm temprano (earlyWarm) ya está calentando este mismo
-            // origin en paralelo; esperarlo aquí evita duplicar el request
-            // Range 0-0 y arranca la descarga contra un origin caliente.
             try {
               await earlyWarm.timeout(const Duration(seconds: 32));
             } catch (_) {}
@@ -1301,38 +1354,57 @@ class DownloadService {
     await playlistOut.parent.create(recursive: true);
     await playlistOut.writeAsString(buf.toString(), flush: true);
 
-    // 4. Bajar init + segmentos en secuencia a segs/.
+    // 4. Bajar init + segmentos con pool de trabajadores concurrentes a segs/.
     lastActivity = DateTime.now();
     _startStallWatchdog(progressKey);
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      ..maxConnectionsPerHost = 10;
     final total = entries.length + (initSeg != null ? 1 : 0);
     var done = 0;
     try {
       Future<void> fetchSeg(Uri uri, File out) async {
-        final req = await client.getUrl(uri);
-        reqHeaders.forEach((k, v) => req.headers.set(k, v));
-        final resp = await req.close();
-        if (resp.statusCode != 200) {
-          throw Exception('HTTP ${resp.statusCode} en $uri');
-        }
-        final tmpOut = File('${out.path}$_partSuffix');
-        final sink = tmpOut.openWrite();
-        try {
-          await for (final chunk in resp) {
-            sink.add(chunk);
-            lastActivity = DateTime.now();
-          }
-          await sink.flush();
-          await sink.close();
-        } catch (_) {
+        int attempts = 0;
+        while (true) {
+          attempts++;
+          final tmpOut = File('${out.path}$_partSuffix');
           try {
-            await sink.close();
-          } catch (_) {}
-          if (await tmpOut.exists()) await tmpOut.delete();
-          rethrow;
+            final req = await client.getUrl(uri);
+            reqHeaders.forEach((k, v) => req.headers.set(k, v));
+            final resp = await req.close();
+            if (resp.statusCode != 200) {
+              throw Exception('HTTP ${resp.statusCode} en $uri');
+            }
+            final sink = tmpOut.openWrite();
+            try {
+              await for (final chunk in resp) {
+                sink.add(chunk);
+                lastActivity = DateTime.now();
+              }
+              await sink.flush();
+              await sink.close();
+            } catch (_) {
+              try {
+                await sink.close();
+              } catch (_) {}
+              if (await tmpOut.exists()) await tmpOut.delete();
+              rethrow;
+            }
+            if (await out.exists()) await out.delete();
+            await tmpOut.rename(out.path);
+            return;
+          } catch (e) {
+            if (await tmpOut.exists()) {
+              try {
+                await tmpOut.delete();
+              } catch (_) {}
+            }
+            if (attempts >= 3 || cancelled()) {
+              rethrow;
+            }
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
         }
-        if (await out.exists()) await out.delete();
-        await tmpOut.rename(out.path);
       }
 
       if (initSeg != null && !cancelled()) {
@@ -1340,14 +1412,35 @@ class DownloadService {
         done++;
         _setProgress(progressKey, done / total);
       }
-      for (var i = 0; i < entries.length; i++) {
-        if (cancelled()) return;
-        await fetchSeg(
-          resolveUri(entries[i].ref),
-          File('${segsDir.path}/seg_${i.toString().padLeft(4, '0')}.m4s'),
-        );
-        done++;
-        _setProgress(progressKey, done / total);
+
+      var nextIdx = 0;
+      Object? workerError;
+      final workerCount = entries.length < 6 ? entries.length : 6;
+
+      Future<void> worker() async {
+        while (true) {
+          if (cancelled() || workerError != null) return;
+          final i = nextIdx++;
+          if (i >= entries.length) return;
+          try {
+            await fetchSeg(
+              resolveUri(entries[i].ref),
+              File('${segsDir.path}/seg_${i.toString().padLeft(4, '0')}.m4s'),
+            );
+            done++;
+            _setProgress(progressKey, done / total);
+          } catch (e) {
+            workerError ??= e;
+            return;
+          }
+        }
+      }
+
+      if (entries.isNotEmpty) {
+        await Future.wait(List.generate(workerCount, (_) => worker()));
+      }
+      if (workerError != null) {
+        throw workerError!;
       }
     } finally {
       client.close(force: true);
@@ -1398,4 +1491,22 @@ class _Job {
         preferDub: json['preferDub'] as bool? ?? false,
         title: json['title'] as String? ?? '',
       );
+}
+
+class _DownloadCandidate {
+  final ServerMirror mirror;
+  final String videoUrl;
+  final String videoType;
+  final Map<String, String>? headers;
+  final int height;
+  final int responseTimeMs;
+
+  _DownloadCandidate({
+    required this.mirror,
+    required this.videoUrl,
+    required this.videoType,
+    this.headers,
+    this.height = 720,
+    this.responseTimeMs = 0,
+  });
 }
