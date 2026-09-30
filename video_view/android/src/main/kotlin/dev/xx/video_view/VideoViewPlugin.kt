@@ -149,7 +149,6 @@ class VideoController(
 			} else {
 				exoPlayer.setMediaItem(mediaItem)
 			}
-			applyVideoEffects()
 			exoPlayer.prepare()
 			state = 1U
 			this.source = source
@@ -249,56 +248,9 @@ class VideoController(
 
 	private var sgsrEnabled = false
 
-	private fun getTargetDimensions(width: Int, height: Int): Pair<Int, Int> {
-		if (width <= 0 || height <= 0) return Pair(2560, 1440)
-		return if (width >= height) {
-			val targetH = 1440
-			val targetW = ((targetH.toFloat() * width) / height).roundToInt()
-			Pair(targetW, targetH)
-		} else {
-			val targetW = 1440
-			val targetH = ((targetW.toFloat() * height) / width).roundToInt()
-			Pair(targetW, targetH)
-		}
-	}
-
 	fun setSgsrEnabled(enabled: Boolean): Any? {
-		if (sgsrEnabled != enabled) {
-			sgsrEnabled = enabled
-			applyVideoEffects()
-			if (hasVideo && originalVideoWidth > 0 && originalVideoHeight > 0) {
-				val (targetW, targetH) = if (sgsrEnabled) getTargetDimensions(originalVideoWidth, originalVideoHeight) else Pair(originalVideoWidth, originalVideoHeight)
-				surfaceProducer.setSize(targetW, targetH)
-				subSurfaceProducer.setSize(targetW, targetH)
-				eventSink?.success(mapOf(
-					"event" to "videoSize",
-					"orientation" to if (surfaceProducer.handlesCropAndRotation()) 0 else (exoPlayer.videoFormat?.rotationDegrees ?: 0) / 90,
-					"width" to targetW.toFloat(),
-					"height" to targetH.toFloat()
-				))
-			}
-			if (exoPlayer.playbackState == Player.STATE_READY) {
-				exoPlayer.seekTo(exoPlayer.currentPosition)
-			}
-		}
+		sgsrEnabled = enabled
 		return null
-	}
-
-	private fun applyVideoEffects() {
-		try {
-			if (sgsrEnabled) {
-				val (targetW, targetH) = getTargetDimensions(originalVideoWidth, originalVideoHeight)
-				val resample = androidx.media3.effect.LanczosResample.scaleToFit(targetW, targetH)
-				val hsl = androidx.media3.effect.HslAdjustment.Builder()
-					.adjustSaturation(0.08f)
-					.build()
-				exoPlayer.setVideoEffects(listOf(resample, hsl))
-			} else {
-				exoPlayer.setVideoEffects(emptyList())
-			}
-		} catch (e: Throwable) {
-			android.util.Log.e("VideoViewPlugin", "Error applying video effects: $e")
-		}
 	}
 
 	fun setMaxResolution(width: Double, height: Double): Any? {
@@ -589,19 +541,14 @@ class VideoController(
 					plugin.requestKeepScreenOn(id, hasVideo)
 				}
 			}
-			val (targetW, targetH) = if (sgsrEnabled && width > 0 && height > 0) getTargetDimensions(width, height) else Pair(width, height)
 			if (hasVideo) {
-				surfaceProducer.setSize(targetW, targetH)
-				subSurfaceProducer.setSize(targetW, targetH)
-			}
-			if (sgsrEnabled) {
-				applyVideoEffects()
+				subSurfaceProducer.setSize(width, height)
 			}
 			eventSink?.success(mapOf(
 				"event" to "videoSize",
 				"orientation" to if (surfaceProducer.handlesCropAndRotation()) 0 else (exoPlayer.videoFormat?.rotationDegrees ?: 0) / 90,
-				"width" to targetW.toFloat(),
-				"height" to targetH.toFloat()
+				"width" to width.toFloat(),
+				"height" to height.toFloat()
 			))
 		}
 	}
