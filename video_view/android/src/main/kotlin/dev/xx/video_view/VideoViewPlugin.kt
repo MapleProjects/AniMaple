@@ -242,6 +242,27 @@ class VideoController(
 		return null
 	}
 
+	private var sgsrEnabled = false
+
+	fun setSgsrEnabled(enabled: Boolean): Any? {
+		sgsrEnabled = enabled
+		applyVideoEffects()
+		return null
+	}
+
+	private fun applyVideoEffects() {
+		try {
+			if (sgsrEnabled) {
+				val effect = androidx.media3.effect.LanczosResample.scaleToFit(2560, 1440)
+				exoPlayer.setVideoEffects(listOf(effect))
+			} else {
+				exoPlayer.setVideoEffects(emptyList())
+			}
+		} catch (e: Throwable) {
+			android.util.Log.e("VideoViewPlugin", "Error applying video effects: $e")
+		}
+	}
+
 	fun setMaxResolution(width: Double, height: Double): Any? {
 		exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon().setMaxVideoSize(width.toInt(), height.toInt()).build()
 		return null
@@ -652,6 +673,11 @@ class VideoViewPlugin : FlutterPlugin, ActivityAware {
 					val player = players[call.argument<Int>("id")!!]
 					val looping = call.argument<Boolean>("value")
 					result.success(player?.setLooping(looping!!))
+				}
+				"setSgsrEnabled" -> {
+					val player = players[call.argument<Int>("id")!!]
+					val enabled = call.argument<Boolean>("enabled") ?: false
+					result.success(player?.setSgsrEnabled(enabled))
 				}
 				"setMaxResolution" -> {
 					val player = players[call.argument<Int>("id")!!]
