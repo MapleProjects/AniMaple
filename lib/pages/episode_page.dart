@@ -7,6 +7,7 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
 import '../services/download_service.dart';
+import '../services/sgsr_service.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -1222,6 +1223,41 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     });
   }
 
+  void _toggleSgsr() {
+    final next = !SgsrService.isEnabled.value;
+    SgsrService.setEnabled(next);
+    _player.setSgsrEnabled(next);
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                next ? Icons.auto_awesome : Icons.check_circle_outline,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  next
+                      ? 'Mejora activa: Super Resolución SGSR 2K (2560x1440)'
+                      : 'Super Resolución SGSR desactivada',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: next ? const Color(0xFF6d28d9) : const Color(0xFF1e1b2e),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() {});
+    }
+  }
+
   void _togglePlayPause() {
     final ps = _player.isPlaying.value;
     if (ps) {
@@ -1746,6 +1782,49 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       style: const TextStyle(color: Colors.white70, fontSize: 12),
                                     ),
                                     const Spacer(),
+                                    ValueListenableBuilder<bool>(
+                                      valueListenable: SgsrService.isEnabled,
+                                      builder: (context, enabled, _) {
+                                        return GestureDetector(
+                                          onTap: _toggleSgsr,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            margin: const EdgeInsets.only(right: 10),
+                                            decoration: BoxDecoration(
+                                              color: enabled
+                                                  ? const Color(0xFF7c3aed).withValues(alpha: 0.45)
+                                                  : Colors.black45,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: enabled
+                                                    ? const Color(0xFFa78bfa)
+                                                    : Colors.white24,
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.auto_awesome,
+                                                  size: 13,
+                                                  color: enabled ? const Color(0xFFc4b5fd) : Colors.white60,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  enabled ? 'SGSR 2K ON' : 'SGSR 2K',
+                                                  style: TextStyle(
+                                                    color: enabled ? Colors.white : Colors.white70,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
                                     GestureDetector(
                                       onTap: _enterPip,
                                       child: Container(
@@ -1852,32 +1931,63 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Widget _buildVariantAndServers(EpisodeDetail ep, List<ServerMirror> filteredEmbeds) {
-    // Selección únicamente de idioma (DUB/SUB). El servidor se elige
-    // automáticamente por lógica interna (preferido recordado → HLS → MP4Upload),
-    // con failover transparente si el activo se cae.
-    if (ep.variants.length <= 1) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
-          const SizedBox(width: 8),
-          ...ep.variants.map((v) {
-            final isActive = v == _activeVariant;
-            final label = v == 'DUB' ? 'Doblaje' : 'Subtitulado';
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
+          if (ep.variants.length > 1) ...[
+            const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
+            ...ep.variants.map((v) {
+              final isActive = v == _activeVariant;
+              final label = v == 'DUB' ? 'Doblaje' : 'Subtitulado';
+              return ChoiceChip(
                 label: Text(label),
                 selected: isActive,
                 onSelected: (_) { setState(() => _activeVariant = v); _autoPlay(); },
                 selectedColor: const Color(0xFF8b5cf6),
                 backgroundColor: const Color(0xFF110e1a),
-                labelStyle: TextStyle(color: isActive ? Colors.white : const Color(0xFFa99fc0), fontWeight: FontWeight.w600, fontSize: 13),
+                labelStyle: TextStyle(
+                  color: isActive ? Colors.white : const Color(0xFFa99fc0),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
                 side: const BorderSide(color: Color(0xFF1e1832)),
-              ),
-            );
-          }),
+              );
+            }),
+          ],
+          ValueListenableBuilder<bool>(
+            valueListenable: SgsrService.isEnabled,
+            builder: (context, enabled, _) {
+              return FilterChip(
+                avatar: Icon(
+                  Icons.auto_awesome,
+                  size: 15,
+                  color: enabled ? const Color(0xFFc4b5fd) : const Color(0xFF8b5cf6),
+                ),
+                label: Text(
+                  enabled
+                      ? 'Mejora activa: SGSR 2K (2560x1440)'
+                      : 'Super Resolución SGSR 2K',
+                  style: TextStyle(
+                    color: enabled ? Colors.white : const Color(0xFFc4b5fd),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                selected: enabled,
+                onSelected: (_) => _toggleSgsr(),
+                selectedColor: const Color(0xFF7c3aed),
+                backgroundColor: const Color(0xFF15102a),
+                side: BorderSide(
+                  color: enabled ? const Color(0xFFa78bfa) : const Color(0xFF2e2350),
+                ),
+                showCheckmark: false,
+              );
+            },
+          ),
         ],
       ),
     );

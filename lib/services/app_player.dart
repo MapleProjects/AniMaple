@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
 import 'package:video_view/video_view.dart' as vv;
+import 'sgsr_service.dart';
 
 bool get isDesktopPlatform =>
     !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
@@ -27,6 +29,7 @@ abstract class AppPlayer {
   Future<void> seekTo(int positionMs);
   Future<void> close();
   void dispose();
+  Future<void> setSgsrEnabled(bool enabled);
 
   Widget buildView({BoxFit fit = BoxFit.contain});
 
@@ -183,6 +186,30 @@ class MediaKitAppPlayer implements AppPlayer {
           : null,
     );
     await _player.open(media, play: true);
+    if (SgsrService.isEnabled.value) {
+      unawaited(setSgsrEnabled(true));
+    }
+  }
+
+  @override
+  Future<void> setSgsrEnabled(bool enabled) async {
+    try {
+      final platform = _player.platform;
+      if (platform != null) {
+        if (enabled) {
+          final shaderPath = await SgsrService.getShaderFile();
+          if (shaderPath != null && shaderPath.isNotEmpty) {
+            await (platform as dynamic)._setPropertyString('glsl-shaders', shaderPath);
+            await (platform as dynamic)._setPropertyString('scale', 'ewa_lanczos');
+            await (platform as dynamic)._setPropertyString('cscale', 'ewa_lanczos');
+          }
+        } else {
+          await (platform as dynamic)._setPropertyString('glsl-shaders', '');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error applying SGSR 2K in MediaKitAppPlayer: $e');
+    }
   }
 
   @override
@@ -341,6 +368,24 @@ class VideoViewAppPlayer implements AppPlayer {
     _vvController.open(url, headers: effectiveHeaders);
     if (startPositionMs != null && startPositionMs > 0) {
       _vvController.seekTo(startPositionMs);
+    }
+    if (SgsrService.isEnabled.value) {
+      unawaited(setSgsrEnabled(true));
+    }
+  }
+
+  @override
+  Future<void> setSgsrEnabled(bool enabled) async {
+    try {
+      final id = (_vvController as dynamic).id as int?;
+      if (id != null) {
+        await const MethodChannel('VideoViewPlugin').invokeMethod('setSgsrEnabled', {
+          'id': id,
+          'enabled': enabled,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error applying SGSR 2K in VideoViewAppPlayer: $e');
     }
   }
 

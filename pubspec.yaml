@@ -1,7 +1,7 @@
 name: animaple
 description: "AniMaple — Anime streaming app"
 publish_to: 'none'
-version: 1.2.21+37
+version: 1.2.22+38
 
 environment:
   sdk: ^3.10.0
@@ -53,3 +53,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/shaders/
