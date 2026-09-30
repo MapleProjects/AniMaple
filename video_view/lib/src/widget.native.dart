@@ -51,12 +51,25 @@ FittedBox showVideo(VideoController player, VideoView widget) {
       ],
     );
   }
+  final w = player.videoSize.value.width;
+  final h = player.videoSize.value.height;
+  double targetWidth = w;
+  double targetHeight = h;
+  if (player.sgsrEnabled.value && w > 0 && h > 0) {
+    if (w >= h) {
+      targetHeight = 1440.0;
+      targetWidth = (1440.0 * w / h).roundToDouble();
+    } else {
+      targetWidth = 1440.0;
+      targetHeight = (1440.0 * h / w).roundToDouble();
+    }
+  }
   return FittedBox(
     fit: widget.videoFit,
     clipBehavior: .hardEdge,
     child: SizedBox(
-      width: player.videoSize.value.width,
-      height: player.videoSize.value.height,
+      width: targetWidth,
+      height: targetHeight,
       child: video,
     ),
   );
