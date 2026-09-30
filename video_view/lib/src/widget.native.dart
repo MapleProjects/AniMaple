@@ -31,6 +31,17 @@ FittedBox showVideo(VideoController player, VideoView widget) {
       child: video,
     );
   }
+  if (player.sgsrEnabled.value) {
+    video = ColorFiltered(
+      colorFilter: const ColorFilter.matrix(<double>[
+        1.14, 0.0,  0.0,  0.0, -8.0,
+        0.0,  1.14, 0.0,  0.0, -8.0,
+        0.0,  0.0,  1.14, 0.0, -8.0,
+        0.0,  0.0,  0.0,  1.0,  0.0,
+      ]),
+      child: video,
+    );
+  }
   if (player.subId != null && player.showSubtitle.value) {
     video = Stack(
       fit: .passthrough,

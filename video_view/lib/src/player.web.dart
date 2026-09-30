@@ -360,6 +360,13 @@ class VideoControllerImplementation extends VideoController {
     return false;
   }
 
+  @override
+  bool setSgsrEnabled(bool enabled) {
+    if (disposed) return false;
+    sgsrEnabled.value = enabled;
+    return true;
+  }
+
   void _close() {
     _seeking = _loading = false;
     mediaInfo.value = null;

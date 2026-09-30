@@ -148,6 +148,7 @@ abstract class VideoController {
     int? position,
     bool? showSubtitle,
     bool? keepScreenOn,
+    bool? sgsrEnabled,
     String? preferredSubtitleLanguage,
     String? preferredAudioLanguage,
     int? maxBitRate,
@@ -165,6 +166,7 @@ abstract class VideoController {
       position: position,
       showSubtitle: showSubtitle,
       keepScreenOn: keepScreenOn,
+      sgsrEnabled: sgsrEnabled,
       preferredSubtitleLanguage: preferredSubtitleLanguage,
       preferredAudioLanguage: preferredAudioLanguage,
       maxBitRate: maxBitRate,
@@ -278,8 +280,12 @@ abstract class VideoController {
     preferredAudioLanguage,
     preferredSubtitleLanguage,
     showSubtitle,
+    sgsrEnabled,
     displayMode,
   ];
+
+  /// Whether Snapdragon Game Super Resolution (SGSR 2K) enhancement is active.
+  final sgsrEnabled = VideoControllerProperty(false);
 
   /// Whether the player is disposed.
   bool get disposed => _disposed;
@@ -318,6 +324,7 @@ abstract class VideoController {
     int? position,
     bool? showSubtitle,
     bool? keepScreenOn,
+    bool? sgsrEnabled,
     String? preferredSubtitleLanguage,
     String? preferredAudioLanguage,
     int? maxBitRate,
@@ -330,6 +337,9 @@ abstract class VideoController {
     }
     if (distinctNotification != null) {
       setDistinctNotification(distinctNotification);
+    }
+    if (sgsrEnabled != null) {
+      setSgsrEnabled(sgsrEnabled);
     }
     if (source != null) {
       open(source);
@@ -436,6 +446,9 @@ abstract class VideoController {
 
   /// Set whether to keep the screen on when playing video.
   bool setKeepScreenOn(bool keepOn);
+
+  /// Set whether SGSR 2K upscaling and sharpening is enabled.
+  bool setSgsrEnabled(bool enabled);
 
   /// Set video display mode.
   /// This API only works on web.
