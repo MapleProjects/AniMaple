@@ -823,13 +823,13 @@ class DownloadService {
       if (playable.isEmpty) {
         throw Exception('Sin fuente descargable para ep ${job.episode}');
       }
-      // Orden: HLS (Zilla) -> UPNShare -> Voe -> MP4Upload -> Byse.
+      // Orden: UPNShare (1080p nativo) -> HLS (Zilla) -> Voe -> MP4Upload -> Byse.
       playable.sort((a, b) {
         int rank(ServerMirror s) {
           final n = s.server.toLowerCase();
           final u = s.url.toLowerCase();
-          if (n.contains('hls') || u.contains('zilla')) return 0;
-          if (n.contains('upnshare') || u.contains('uns.bio')) return 1;
+          if (n.contains('upnshare') || u.contains('uns.bio')) return 0;
+          if (n.contains('hls') || u.contains('zilla')) return 1;
           if (n.contains('voe') || u.contains('voe.sx')) return 2;
           if (n.contains('mp4upload')) return 3;
           if (n.contains('byse') || u.contains('byselapuix.com')) return 4;
@@ -1231,30 +1231,16 @@ class DownloadService {
   }) async {
     final reqHeaders = headers ?? _zillaHeaders();
 
-    // 1. Obtener el playlist de medios (resuelve master multi-variante).
+    // 1. Obtener el playlist de medios (resuelve master multi-variante a máxima calidad).
     var mediaUrl = masterUrl;
+    final q = await ApiService.resolveHighestQualityHls(masterUrl, headers: reqHeaders);
+    mediaUrl = q['url'] as String? ?? masterUrl;
+
     final masterBytes = await _fetchBytes(mediaUrl, headers: reqHeaders);
     if (masterBytes == null) {
       throw Exception('No se pudo bajar el playlist HLS');
     }
     var playlist = utf8.decode(masterBytes, allowMalformed: true);
-    if (playlist.contains('#EXT-X-STREAM-INF')) {
-      final lines = playlist.split('\n');
-      String? child;
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith('#EXT-X-STREAM-INF') && i + 1 < lines.length) {
-          child = lines[i + 1].trim();
-          break;
-        }
-      }
-      if (child == null || child.startsWith('#')) {
-        throw Exception('Master HLS sin variantes');
-      }
-      mediaUrl = Uri.parse(masterUrl).resolve(child).toString();
-      final mediaBytes = await _fetchBytes(mediaUrl, headers: reqHeaders);
-      if (mediaBytes == null) throw Exception('No se pudo bajar la variante HLS');
-      playlist = utf8.decode(mediaBytes, allowMalformed: true);
-    }
     if (cancelled()) return;
 
     // 2. Parsear segmentos, EXTINF e init, resolviendo rutas relativas.

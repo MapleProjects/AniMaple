@@ -3,7 +3,6 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
@@ -34,6 +33,26 @@ class EpisodePage extends StatefulWidget {
 
   @override
   State<EpisodePage> createState() => _EpisodePageState();
+}
+
+class _ServerQualityCandidate {
+  final ServerMirror server;
+  final String videoUrl;
+  final String videoType;
+  final Map<String, String>? headers;
+  final int height;
+  final int bandwidth;
+  final int responseTimeMs;
+
+  _ServerQualityCandidate({
+    required this.server,
+    required this.videoUrl,
+    required this.videoType,
+    this.headers,
+    required this.height,
+    required this.bandwidth,
+    required this.responseTimeMs,
+  });
 }
 
 class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
@@ -508,46 +527,27 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   /// para que el error se muestre al usuario.
   bool _failoverToNextServer() {
     if (_activeServer != null) _failedServers.add(_activeServer!);
+    _forgetPreferredServer();
     final ep = _episode;
     if (ep == null) return false;
 
-    // El orden ya usa _failedServers (los excluye) y el preferido recordado:
-    // si el preferido es el que falló, pasa al siguiente automáticamente.
-    final next = _nextCandidateSync(ep);
-    if (next == null) return false;
+    final remaining = ep.embeds
+        .where((s) =>
+            s.variant == _activeVariant &&
+            !_failedServers.contains(s.server) &&
+            _isPlayableServer(s))
+        .toList();
+    if (remaining.isEmpty) return false;
 
-    debugPrint('FAILOVER: $_activeServer → ${next.server}');
-    // Sin progreso real que preservar: el source nunca arrancó.
+    debugPrint('FAILOVER: $_activeServer falló, re-evaluando servidores restantes');
     _lastPositionMs = 0;
     _pendingSeek = -1;
     _lastVideoUrl = null;
     _lastVideoHeaders = null;
     _sourceStarted = false;
     _videoErrorShown = false;
-    unawaited(_playServer(next));
+    unawaited(_autoPlayResolved(ep));
     return true;
-  }
-
-  /// Siguiente candidato SIN esperar SharedPreferences (failover síncrono):
-  /// prioriza HLS → MP4Upload → otros, excluyendo los fallidos.
-  ServerMirror? _nextCandidateSync(EpisodeDetail ep) {
-    final filtered = ep.embeds
-        .where((s) =>
-            s.variant == _activeVariant &&
-            !_failedServers.contains(s.server) &&
-            _isPlayableServer(s))
-        .toList();
-    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
-    final upn = filtered.where((s) => s.server.toLowerCase().contains('upnshare') || s.url.toLowerCase().contains('uns.bio')).toList();
-    final voe = filtered.where((s) => s.server.toLowerCase().contains('voe') || s.url.toLowerCase().contains('voe.sx')).toList();
-    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
-    final byse = filtered.where((s) => s.server.toLowerCase().contains('byse') || s.url.toLowerCase().contains('byselapuix.com')).toList();
-    if (hls.isNotEmpty) return hls.first;
-    if (upn.isNotEmpty) return upn.first;
-    if (voe.isNotEmpty) return voe.first;
-    if (mp4.isNotEmpty) return mp4.first;
-    if (byse.isNotEmpty) return byse.first;
-    return filtered.isNotEmpty ? filtered.first : null;
   }
 
   /// Reintenta abrir el último source cada segundo, indefinidamente, hasta
@@ -599,28 +599,80 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() {});
   }
 
-  // ── Servidor preferido (memoria) ─────────────────────────────
-  // Recuerda con qué servidor funcionó bien la última vez por anime, para
-  // arrancar directo en él y minimizar reintentos. La preferencia no bloquea:
-  // si ese servidor falla (caído/cambiado), se descarta y se usa el siguiente.
+  // ── Servidor preferido de sesión (memoria volátil) ───────────────────
+  // Almacena en memoria durante la ejecución de la app el servidor que funcionó
+  // correctamente para cada anime. Se reinicia al cerrar la app o al caerse
+  // el servidor (failover), volviendo a probar todos simultáneamente.
+  static final Map<String, String> _sessionPreferredServers = {};
 
-  static const _prefKeyPrefix = 'preferred_server:';
+  String? _preferredServerFor(String slug) {
+    return _sessionPreferredServers[slug];
+  }
 
-  Future<String?> _preferredServerFor(String slug) async {
+  void _rememberPreferredServer() {
+    if (_activeServer == null) return;
+    _sessionPreferredServers[widget.animeSlug] = _activeServer!;
+  }
+
+  void _forgetPreferredServer() {
+    _sessionPreferredServers.remove(widget.animeSlug);
+  }
+
+  /// Prueba un servidor individual de forma asíncrona, midiendo su latencia
+  /// y evaluando la resolución máxima disponible (ej: 1080p en HLS).
+  Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
+    final sw = Stopwatch()..start();
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString('$_prefKeyPrefix$slug');
+      final data = await ApiService.fetchVideoUrl(s.url)
+          .timeout(const Duration(seconds: 12));
+      final videoUrl = data['url'] as String?;
+      final videoType = data['type'] as String? ?? 'mp4';
+      if (videoUrl == null || videoUrl.isEmpty || videoType == 'embed') {
+        return null;
+      }
+
+      final customHeaders = (data['headers'] as Map<String, dynamic>?)
+          ?.map((k, v) => MapEntry(k, v.toString()));
+      final headers = customHeaders ??
+          (videoType == 'hls'
+              ? <String, String>{'Referer': 'https://player.zilla-networks.com/'}
+              : videoType == 'mp4'
+                  ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
+                  : null);
+
+      var effectiveUrl = videoUrl;
+      int height = 720;
+      int bandwidth = 0;
+
+      if (videoType == 'hls') {
+        final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers);
+        effectiveUrl = q['url'] as String? ?? videoUrl;
+        height = q['height'] as int? ?? 720;
+        bandwidth = q['bandwidth'] as int? ?? 0;
+      } else if (videoType == 'mp4') {
+        final lower = videoUrl.toLowerCase();
+        if (lower.contains('1080') || s.server.toLowerCase().contains('1080')) {
+          height = 1080;
+        } else if (lower.contains('720') || s.server.toLowerCase().contains('720')) {
+          height = 720;
+        } else if (lower.contains('480')) {
+          height = 480;
+        }
+      }
+
+      sw.stop();
+      return _ServerQualityCandidate(
+        server: s,
+        videoUrl: effectiveUrl,
+        videoType: videoType,
+        headers: headers,
+        height: height,
+        bandwidth: bandwidth,
+        responseTimeMs: sw.elapsedMilliseconds,
+      );
     } catch (_) {
       return null;
     }
-  }
-
-  Future<void> _rememberPreferredServer() async {
-    if (_activeServer == null) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('$_prefKeyPrefix${widget.animeSlug}', _activeServer!);
-    } catch (_) {}
   }
 
   /// Servidores que la app puede reproducir nativamente.
@@ -637,8 +689,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     return false;
   }
 
-  /// Determina el orden de servidores a probar para [variant]:
-  /// preferido recordado → HLS → UPNShare → Voe → MP4Upload → Byse.
+  /// Determina el orden de servidores a probar para [variant].
   Future<List<ServerMirror>> _orderedServers(EpisodeDetail ep, String variant) async {
     final filtered = ep.embeds
         .where((s) =>
@@ -646,8 +697,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             !_failedServers.contains(s.server) &&
             _isPlayableServer(s))
         .toList();
-    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
     final upn = filtered.where((s) => s.server.toLowerCase().contains('upnshare') || s.url.toLowerCase().contains('uns.bio')).toList();
+    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
     final voe = filtered.where((s) => s.server.toLowerCase().contains('voe') || s.url.toLowerCase().contains('voe.sx')).toList();
     final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
     final byse = filtered.where((s) => s.server.toLowerCase().contains('byse') || s.url.toLowerCase().contains('byselapuix.com')).toList();
@@ -655,13 +706,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         .where((s) => !hls.contains(s) && !upn.contains(s) && !voe.contains(s) && !mp4.contains(s) && !byse.contains(s))
         .toList();
     final ordered = <ServerMirror>[];
-    final preferred = await _preferredServerFor(widget.animeSlug);
+    final preferred = _preferredServerFor(widget.animeSlug);
     if (preferred != null) {
       final match = filtered.where((s) => s.server == preferred).toList();
       if (match.isNotEmpty) ordered.add(match.first);
     }
-    ordered.addAll(hls);
     ordered.addAll(upn);
+    ordered.addAll(hls);
     ordered.addAll(voe);
     ordered.addAll(mp4);
     ordered.addAll(byse);
@@ -841,9 +892,92 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _autoPlayResolved(EpisodeDetail ep) async {
+    // 1. Si ya se guardó un servidor preferido en la sesión y no ha fallado, usarlo.
+    final sessionPref = _preferredServerFor(widget.animeSlug);
+    if (sessionPref != null && !_failedServers.contains(sessionPref)) {
+      final match = ep.embeds
+          .where((s) =>
+              s.variant == _activeVariant &&
+              s.server == sessionPref &&
+              _isPlayableServer(s))
+          .toList();
+      if (match.isNotEmpty) {
+        await _playServer(match.first);
+        return;
+      }
+    }
+
+    // 2. Probar todos los servidores candidatos simultáneamente.
+    final candidates = ep.embeds
+        .where((s) =>
+            s.variant == _activeVariant &&
+            !_failedServers.contains(s.server) &&
+            _isPlayableServer(s))
+        .toList();
+    if (candidates.isEmpty) return;
+
+    final results = await Future.wait(candidates.map((s) => _probeServer(s)));
+    final valid = results.whereType<_ServerQualityCandidate>().toList();
+
+    if (valid.isNotEmpty) {
+      // Ordenar por calidad mayor (1080 > 720 > 480), mayor bitrate, menor latencia de respuesta
+      valid.sort((a, b) {
+        if (a.height != b.height) return b.height.compareTo(a.height);
+        if (a.bandwidth != b.bandwidth && a.bandwidth > 0 && b.bandwidth > 0) {
+          return b.bandwidth.compareTo(a.bandwidth);
+        }
+        return a.responseTimeMs.compareTo(b.responseTimeMs);
+      });
+
+      final best = valid.first;
+      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms)');
+      await _playCandidateDirect(best);
+      return;
+    }
+
+    // Fallback a lista secuencial si las pruebas no respondieron
     final ordered = await _orderedServers(ep, _activeVariant);
-    if (ordered.isEmpty) return;
-    await _playServer(ordered.first);
+    if (ordered.isNotEmpty) {
+      await _playServer(ordered.first);
+    }
+  }
+
+  Future<void> _playCandidateDirect(_ServerQualityCandidate candidate) async {
+    if (mounted) setState(() { _activeServer = candidate.server.server; _autoPlayedNext = false; });
+    _videoErrorShown = false;
+    _sourceStarted = false;
+
+    try {
+      final videoUrl = candidate.videoUrl;
+      final videoType = candidate.videoType;
+      final headers = candidate.headers;
+
+      debugPrint('PLAYING DIRECT: $videoUrl (type=$videoType, height=${candidate.height}p, bw=${candidate.bandwidth})');
+
+      final before = _player.positionMs.value;
+      if (before > 0) _lastPositionMs = before;
+      _pendingSeek = _lastPositionMs;
+
+      _lastVideoUrl = videoUrl;
+      _lastVideoHeaders = headers;
+
+      _stopReconnect();
+
+      if (videoType == 'mp4') {
+        if (mounted) setState(() => _prewarming = true);
+        try {
+          await ApiService.prewarmVideo(videoUrl, headers: headers)
+              .timeout(const Duration(seconds: 32), onTimeout: () => false);
+        } finally {
+          if (mounted) setState(() => _prewarming = false);
+        }
+      }
+
+      await _player.open(videoUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+    } catch (e, st) {
+      debugPrint('PLAY CANDIDATE ERROR: $e');
+      if (mounted) showErrorSheet(context, e, st, title: 'Error de reproducción');
+    }
   }
 
   Future<void> _playServer(ServerMirror server) async {
@@ -864,10 +998,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
 
         debugPrint('PLAYING: $videoUrl (type=$videoType)');
-        // HLS (zilla-networks): los segmentos requieren headers de navegador
-        // (UA real, Sec-Fetch-*, Accept-Language). ExoPlayer puede
-        // descargarlos si se envían — Cloudflare NO bloquea por fingerprint
-        // TLS (verificado: HTTP/1.1 con headers → 200).
         final customHeaders = (data['headers'] as Map<String, dynamic>?)
             ?.map((k, v) => MapEntry(k, v.toString()));
 
@@ -880,26 +1010,21 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                     ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                     : null);
 
-        // Cambio de servidor/idioma: conservar la posición actual para
-        // restaurarla cuando el nuevo source empiece a reproducirse.
+        var effectiveUrl = videoUrl;
+        if (videoType == 'hls') {
+          final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers);
+          effectiveUrl = q['url'] as String? ?? videoUrl;
+        }
+
         final before = _player.positionMs.value;
         if (before > 0) _lastPositionMs = before;
         _pendingSeek = _lastPositionMs;
 
-        // Registrar el source activo: permite reconectar automáticamente si
-        // el usuario pierde internet durante la reproducción.
-        _lastVideoUrl = videoUrl;
+        _lastVideoUrl = effectiveUrl;
         _lastVideoHeaders = headers;
 
-        // Cancelar cualquier reconexión pendiente: cambiamos de fuente a
-        // propósito.
         _stopReconnect();
 
-        // MP4Upload: el origin a3.mp4upload.com:183 tarda ~20-35s en el
-        // primer byte si está frío. Precalentar con Range 0-0 antes de abrir
-        // el player reduce el arranque a ~7s. Esperar hasta 32s (máximo
-        // observado) para que la request de apertura llegue contra un origin
-        // ya despierto; si el prewarm falla, abrir igual.
         if (videoType == 'mp4') {
           if (mounted) setState(() => _prewarming = true);
           try {
@@ -911,7 +1036,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           }
         }
 
-        await _player.open(videoUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+        await _player.open(effectiveUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
