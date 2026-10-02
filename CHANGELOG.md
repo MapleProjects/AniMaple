@@ -4,7 +4,7 @@
 
 ### Novedades y mejoras
 - Incorporación de Image Reconstruction, un sistema que limpia imperfecciones de transmisión, suaviza los degradados de color y realza los trazos del dibujo para que la animación se aprecie más nítida y definida.
-- Rediseño visual del panel de selección y prueba de servidores integrado al estilo oscuro de la aplicación.
+- Implementación de estado visual para la verificación y selección de servidores integrado al estilo oscuro de la aplicación.
 - Descarga acelerada multiconexión para servidores de video que optimiza la velocidad y previene pausas durante la reproducción.
 - Mayor memoria previa en el reproductor para asegurar una reproducción continua y estable.
 - Soporte para nuevos servidores de transmisión.
