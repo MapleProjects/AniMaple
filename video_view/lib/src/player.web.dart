@@ -361,9 +361,9 @@ class VideoControllerImplementation extends VideoController {
   }
 
   @override
-  bool setSgsrEnabled(bool enabled) {
+  bool setFsrEnabled(bool enabled) {
     if (disposed) return false;
-    sgsrEnabled.value = enabled;
+    fsrEnabled.value = enabled;
     return true;
   }
 

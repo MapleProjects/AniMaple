@@ -148,7 +148,7 @@ abstract class VideoController {
     int? position,
     bool? showSubtitle,
     bool? keepScreenOn,
-    bool? sgsrEnabled,
+    bool? fsrEnabled,
     String? preferredSubtitleLanguage,
     String? preferredAudioLanguage,
     int? maxBitRate,
@@ -166,7 +166,7 @@ abstract class VideoController {
       position: position,
       showSubtitle: showSubtitle,
       keepScreenOn: keepScreenOn,
-      sgsrEnabled: sgsrEnabled,
+      fsrEnabled: fsrEnabled,
       preferredSubtitleLanguage: preferredSubtitleLanguage,
       preferredAudioLanguage: preferredAudioLanguage,
       maxBitRate: maxBitRate,
@@ -280,12 +280,12 @@ abstract class VideoController {
     preferredAudioLanguage,
     preferredSubtitleLanguage,
     showSubtitle,
-    sgsrEnabled,
+    fsrEnabled,
     displayMode,
   ];
 
-  /// Whether Snapdragon Game Super Resolution (SGSR 2K) enhancement is active.
-  final sgsrEnabled = VideoControllerProperty(false);
+  /// Whether Snapdragon Game Super Resolution (FSR 2K) enhancement is active.
+  final fsrEnabled = VideoControllerProperty(false);
 
   /// Whether the player is disposed.
   bool get disposed => _disposed;
@@ -324,7 +324,7 @@ abstract class VideoController {
     int? position,
     bool? showSubtitle,
     bool? keepScreenOn,
-    bool? sgsrEnabled,
+    bool? fsrEnabled,
     String? preferredSubtitleLanguage,
     String? preferredAudioLanguage,
     int? maxBitRate,
@@ -338,8 +338,8 @@ abstract class VideoController {
     if (distinctNotification != null) {
       setDistinctNotification(distinctNotification);
     }
-    if (sgsrEnabled != null) {
-      setSgsrEnabled(sgsrEnabled);
+    if (fsrEnabled != null) {
+      setFsrEnabled(fsrEnabled);
     }
     if (source != null) {
       open(source);
@@ -447,8 +447,8 @@ abstract class VideoController {
   /// Set whether to keep the screen on when playing video.
   bool setKeepScreenOn(bool keepOn);
 
-  /// Set whether SGSR 2K upscaling and sharpening is enabled.
-  bool setSgsrEnabled(bool enabled);
+  /// Set whether FSR 2K upscaling and sharpening is enabled.
+  bool setFsrEnabled(bool enabled);
 
   /// Set video display mode.
   /// This API only works on web.

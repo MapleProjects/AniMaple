@@ -31,17 +31,6 @@ FittedBox showVideo(VideoController player, VideoView widget) {
       child: video,
     );
   }
-  if (player.sgsrEnabled.value) {
-    video = ColorFiltered(
-      colorFilter: const ColorFilter.matrix(<double>[
-        1.14, 0.0,  0.0,  0.0, -8.0,
-        0.0,  1.14, 0.0,  0.0, -8.0,
-        0.0,  0.0,  1.14, 0.0, -8.0,
-        0.0,  0.0,  0.0,  1.0,  0.0,
-      ]),
-      child: video,
-    );
-  }
   if (player.subId != null && player.showSubtitle.value) {
     video = Stack(
       fit: .passthrough,
@@ -53,23 +42,14 @@ FittedBox showVideo(VideoController player, VideoView widget) {
   }
   final w = player.videoSize.value.width;
   final h = player.videoSize.value.height;
-  double targetWidth = w;
-  double targetHeight = h;
-  if (player.sgsrEnabled.value && w > 0 && h > 0) {
-    if (w >= h) {
-      targetHeight = 1440.0;
-      targetWidth = (1440.0 * w / h).roundToDouble();
-    } else {
-      targetWidth = 1440.0;
-      targetHeight = (1440.0 * h / w).roundToDouble();
-    }
-  }
+  final effectiveW = (w > 0 && h > 0) ? w : 1920.0;
+  final effectiveH = (w > 0 && h > 0) ? h : 1080.0;
   return FittedBox(
     fit: widget.videoFit,
     clipBehavior: .hardEdge,
     child: SizedBox(
-      width: targetWidth,
-      height: targetHeight,
+      width: effectiveW,
+      height: effectiveH,
       child: video,
     ),
   );

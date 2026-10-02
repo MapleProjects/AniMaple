@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
 import 'package:video_view/video_view.dart' as vv;
-import 'sgsr_service.dart';
+import 'fsr_service.dart';
 
 bool get isDesktopPlatform =>
     !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
@@ -28,7 +28,7 @@ abstract class AppPlayer {
   Future<void> seekTo(int positionMs);
   Future<void> close();
   void dispose();
-  Future<void> setSgsrEnabled(bool enabled);
+  Future<void> setFsrEnabled(bool enabled);
 
   Widget buildView({BoxFit fit = BoxFit.contain});
 
@@ -185,18 +185,18 @@ class MediaKitAppPlayer implements AppPlayer {
           : null,
     );
     await _player.open(media, play: true);
-    if (SgsrService.isEnabled.value) {
-      unawaited(setSgsrEnabled(true));
+    if (FsrService.isEnabled.value) {
+      unawaited(setFsrEnabled(true));
     }
   }
 
   @override
-  Future<void> setSgsrEnabled(bool enabled) async {
+  Future<void> setFsrEnabled(bool enabled) async {
     try {
       final platform = _player.platform;
       if (platform != null) {
         if (enabled) {
-          final shaderPath = await SgsrService.getShaderFile();
+          final shaderPath = await FsrService.getShaderFile();
           if (shaderPath != null && shaderPath.isNotEmpty) {
             await (platform as dynamic)._setPropertyString('glsl-shaders', shaderPath);
             await (platform as dynamic)._setPropertyString('scale', 'ewa_lanczos');
@@ -207,7 +207,7 @@ class MediaKitAppPlayer implements AppPlayer {
         }
       }
     } catch (e) {
-      debugPrint('Error applying SGSR 2K in MediaKitAppPlayer: $e');
+      debugPrint('Error applying FSR 2K in MediaKitAppPlayer: $e');
     }
   }
 
@@ -287,7 +287,7 @@ class VideoViewAppPlayer implements AppPlayer {
       autoPlay: true,
       cancelableNotification: true,
       keepScreenOn: true,
-      sgsrEnabled: SgsrService.isEnabled.value,
+      fsrEnabled: FsrService.isEnabled.value,
     );
 
     _vvController.playbackState.addListener(_onState);
@@ -365,7 +365,7 @@ class VideoViewAppPlayer implements AppPlayer {
       if (referer.isNotEmpty) 'Referer': referer,
       ...?headers,
     };
-    _vvController.setSgsrEnabled(SgsrService.isEnabled.value);
+    _vvController.setFsrEnabled(FsrService.isEnabled.value);
     _vvController.open(url, headers: effectiveHeaders);
     if (startPositionMs != null && startPositionMs > 0) {
       _vvController.seekTo(startPositionMs);
@@ -373,11 +373,11 @@ class VideoViewAppPlayer implements AppPlayer {
   }
 
   @override
-  Future<void> setSgsrEnabled(bool enabled) async {
+  Future<void> setFsrEnabled(bool enabled) async {
     try {
-      _vvController.setSgsrEnabled(enabled);
+      _vvController.setFsrEnabled(enabled);
     } catch (e) {
-      debugPrint('Error applying SGSR 2K in VideoViewAppPlayer: $e');
+      debugPrint('Error applying FSR 2K in VideoViewAppPlayer: $e');
     }
   }
 
@@ -423,7 +423,7 @@ class VideoViewAppPlayer implements AppPlayer {
     return vv.VideoView(
       controller: _vvController,
       keepScreenOn: true,
-      sgsrEnabled: SgsrService.isEnabled.value,
+      fsrEnabled: FsrService.isEnabled.value,
     );
   }
 }
