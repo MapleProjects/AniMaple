@@ -1,5 +1,14 @@
 # AniMaple — Registro de cambios
 
+## v2.0.0
+
+### Novedades y mejoras
+- Incorporación de Image Reconstruction, un sistema que limpia imperfecciones de transmisión, suaviza los degradados de color y realza los trazos del dibujo para que la animación se aprecie más nítida y definida.
+- Rediseño visual del panel de selección y prueba de servidores integrado al estilo oscuro de la aplicación.
+- Descarga acelerada multiconexión para servidores de video que optimiza la velocidad y previene pausas durante la reproducción.
+- Mayor memoria previa en el reproductor para asegurar una reproducción continua y estable.
+- Soporte para nuevos servidores de transmisión.
+
 ## v1.2.10 (20 ago 2026)
 
 ### Novedades y mejoras

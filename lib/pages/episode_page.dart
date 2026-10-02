@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,9 +8,10 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/app_player.dart';
 import '../services/download_service.dart';
-import '../services/sgsr_service.dart';
+import '../services/hls_proxy.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
+import '../widgets/webview_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -44,6 +46,7 @@ class _ServerQualityCandidate {
   final int height;
   final int bandwidth;
   final int responseTimeMs;
+  final double measuredMbps;
 
   _ServerQualityCandidate({
     required this.server,
@@ -53,6 +56,7 @@ class _ServerQualityCandidate {
     required this.height,
     required this.bandwidth,
     required this.responseTimeMs,
+    this.measuredMbps = 0.0,
   });
 }
 
@@ -70,6 +74,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   String? _offlinePath;
 
   String? _activeServer;
+  String? _currentVideoType;
   String _activeVariant = 'DUB';
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
@@ -123,6 +128,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   // true mientras se precalienta el origin del video (mp4upload lento).
   bool _prewarming = false;
+
+  // ── Overlay de seleccion de servidor (animacion en vivo) ──
+  // true mientras el sondeo de servidores corre.
+  bool _probing = false;
+  // Fila por servidor: nombre -> velocidad medida (Mbps) o ausente si sondea.
+  final Map<String, double> _probeSpeeds = {};
+  // Servidor elegido tras el sondeo (etiqueta para la animacion final).
+  String? _probeChosen;
+  // Cold start: evita mostrar el overlay al reabrir sin cambiar de fuente.
+  bool _probeOverlayDismissed = false;
 
   // Posición a restaurar (ms) al volver a playing. -1 = sin pendiente.
   int _pendingSeek = -1;
@@ -355,6 +370,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final playing = _player.isPlaying.value;
     if (playing) {
       _sourceStarted = true;
+      // El anime arranco: retirar el overlay de seleccion/conexion.
+      if (_probeOverlayDismissed == false) {
+        if (mounted) setState(() => _probeOverlayDismissed = true);
+      }
       WakelockPlus.enable();
       _startPositionTimer();
       // Auto-hide controls when video starts playing
@@ -603,6 +622,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
     final sw = Stopwatch()..start();
     try {
+      if (s.server.toLowerCase().contains('byse')) {
+        return null;
+      }
       final data = await ApiService.fetchVideoUrl(s.url)
           .timeout(const Duration(seconds: 12));
       final videoUrl = data['url'] as String?;
@@ -640,6 +662,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
       }
 
+      // Velocidad REAL del stream (no solo latencia del resolver): elegir
+      // el servidor que de verdad entrega datos, no el que responde rapido
+      // pero streamea lento.
+      double measuredMbps = 0.0;
+      if (videoType == 'mp4' || videoType == 'hls') {
+        measuredMbps = await ApiService.measureStreamMbps(
+          effectiveUrl,
+          headers: headers,
+          timeout: const Duration(seconds: 8),
+        );
+      }
       sw.stop();
       return _ServerQualityCandidate(
         server: s,
@@ -649,6 +682,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         height: height,
         bandwidth: bandwidth,
         responseTimeMs: sw.elapsedMilliseconds,
+        measuredMbps: measuredMbps,
       );
     } catch (_) {
       return null;
@@ -877,23 +911,69 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         .toList();
     if (candidates.isEmpty) return;
 
-    final results = await Future.wait(candidates.map((s) => _probeServer(s)));
+    // Overlay en vivo: mostrar la animacion de sondeo y colorear cada
+    // servidor conforme termina de medirse.
+    if (mounted) {
+      setState(() {
+        _probing = true;
+        _probeSpeeds.clear();
+        _probeChosen = null;
+        _probeOverlayDismissed = false;
+        for (final s in candidates) {
+          _probeSpeeds[s.server] = double.nan; // sondeando
+        }
+      });
+    }
+
+    final results = await Future.wait(candidates.map((s) async {
+      final r = await _probeServer(s);
+      if (mounted) {
+        setState(() {
+          _probeSpeeds[s.server] = r?.measuredMbps ?? 0.0;
+        });
+      }
+      return r;
+    }));
     final valid = results.whereType<_ServerQualityCandidate>().toList();
 
     if (valid.isNotEmpty) {
-      // Ordenar: mayor calidad (1080 > 720 > 480) y menor tiempo de respuesta
+      // Ordenar por velocidad real medida: un 1080p que entrega 1 Mbps corta;
+      // un 720p a 6 Mbps fluye. Penalizamos servidores sin medicion (lentos/caidos).
       valid.sort((a, b) {
-        if (a.height != b.height) return b.height.compareTo(a.height);
+        // Mbps suficiente para reproducir sin cortes (2.5 Mbps minimo util)
+        final goodA = a.measuredMbps >= 2.5 ? 1 : 0;
+        final goodB = b.measuredMbps >= 2.5 ? 1 : 0;
+        if (goodA != goodB) return goodB.compareTo(goodA);
+        if (goodA == 1) {
+          // ambos buenos: mayor calidad, y a igualdad menor latencia
+          if (a.height != b.height) return b.height.compareTo(a.height);
+          return a.responseTimeMs.compareTo(b.responseTimeMs);
+        }
+        // ninguno bueno: el que mas fluido se mida
+        if (a.measuredMbps != b.measuredMbps) return b.measuredMbps.compareTo(a.measuredMbps);
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
       final best = valid.first;
-      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms)');
+      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms, ${best.measuredMbps.toStringAsFixed(2)}Mbps)');
+      if (mounted) {
+        setState(() {
+          _probeChosen = best.server.server;
+          _probing = false;
+        });
+      }
+      // El overlay NO desaparece aqui: permanece mostrando "conectando"
+      // hasta que _onStateChanged detecte que el video realmente reprodujo.
       await _playCandidateDirect(best);
       return;
     }
 
     // Fallback a lista secuencial si las pruebas no respondieron
+    if (mounted) {
+      setState(() {
+        _probing = false;
+      });
+    }
     final ordered = await _orderedServers(ep, _activeVariant);
     if (ordered.isNotEmpty) {
       await _playServer(ordered.first);
@@ -901,7 +981,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _playCandidateDirect(_ServerQualityCandidate candidate) async {
-    if (mounted) setState(() { _activeServer = candidate.server.server; _autoPlayedNext = false; });
+    if (mounted) {
+      setState(() {
+        _activeServer = candidate.server.server;
+        _currentVideoType = candidate.videoType;
+        _autoPlayedNext = false;
+      });
+    }
     _videoErrorShown = false;
     _sourceStarted = false;
 
@@ -931,7 +1017,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
       }
 
-      await _player.open(videoUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+      var streamUrl = videoUrl;
+      if (videoType == 'mp4' && HlsProxy.instance.isRunning && !videoUrl.startsWith('http://127.0.0.1')) {
+        streamUrl = HlsProxy.instance.proxyVideo(videoUrl, referer: headers?['Referer']);
+      }
+
+      await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
     } catch (e, st) {
       debugPrint('PLAY CANDIDATE ERROR: $e');
       if (mounted) showErrorSheet(context, e, st, title: 'Error de reproducción');
@@ -939,7 +1030,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _playServer(ServerMirror server) async {
-    if (mounted) setState(() { _activeServer = server.server; _autoPlayedNext = false; });
+    if (mounted) {
+      setState(() {
+        _activeServer = server.server;
+        _probeChosen = server.server;
+        _probeOverlayDismissed = false;
+        _autoPlayedNext = false;
+      });
+    }
     _videoErrorShown = false; // permitir mostrar un nuevo error
     _sourceStarted = false;   // nuevo source: aún no ha reproducido
 
@@ -956,6 +1054,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
 
         debugPrint('PLAYING: $videoUrl (type=$videoType)');
+        if (videoType == 'embed') {
+          _player.pause();
+          _stopReconnect();
+          if (mounted) {
+            setState(() {
+              _currentVideoType = 'embed';
+              _lastVideoUrl = videoUrl;
+              _sourceStarted = true;
+              _probing = false;
+              _probeOverlayDismissed = true;
+            });
+          }
+          return;
+        }
+
+        if (mounted) {
+          setState(() {
+            _currentVideoType = videoType;
+          });
+        }
         final customHeaders = (data['headers'] as Map<String, dynamic>?)
             ?.map((k, v) => MapEntry(k, v.toString()));
 
@@ -994,7 +1112,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           }
         }
 
-        await _player.open(effectiveUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+        var streamUrl = effectiveUrl;
+        if (videoType == 'mp4' && HlsProxy.instance.isRunning && !effectiveUrl.startsWith('http://127.0.0.1')) {
+          streamUrl = HlsProxy.instance.proxyVideo(effectiveUrl, referer: headers?['Referer']);
+        }
+
+        await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
@@ -1030,6 +1153,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _lastVideoHeaders = null;
     _failedServers.clear();
     _sourceStarted = false;
+    _currentVideoType = null;
+    _probeChosen = null;
+    _probing = false;
+    _probeOverlayDismissed = false;
+    _probeSpeeds.clear();
     _player.close();
     _load();
   }
@@ -1223,41 +1351,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     });
   }
 
-  void _toggleSgsr() {
-    final next = !SgsrService.isEnabled.value;
-    SgsrService.setEnabled(next);
-    _player.setSgsrEnabled(next);
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(
-                next ? Icons.auto_awesome : Icons.check_circle_outline,
-                color: Colors.white,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  next
-                      ? 'Mejora activa: Super Resolución SGSR 2K (2560x1440)'
-                      : 'Super Resolución SGSR desactivada',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: next ? const Color(0xFF6d28d9) : const Color(0xFF1e1b2e),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      setState(() {});
-    }
-  }
-
   void _togglePlayPause() {
     final ps = _player.isPlaying.value;
     if (ps) {
@@ -1317,61 +1410,102 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   // ── Video player with overlay controls ──
 
+  /// Overlay elegante de seleccion de servidor: animacion de sondeo con
+  /// barras por servidor que muestran la velocidad medida en vivo, y al
+  /// terminar una tarjeta de confirmacion con el servidor elegido y calidad.
+  Widget _buildProbeOverlay() {
+    final chosen = _probeChosen;
+    final anyStarted = _probeSpeeds.isNotEmpty;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          color: const Color(0xFF07050d).withValues(alpha: 0.65),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 380),
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1.0).animate(
+                  CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+                ),
+                child: child,
+              ),
+            ),
+            child: chosen != null
+                ? _ProbeChosenCard(
+                    key: ValueKey('chosen_$chosen'),
+                    server: chosen,
+                    prewarming: _prewarming,
+                  )
+                : _ProbeScanPanel(
+                    key: const ValueKey('scan'),
+                    speeds: _probeSpeeds,
+                    started: anyStarted,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildVideoPlayer() {
     final isPlaying = _player.isPlaying.value;
+    final isEmbed = _currentVideoType == 'embed';
     final playerWidget = Stack(
       alignment: Alignment.center,
       children: [
         // Video surface
-        _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
+        if (isEmbed && _lastVideoUrl != null)
+          WebviewPlayer(url: _lastVideoUrl!, referer: 'https://animeav1.com/')
+        else
+          _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
 
-        // ── Everything below is hidden in PiP mode ──
-        if (!_isPipMode) ...[
+        // Overlay de seleccion de servidor (sondeo en vivo + confirmacion)
+        if (!_probeOverlayDismissed && (_probing || _probeChosen != null || !_sourceStarted || _prewarming))
+          _buildProbeOverlay(),
 
-        // Loading spinner
-        if (_player.isLoading.value)
-          const CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
+        // ── Everything below is hidden in PiP mode or in web embed player mode ──
+        if (!_isPipMode && !isEmbed) ...[
 
-        // Precalentando servidor (mp4upload): aviso para que el usuario
-        // sepa que el origin lento está respondiendo. Sin esto, la espera
-        // de ~30s se ve como pantalla rota.
-        if (_prewarming)
+        // Rueda de carga del reproductor: solo en reconexiones tras haber iniciado el capitulo
+        if (_sourceStarted && _reconnecting)
+          const CircularProgressIndicator(color: Color(0xFFd8b4fe), strokeWidth: 2.5),
+
+        // Reconexión automática (pérdida de internet): aviso al usuario con diseño elegante
+        if (_reconnecting)
           Container(
-            color: Colors.black.withValues(alpha: 0.45),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
-                SizedBox(height: 12),
-                Text(
-                  'Conectando con el servidor…',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'El servidor puede tardar unos segundos (hasta 30s).',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF161324), Color(0xFF241b38)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF7c3aed).withValues(alpha: 0.55)),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF8b5cf6).withValues(alpha: 0.3),
+                  blurRadius: 28,
+                  spreadRadius: 2,
                 ),
               ],
             ),
-          ),
-
-        // Reconexión automática (pérdida de internet): aviso al usuario
-        if (_reconnecting)
-          Container(
-            color: Colors.black.withValues(alpha: 0.55),
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
-                SizedBox(height: 12),
+                SizedBox(height: 14),
                 Text(
                   'Reconectando…',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'Conexión perdida, se está restaurando la reproducción',
+                  'Conexión perdida, restaurando reproducción',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],
@@ -1379,7 +1513,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ),
 
         // Big center play/pause (when paused)
-        if (!isPlaying && !_player.isLoading.value)
+        if (!isPlaying && !_player.isLoading.value && _sourceStarted)
           GestureDetector(
             onTap: _togglePlayPause,
             child: Container(
@@ -1615,7 +1749,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ),
 
         // Bottom controls bar with drag bubble
-        if (!_isPipMode)
+        if (!_isPipMode && !isEmbed)
         IgnorePointer(
           ignoring: !_controlsVisible,
           child: FadeTransition(
@@ -1782,49 +1916,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       style: const TextStyle(color: Colors.white70, fontSize: 12),
                                     ),
                                     const Spacer(),
-                                    ValueListenableBuilder<bool>(
-                                      valueListenable: SgsrService.isEnabled,
-                                      builder: (context, enabled, _) {
-                                        return GestureDetector(
-                                          onTap: _toggleSgsr,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                            margin: const EdgeInsets.only(right: 10),
-                                            decoration: BoxDecoration(
-                                              color: enabled
-                                                  ? const Color(0xFF7c3aed).withValues(alpha: 0.45)
-                                                  : Colors.black45,
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(
-                                                color: enabled
-                                                    ? const Color(0xFFa78bfa)
-                                                    : Colors.white24,
-                                                width: 1,
-                                              ),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.auto_awesome,
-                                                  size: 13,
-                                                  color: enabled ? const Color(0xFFc4b5fd) : Colors.white60,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  enabled ? 'SGSR 2K ON' : 'SGSR 2K',
-                                                  style: TextStyle(
-                                                    color: enabled ? Colors.white : Colors.white70,
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
                                     GestureDetector(
                                       onTap: _enterPip,
                                       child: Container(
@@ -1958,36 +2049,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
               );
             }),
           ],
-          ValueListenableBuilder<bool>(
-            valueListenable: SgsrService.isEnabled,
-            builder: (context, enabled, _) {
-              return FilterChip(
-                avatar: Icon(
-                  Icons.auto_awesome,
-                  size: 15,
-                  color: enabled ? const Color(0xFFc4b5fd) : const Color(0xFF8b5cf6),
-                ),
-                label: Text(
-                  enabled
-                      ? 'Mejora activa: SGSR 2K (2560x1440)'
-                      : 'Super Resolución SGSR 2K',
-                  style: TextStyle(
-                    color: enabled ? Colors.white : const Color(0xFFc4b5fd),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-                selected: enabled,
-                onSelected: (_) => _toggleSgsr(),
-                selectedColor: const Color(0xFF7c3aed),
-                backgroundColor: const Color(0xFF15102a),
-                side: BorderSide(
-                  color: enabled ? const Color(0xFFa78bfa) : const Color(0xFF2e2350),
-                ),
-                showCheckmark: false,
-              );
-            },
-          ),
         ],
       ),
     );
@@ -2159,4 +2220,335 @@ class _BubbleArrowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Componente glassmorphism con estética oscura púrpura nativa de AniMaple.
+class _GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final double borderRadius;
+  final Color? borderColor;
+  final List<Color>? gradientColors;
+
+  const _GlassCard({
+    required this.child,
+    this.padding,
+    this.borderRadius = 10,
+    this.borderColor,
+    this.gradientColors,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: gradientColors ??
+                  [
+                    const Color(0xFF18122c).withValues(alpha: 0.85),
+                    const Color(0xFF0e0a1a).withValues(alpha: 0.90),
+                  ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: borderColor ?? const Color(0xFF8b5cf6).withValues(alpha: 0.22),
+              width: 1.0,
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Panel de sondeo en vivo con diseño nativo de AniMaple en tarjetas separadas.
+class _ProbeScanPanel extends StatefulWidget {
+  final Map<String, double> speeds;
+  final bool started;
+  const _ProbeScanPanel({super.key, required this.speeds, required this.started});
+
+  @override
+  State<_ProbeScanPanel> createState() => _ProbeScanPanelState();
+}
+
+class _ProbeScanPanelState extends State<_ProbeScanPanel> {
+  @override
+  Widget build(BuildContext context) {
+    final entries = widget.speeds.entries.toList();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 340),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Cabecera estilizada con la identidad púrpura de AniMaple
+          _GlassCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            borderRadius: 10,
+            borderColor: const Color(0xFF8b5cf6).withValues(alpha: 0.30),
+            gradientColors: [
+              const Color(0xFF22173d).withValues(alpha: 0.88),
+              const Color(0xFF110d1e).withValues(alpha: 0.92),
+            ],
+            child: Row(
+              children: [
+                Container(
+                  width: 3.5,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8b5cf6),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Seleccionando servidor',
+                        style: TextStyle(
+                          color: Color(0xFFe8e4f0),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.started
+                            ? 'Midiendo velocidad en tiempo real…'
+                            : 'Buscando las mejores fuentes…',
+                        style: const TextStyle(
+                          color: Color(0xFF8b5cf6),
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final e in entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _serverGlassTile(e.key, e.value),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serverGlassTile(String name, double mbps) {
+    final isEmbed = name.toLowerCase().contains('byse');
+    final probing = mbps.isNaN;
+    final ok = !probing && mbps >= 2.5;
+    final meh = !probing && mbps > 0.0 && mbps < 2.5;
+    final label = name.length > 24 ? '${name.substring(0, 24)}…' : name;
+
+    final accent = probing
+        ? const Color(0xFFa78bfa)
+        : isEmbed
+            ? const Color(0xFFc084fc)
+            : ok
+                ? const Color(0xFF22c55e)
+                : meh
+                    ? const Color(0xFFf59e0b)
+                    : const Color(0xFFef4444);
+
+    return _GlassCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      borderRadius: 10,
+      borderColor: accent.withValues(alpha: 0.22),
+      gradientColors: [
+        const Color(0xFF18122c).withValues(alpha: 0.80),
+        const Color(0xFF0e0a1a).withValues(alpha: 0.88),
+      ],
+      child: Row(
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFFe8e4f0),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: accent.withValues(alpha: 0.28), width: 0.8),
+            ),
+            child: Text(
+              probing
+                  ? 'Midiendo…'
+                  : isEmbed
+                      ? 'Web embed'
+                      : '${mbps.toStringAsFixed(1)} Mbps',
+              style: TextStyle(
+                color: accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tarjeta final de servidor elegido con diseño nativo y unificado de AniMaple.
+class _ProbeChosenCard extends StatefulWidget {
+  final String server;
+  final bool prewarming;
+  const _ProbeChosenCard({super.key, required this.server, this.prewarming = false});
+
+  @override
+  State<_ProbeChosenCard> createState() => _ProbeChosenCardState();
+}
+
+class _ProbeChosenCardState extends State<_ProbeChosenCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = widget.prewarming ? const Color(0xFFa78bfa) : const Color(0xFF22c55e);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 340),
+      child: _GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        borderRadius: 12,
+        borderColor: const Color(0xFF8b5cf6).withValues(alpha: 0.32),
+        gradientColors: [
+          const Color(0xFF20163b).withValues(alpha: 0.90),
+          const Color(0xFF0e0a1a).withValues(alpha: 0.94),
+        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8b5cf6).withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: const Color(0xFF8b5cf6).withValues(alpha: 0.30),
+                  width: 0.8,
+                ),
+              ),
+              child: Text(
+                widget.prewarming ? 'OPTIMIZANDO FUENTE' : 'SERVIDOR SELECCIONADO',
+                style: const TextStyle(
+                  color: Color(0xFFc4b5fd),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              widget.server,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFe8e4f0),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.prewarming
+                  ? 'Preparando transmisión fluida…'
+                  : 'Conectando con el servidor…',
+              style: const TextStyle(
+                color: Color(0xFF8b5cf6),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (widget.prewarming) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: const SizedBox(
+                  height: 3,
+                  child: LinearProgressIndicator(
+                    color: Color(0xFF8b5cf6),
+                    backgroundColor: Color(0xFF22173d),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            FadeTransition(
+              opacity: Tween(begin: 0.6, end: 1.0).animate(_pulse),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.prewarming ? 'Cargando datos iniciales…' : 'Iniciando reproducción…',
+                    style: const TextStyle(
+                      color: Color(0xFFa99fc0),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

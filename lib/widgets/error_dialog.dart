@@ -24,19 +24,31 @@ void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
   _lastSheetShown = now;
 
   final detail = _formatError(error, stackTrace, slug: slug);
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: const Color(0xFF110e1a),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (_) => _ErrorSheet(
-      title: title ?? 'Error',
-      error: error,
-      detail: detail,
-    ),
-  ).whenComplete(() => _sheetOpen = false);
+  // Diferir el push al terminar el frame actual. FlutterError.onError puede
+  // dispararse DURANTE build/layout; empujar una ruta en ese momento deja
+  // Navigator._debugLocked pegado (bloquea toda navegación posterior con
+  // assert '!_debugLocked') y provoca la cascada "Build scheduled during
+  // frame" / null checks en slivers.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!context.mounted) {
+      _sheetOpen = false;
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF110e1a),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _ErrorSheet(
+        title: title ?? 'Error',
+        error: error,
+        detail: detail,
+      ),
+    ).whenComplete(() => _sheetOpen = false);
+  });
+  WidgetsBinding.instance.scheduleFrame();
 }
 
 bool _sheetOpen = false;
@@ -241,6 +253,19 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
       // Errores de red de Image.network etc. (offline esperado): solo log,
       // NUNCA hoja de error — saturarían la app en modo sin conexión.
       if (isConnectivityError(details.exception)) return;
+      // Assert exclusivo de debug de Flutter: el grid del primer frame
+      // tras el arranque recibe constraints de ancho ~0 y revienta
+      // 'crossAxisExtent > 0.0'. Solo log, no debe alarmar al usuario.
+      if (details.exception.toString().contains('crossAxisExtent > 0.0')) {
+        return;
+      }
+      // Cascada de layout de slivers (geometry null tras un fallo previo):
+      // efecto secundario, no accionable — solo log.
+      final stackStr = details.stack?.toString() ?? '';
+      if (stackStr.contains('rendering/sliver_') ||
+          stackStr.contains('rendering/viewport.dart')) {
+        return;
+      }
       if (mounted) {
         showErrorSheet(
           context,
@@ -253,5 +278,14 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    // Los primeros frames del engine llegan con physicalSize 0×0 (métricas
+    // asíncronas). Construir el árbol completo en 0×0 rompe los grids
+    // (assert 'crossAxisExtent > 0.0' + cascada de null-checks en slivers).
+    // Se espera en vacío hasta que las métricas de la ventana sean reales.
+    if (MediaQuery.sizeOf(context) == Size.zero) {
+      return const SizedBox.shrink();
+    }
+    return widget.child;
+  }
 }

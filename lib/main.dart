@@ -10,7 +10,8 @@ import 'services/download_service.dart';
 import 'services/sync_service.dart';
 import 'services/notification_service.dart';
 import 'services/update_service.dart';
-import 'services/sgsr_service.dart';
+import 'services/fsr_service.dart';
+import 'services/hls_proxy.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
@@ -27,10 +28,12 @@ void main() async {
     MediaKit.ensureInitialized();
   }
   ApiService.init();
+  // Iniciar proxy local HTTP de alto rendimiento para streaming concurrente
+  unawaited(HlsProxy.instance.start());
   // Descargas offline: cargar índice y limpiar .part huérfanos de sesiones
   // anteriores (crash/apagado a mitad de descarga).
   unawaited(DownloadService.instance.init());
-  unawaited(SgsrService.init());
+  unawaited(FsrService.init());
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
   // google_sign_in 6.x usa signInSilently() (100% invisible en Android, sin

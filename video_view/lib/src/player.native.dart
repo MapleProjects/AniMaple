@@ -29,7 +29,7 @@ class VideoControllerImplementation extends VideoController {
   Map<String, String>? _headers;
   var _seeking = false;
   var _position = 0;
-  var _sgsrEnabled = false;
+  var _fsrEnabled = false;
 
   VideoControllerImplementation() : super.create() {
     if (kDebugMode && !_detectorStarted) {
@@ -173,8 +173,8 @@ class VideoControllerImplementation extends VideoController {
         if (keepScreenOn.value) {
           _setKeepScreenOn();
         }
-        if (_sgsrEnabled) {
-          _setSgsrEnabled();
+        if (_fsrEnabled) {
+          _setFsrEnabled();
         }
       }
     });
@@ -506,19 +506,38 @@ class VideoControllerImplementation extends VideoController {
     'value': keepScreenOn.value,
   });
 
-  void _setSgsrEnabled() => _methodChannel.invokeMethod('setSgsrEnabled', {
+  void _setFsrEnabled() => _methodChannel.invokeMethod('setFsrEnabled', {
     'id': _id,
-    'enabled': _sgsrEnabled,
+    'enabled': _fsrEnabled,
   });
 
+  // Debounce: alternar FSR rapidamente golpea el grafo GL de Media3 con
+  // re-registros de efectos y re-adjuntados de superficie; en rafagas el
+  // detach de la superficie anterior caduca ("Detaching surface timed out",
+  // ERROR_CODE_TIMEOUT). Se aplica el ultimo estado como maximo una vez por
+  // ventana de 220ms.
+  DateTime? _lastFsrWrite;
+  Timer? _fsrDebounce;
+
   @override
-  bool setSgsrEnabled(bool enabled) {
+  bool setFsrEnabled(bool enabled) {
     if (disposed) return false;
-    _sgsrEnabled = enabled;
-    sgsrEnabled.value = enabled;
-    if (_id != null) {
-      _setSgsrEnabled();
+    _fsrEnabled = enabled;
+    fsrEnabled.value = enabled;
+    if (_id == null) return true;
+    final now = DateTime.now();
+    if (_lastFsrWrite != null && now.difference(_lastFsrWrite!) < const Duration(milliseconds: 220)) {
+      _fsrDebounce?.cancel();
+      _fsrDebounce = Timer(const Duration(milliseconds: 220), () {
+        if (disposed) return;
+        _lastFsrWrite = DateTime.now();
+        _setFsrEnabled();
+      });
+      return true;
     }
+    _fsrDebounce?.cancel();
+    _lastFsrWrite = now;
+    _setFsrEnabled();
     return true;
   }
 

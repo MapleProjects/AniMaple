@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../models/anime.dart';
 import 'sync_service.dart';
 import 'notification_service.dart';
@@ -612,6 +613,40 @@ class ApiService {
     }
   }
 
+  /// Mide la velocidad real de descarga de un stream (TTFB + throughput) en
+  /// Mbps. Descarga hasta ~512KB con Range para no consumir datos de más.
+  /// Devuelve 0 si no se pudo medir (el servidor está lento o cayó).
+  static Future<double> measureStreamMbps(
+    String url, {
+    Map<String, String>? headers,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final sw = Stopwatch()..start();
+    var got = 0;
+    try {
+      final req = http.Request('GET', Uri.parse(url));
+      req.headers.addAll({
+        'Range': 'bytes=0-524287', // 512KB max
+        'User-Agent': _ua,
+        'Connection': 'close',
+        ...?headers,
+      });
+      final resp = await _http.send(req).timeout(timeout);
+      if (resp.statusCode != 206 && resp.statusCode != 200) return 0.0;
+      await resp.stream.listen((chunk) {
+        got += chunk.length;
+      }, onError: (_) {}).asFuture().timeout(timeout, onTimeout: () {});
+      final ms = sw.elapsedMilliseconds;
+      if (ms <= 0 || got <= 0) return 0.0;
+      final mbps = (got * 8.0) / (ms / 1000.0) / 1_000_000.0;
+      debugPrint('Speed ${url.substring(0, url.length > 60 ? 60 : url.length)}… = ${mbps.toStringAsFixed(2)} Mbps (${got ~/ 1024}KB/${ms}ms)');
+      return mbps;
+    } catch (e) {
+      debugPrint('Speed measure failed: $e');
+      return 0.0;
+    }
+  }
+
   /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
   /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
   static Future<Map<String, dynamic>> resolveHighestQualityHls(
@@ -887,24 +922,150 @@ class ApiService {
     return {'url': embedUrl, 'type': 'embed'};
   }
 
+  static final Map<String, Map<String, dynamic>> _byseCache = {};
+
   static Future<Map<String, dynamic>> _resolveByse(String embedUrl) async {
+    if (_byseCache.containsKey(embedUrl)) {
+      return _byseCache[embedUrl]!;
+    }
+
+    String? streamUrl;
     if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
       try {
-        final streamUrl = await _resolveByseHeadless(embedUrl);
-        if (streamUrl != null && streamUrl.isNotEmpty) {
-          return {
-            'url': streamUrl,
-            'type': 'hls',
-            'headers': {
-              'Referer': 'https://n1mwq.org/',
-            },
-          };
-        }
+        streamUrl = await _resolveByseHeadless(embedUrl);
       } catch (e) {
         debugPrint('Byse headless resolver error: $e');
       }
+    } else if (Platform.isAndroid || Platform.isIOS) {
+      try {
+        streamUrl = await _resolveByseAndroid(embedUrl);
+      } catch (e) {
+        debugPrint('Byse Android resolver error: $e');
+      }
+    }
+
+    if (streamUrl != null && streamUrl.isNotEmpty) {
+      final res = {
+        'url': streamUrl,
+        'type': 'hls',
+        'headers': {
+          'Referer': 'https://n1mwq.org/',
+        },
+      };
+      _byseCache[embedUrl] = res;
+      return res;
     }
     return {'url': embedUrl, 'type': 'embed'};
+  }
+
+  static Future<String?> _resolveByseAndroid(String embedUrl) async {
+    final completer = Completer<String?>();
+    try {
+      String targetUrl = embedUrl;
+      try {
+        final code = embedUrl.contains('/e/')
+            ? embedUrl.split('/e/').last.split('?').first.split('/').first
+            : embedUrl.split('/').last.split('?').first;
+        final detailsUri = Uri.parse('https://byselapuix.com/api/videos/$code/embed/details');
+        final resp = await _http.get(detailsUri, headers: {
+          'User-Agent': _ua,
+          'Referer': embedUrl,
+          'Origin': 'https://byselapuix.com',
+          'X-Embed-Origin': 'animeav1.com',
+          'X-Embed-Referer': 'https://animeav1.com/',
+          'X-Embed-Parent': embedUrl,
+        }).timeout(const Duration(seconds: 4));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          final frame = data['embed_frame_url'] as String?;
+          if (frame != null && frame.isNotEmpty) {
+            targetUrl = frame;
+          }
+        }
+      } catch (_) {}
+
+      final controller = WebViewController();
+      await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+      await controller.setUserAgent(
+        'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+      );
+
+      Timer? pollTimer;
+      Timer? timeoutTimer;
+
+      void finish(String? url) {
+        pollTimer?.cancel();
+        timeoutTimer?.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(url);
+        }
+      }
+
+      timeoutTimer = Timer(const Duration(seconds: 2), () => finish(null));
+
+      await controller.addJavaScriptChannel(
+        'AniMapleByse',
+        onMessageReceived: (JavaScriptMessage msg) {
+          final val = msg.message.trim();
+          if (val.contains('.m3u8') || val.startsWith('http')) {
+            finish(val);
+          }
+        },
+      );
+
+      await controller.setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            pollTimer?.cancel();
+            pollTimer = Timer.periodic(const Duration(milliseconds: 350), (_) async {
+              try {
+                await controller.runJavaScript(
+                  '(() => { const b = document.querySelector("button"); if (b) b.click(); })()',
+                );
+                final res = await controller.runJavaScriptReturningResult(
+                  '(() => {'
+                  '  try {'
+                  '    if (window.jwplayer && window.jwplayer().getConfig) {'
+                  '      const sources = window.jwplayer().getConfig().playlist[0].sources;'
+                  '      if (sources && sources.length > 0 && sources[0].file) return sources[0].file;'
+                  '    }'
+                  '    const v = document.querySelector("video");'
+                  '    if (v && v.src && v.src.startsWith("http")) return v.src;'
+                  '  } catch(e) {}'
+                  '  return null;'
+                  '})()',
+                );
+                if (res is String && res != 'null' && res.isNotEmpty) {
+                  final clean = res.replaceAll('"', '').trim();
+                  if (clean.contains('.m3u8') || clean.startsWith('http')) {
+                    finish(clean);
+                  }
+                }
+              } catch (_) {}
+            });
+          },
+        ),
+      );
+
+      await controller.loadRequest(
+        Uri.parse(targetUrl),
+        headers: targetUrl.contains('n1mwq.org')
+            ? {
+                'Referer': embedUrl,
+                'Origin': 'https://byselapuix.com',
+                'X-Embed-Origin': 'animeav1.com',
+                'X-Embed-Referer': 'https://animeav1.com/',
+                'X-Embed-Parent': embedUrl,
+              }
+            : {},
+      );
+
+      return await completer.future;
+    } catch (e) {
+      debugPrint('Byse Android resolver error: $e');
+      return null;
+    }
   }
 
   static Future<String?> _resolveByseHeadless(String embedUrl) async {

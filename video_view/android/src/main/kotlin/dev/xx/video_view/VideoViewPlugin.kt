@@ -20,8 +20,10 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.upstream.DefaultAllocator
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -40,7 +42,26 @@ class VideoController(
 	val id = surfaceProducer.id().toInt()
 	val subId = subSurfaceProducer.id().toInt()
 	private var pendingHeaders: Map<String, String>? = null
-	private val exoPlayer: ExoPlayer = ExoPlayer.Builder(binding.applicationContext).build()
+	private val exoPlayer: ExoPlayer = run {
+		val allocator = DefaultAllocator(true, 64 * 1024)
+		val loadControl = DefaultLoadControl.Builder()
+			.setAllocator(allocator)
+			.setBufferDurationsMs(
+				30_000,
+				120_000,
+				2_000,
+				4_000
+			)
+			.setBackBuffer(30_000, true)
+			.setPrioritizeTimeOverSizeThresholds(true)
+			.setTargetBufferBytes(128 * 1024 * 1024)
+			.build()
+
+		ExoPlayer.Builder(binding.applicationContext)
+			.setLoadControl(loadControl)
+			.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+			.build()
+	}
 	private val handler = Handler(exoPlayer.applicationLooper)
 	private val eventChannel = EventChannel(binding.binaryMessenger, "VideoViewPlugin/$id")
 	private val subtitlePainter = SubtitlePainter(binding.applicationContext)
@@ -137,6 +158,8 @@ class VideoController(
 					// caso observado.
 					.setConnectTimeoutMs(40_000)
 					.setReadTimeoutMs(40_000)
+					.setAllowCrossProtocolRedirects(true)
+					.setKeepPostFor302Redirects(true)
 					.setTransferListener(object : TransferListener {
 						override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
 						override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
@@ -149,6 +172,12 @@ class VideoController(
 			} else {
 				exoPlayer.setMediaItem(mediaItem)
 			}
+			try {
+				val s = surfaceProducer.surface
+				if (s != null && s.isValid) {
+					exoPlayer.setVideoSurface(s)
+				}
+			} catch (_: Throwable) {}
 			exoPlayer.prepare()
 			state = 1U
 			this.source = source
@@ -250,6 +279,10 @@ class VideoController(
 
 	fun setSgsrEnabled(enabled: Boolean): Any? {
 		sgsrEnabled = enabled
+		return null
+	}
+
+	fun setFsrEnabled(enabled: Boolean): Any? {
 		return null
 	}
 
@@ -360,6 +393,22 @@ class VideoController(
 			"subtitleTracks" to subtitleTracks,
 			"source" to source
 		))
+		val vs = exoPlayer.videoSize
+		if (vs.width > 0 && vs.height > 0) {
+			val w = (vs.width * vs.pixelWidthHeightRatio).roundToInt()
+			val h = vs.height
+			originalVideoWidth = w
+			originalVideoHeight = h
+			hasVideo = true
+			surfaceProducer.setSize(w, h)
+			subSurfaceProducer.setSize(w, h)
+			eventSink?.success(mapOf(
+				"event" to "videoSize",
+				"orientation" to if (surfaceProducer.handlesCropAndRotation()) 0 else (exoPlayer.videoFormat?.rotationDegrees ?: 0) / 90,
+				"width" to w.toFloat(),
+				"height" to h.toFloat()
+			))
+		}
 		if (!exoPlayer.isCurrentMediaItemLive) {
 			watchPosition()
 			if (networking) {
@@ -670,6 +719,11 @@ class VideoViewPlugin : FlutterPlugin, ActivityAware {
 					val player = players[call.argument<Int>("id")!!]
 					val enabled = call.argument<Boolean>("enabled") ?: false
 					result.success(player?.setSgsrEnabled(enabled))
+				}
+				"setFsrEnabled" -> {
+					val player = players[call.argument<Int>("id")!!]
+					val enabled = call.argument<Boolean>("enabled") ?: false
+					result.success(player?.setFsrEnabled(enabled))
 				}
 				"setMaxResolution" -> {
 					val player = players[call.argument<Int>("id")!!]

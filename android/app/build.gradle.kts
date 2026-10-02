@@ -54,6 +54,12 @@ android {
             val releaseSigning = signingConfigs.findByName("release")
             signingConfig = releaseSigning ?: signingConfigs.getByName("debug")
         }
+        debug {
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning != null) {
+                signingConfig = releaseSigning
+            }
+        }
     }
 }
 
