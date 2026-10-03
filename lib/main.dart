@@ -46,8 +46,24 @@ void _writeCrashLog(String source, String error, StackTrace? stack) {
   } catch (_) {}
 }
 
+void _setupFileLogger() {
+  final original = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    original(message, wrapWidth: wrapWidth);
+    if (message != null) {
+      try {
+        final home = Platform.environment['HOME'] ?? '';
+        final file = File('$home/.local/share/com.mapleprojects.animaple/player.log');
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('[${DateTime.now().toIso8601String()}][DEBUG] $message\n', mode: FileMode.append, flush: true);
+      } catch (_) {}
+    }
+  };
+}
+
 void main() async {
   _setupCrashLogger();
+  _setupFileLogger();
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
