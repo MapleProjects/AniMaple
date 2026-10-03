@@ -72,7 +72,12 @@ class MediaKitAppPlayer implements AppPlayer {
         bufferSize: 64 * 1024 * 1024,
       ),
     );
-    _videoController = mkv.VideoController(_player);
+    _videoController = mkv.VideoController(
+      _player,
+      configuration: mkv.VideoControllerConfiguration(
+        enableHardwareAcceleration: !Platform.isLinux,
+      ),
+    );
 
     _subscriptions.add(_player.stream.playing.listen((playing) {
       if (!_disposed) _isPlaying.value = playing;
