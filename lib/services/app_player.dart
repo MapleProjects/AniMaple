@@ -81,26 +81,21 @@ class MediaKitAppPlayer implements AppPlayer {
       configuration: const mk.PlayerConfiguration(
         title: 'AniMaple',
         bufferSize: 64 * 1024 * 1024,
-        logLevel: mk.MPVLogLevel.v,
+        logLevel: mk.MPVLogLevel.warn,
       ),
     );
     _videoController = mkv.VideoController(
       _player,
-      configuration: mkv.VideoControllerConfiguration(
+      configuration: const mkv.VideoControllerConfiguration(
         enableHardwareAcceleration: true,
-        hwdec: Platform.isLinux ? 'no' : 'auto',
+        hwdec: 'auto-safe',
       ),
     );
 
-    _videoController.id.addListener(() {
-      _log('[TEXTURE_ID] ${_videoController.id.value}');
-    });
-    _videoController.rect.addListener(() {
-      _log('[TEXTURE_RECT] ${_videoController.rect.value}');
-    });
-
     _subscriptions.add(_player.stream.log.listen((event) {
-      _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
+      if (event.level == mk.MPVLogLevel.warn || event.level == mk.MPVLogLevel.error) {
+        _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
+      }
     }));
 
     _subscriptions.add(_player.stream.videoParams.listen((params) {
