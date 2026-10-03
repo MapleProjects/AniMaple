@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart' as mk;
@@ -65,11 +65,23 @@ class MediaKitAppPlayer implements AppPlayer {
   final List<StreamSubscription> _subscriptions = [];
   bool _disposed = false;
 
+  static File? _logFile;
+  static void _log(String msg) {
+    try {
+      final home = Platform.environment['HOME'] ?? '';
+      _logFile ??= File('$home/.local/share/com.mapleprojects.animaple/player.log');
+      _logFile!.parent.createSync(recursive: true);
+      _logFile!.writeAsStringSync('[${DateTime.now().toIso8601String()}] $msg\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
   MediaKitAppPlayer._() {
+    _log('Initializing MediaKitAppPlayer');
     _player = mk.Player(
       configuration: const mk.PlayerConfiguration(
         title: 'AniMaple',
         bufferSize: 64 * 1024 * 1024,
+        logLevel: mk.MPVLogLevel.v,
       ),
     );
     _videoController = mkv.VideoController(
@@ -80,11 +92,36 @@ class MediaKitAppPlayer implements AppPlayer {
       ),
     );
 
+    _videoController.id.addListener(() {
+      _log('[TEXTURE_ID] ${_videoController.id.value}');
+    });
+    _videoController.rect.addListener(() {
+      _log('[TEXTURE_RECT] ${_videoController.rect.value}');
+    });
+
+    _subscriptions.add(_player.stream.log.listen((event) {
+      _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
+    }));
+
+    _subscriptions.add(_player.stream.videoParams.listen((params) {
+      _log('[VIDEO_PARAMS] w=${params.w} h=${params.h} dw=${params.dw} dh=${params.dh} aspect=${params.aspect} pixelformat=${params.pixelformat}');
+    }));
+
+    _subscriptions.add(_player.stream.width.listen((w) {
+      _log('[VIDEO_WIDTH] $w');
+    }));
+
+    _subscriptions.add(_player.stream.height.listen((h) {
+      _log('[VIDEO_HEIGHT] $h');
+    }));
+
     _subscriptions.add(_player.stream.playing.listen((playing) {
+      _log('[PLAYING] $playing');
       if (!_disposed) _isPlaying.value = playing;
     }));
 
     _subscriptions.add(_player.stream.buffering.listen((buffering) {
+      _log('[BUFFERING] $buffering');
       if (!_disposed) _isLoading.value = buffering;
     }));
 
@@ -93,15 +130,15 @@ class MediaKitAppPlayer implements AppPlayer {
     }));
 
     _subscriptions.add(_player.stream.duration.listen((dur) {
+      _log('[DURATION] ${dur.inMilliseconds} ms');
       if (!_disposed) _durationMs.value = dur.inMilliseconds;
     }));
 
     _subscriptions.add(_player.stream.completed.listen((completed) {
+      _log('[COMPLETED] $completed');
       if (!_disposed && completed) {
         final dur = _durationMs.value;
         final pos = _positionMs.value;
-        // Verify that the video actually reached the end before signaling finished.
-        // On network streams or seeks, libmpv may emit eof-reached prematurely.
         if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
           debugPrint('MediaKit: spurious completed/eof ignored at $pos ms / $dur ms');
           _player.play();
@@ -112,6 +149,7 @@ class MediaKitAppPlayer implements AppPlayer {
     }));
 
     _subscriptions.add(_player.stream.error.listen((err) {
+      _log('[MPV_ERROR] $err');
       if (!_disposed && err.isNotEmpty) {
         _error.value = err;
       }
@@ -204,6 +242,7 @@ class MediaKitAppPlayer implements AppPlayer {
       debugPrint('Error applying mpv properties: $e');
     }
 
+    _log('MediaKitAppPlayer.open: url=$url, startPositionMs=$startPositionMs, headers=$effectiveHeaders');
     final media = mk.Media(
       url,
       httpHeaders: effectiveHeaders,
@@ -284,6 +323,7 @@ class MediaKitAppPlayer implements AppPlayer {
 
   @override
   Widget buildView({BoxFit fit = BoxFit.contain}) {
+    _log('MediaKitAppPlayer.buildView: fit=$fit, textureId=${_videoController.id.value}, rect=${_videoController.rect.value}');
     return mkv.Video(
       key: _videoWidgetKey,
       controller: _videoController,
