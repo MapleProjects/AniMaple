@@ -311,6 +311,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           await windowManager.setAspectRatio(16 / 9);
           await windowManager.setMinimumSize(const Size(280, 158));
           await windowManager.setMaximumSize(const Size(800, 450));
+          await windowManager.setMaximizable(false);
           await windowManager.setResizable(true);
 
           final targetSize = (_lastPipSize.width <= 500 && _lastPipSize.height <= 300)
@@ -350,18 +351,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           }
         } catch (_) {}
       }
-      await windowManager.setMaximumSize(Size.infinite);
-      await windowManager.setAspectRatio(0);
+      // NUNCA usar Size.infinite (genera overflow a INT_MIN en C++ y bloquea maximizar/redimensionar)
+      await windowManager.setMaximumSize(const Size(19200, 10800));
       await windowManager.setMinimumSize(const Size(800, 500));
-      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
-      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setAspectRatio(0);
+      await windowManager.setMaximizable(true);
       await windowManager.setResizable(true);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
 
-      if (_savedWindowSize != null) {
-        await windowManager.setSize(_savedWindowSize!);
-      }
+      final targetW = (_savedWindowSize != null && _savedWindowSize!.width >= 900)
+          ? _savedWindowSize!.width
+          : 1280.0;
+      final targetH = (_savedWindowSize != null && _savedWindowSize!.height >= 600)
+          ? _savedWindowSize!.height
+          : 720.0;
+      await windowManager.setSize(Size(targetW, targetH));
       if (_savedWindowPosition != null) {
         await windowManager.setPosition(_savedWindowPosition!);
+      } else {
+        await windowManager.center();
       }
     } catch (e) {
       debugPrint('Error exiting Desktop PiP: $e');
@@ -1039,9 +1048,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
       debugPrint('PLAYING DIRECT: $videoUrl (type=$videoType, height=${candidate.height}p, bw=${candidate.bandwidth})');
 
-      final before = _player.positionMs.value;
-      if (before > 0) _lastPositionMs = before;
-      _pendingSeek = _lastPositionMs;
+      if (_lastPositionMs > 0) {
+        _pendingSeek = _lastPositionMs;
+      } else {
+        _pendingSeek = 0;
+      }
 
       _lastVideoUrl = videoUrl;
       _lastVideoHeaders = headers;
@@ -1133,9 +1144,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           effectiveUrl = q['url'] as String? ?? videoUrl;
         }
 
-        final before = _player.positionMs.value;
-        if (before > 0) _lastPositionMs = before;
-        _pendingSeek = _lastPositionMs;
+        if (_lastPositionMs > 0) {
+          _pendingSeek = _lastPositionMs;
+        } else {
+          _pendingSeek = 0;
+        }
 
         _lastVideoUrl = effectiveUrl;
         _lastVideoHeaders = headers;
@@ -1169,44 +1182,60 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   // In-place episode switch — no Navigator, no widget rebuild, fullscreen persists
-  void _switchEpisode(int newEp) {
+  void _switchEpisode(int newEp) async {
     final detail = _animeDetail;
     if (detail == null) return;
     if (widget.offlineLibrary &&
         !DownloadService.instance.isDownloaded(widget.animeSlug, newEp)) {
       return; // Modo biblioteca: navegar solo entre capítulos descargados.
     }
-    if (newEp < 1 || newEp > detail.episodes.length) return;
+    // Soporta animes con episodio 0 (ovas/prólogos/especiales) o numeración no continua
+    if (!detail.episodes.any((e) => e.number == newEp)) return;
     if (newEp == _currentEp) return;
-    setState(() {
-      _currentEp = newEp;
-      _loading = true;
-      // Reset del estado offline: el nuevo capítulo se resuelve en _load().
-      _offlinePath = null;
-    });
+
+    try {
+      await _player.pause();
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _currentEp = newEp;
+        _loading = true;
+        // Reset del estado offline: el nuevo capítulo se resuelve en _load().
+        _offlinePath = null;
+        _showCountdown = false;
+        _autoPlayedNext = false;
+        _probeChosen = null;
+        _probing = false;
+        _probeOverlayDismissed = false;
+        _sourceStarted = false;
+        _currentVideoType = null;
+      });
+    }
     // Cancelar reconexión y reiniciar la posición: es otro capítulo, no
     // debe heredar el progreso del anterior.
+    _countdownTimer?.cancel();
     _reconnectTimer?.cancel();
     _reconnecting = false;
-    _pendingSeek = -1;
+    _pendingSeek = 0;
     _lastPositionMs = 0;
     _lastVideoUrl = null;
     _lastVideoHeaders = null;
     _failedServers.clear();
-    _sourceStarted = false;
-    _currentVideoType = null;
-    _probeChosen = null;
-    _probing = false;
-    _probeOverlayDismissed = false;
     _probeSpeeds.clear();
-    _player.close();
-    _load();
+    await _player.close();
+    if (mounted) {
+      _load();
+    }
   }
 
   void _goNext() => _switchEpisode(_currentEp + 1);
   void _goPrev() => _switchEpisode(_currentEp - 1);
 
   void _toggleFullscreen() async {
+    if (_isDesktop && _isPipMode) {
+      await _exitPipDesktop();
+    }
     final nextFullscreen = !_isFullscreen;
     if (_isDesktop) {
       try {
@@ -1234,8 +1263,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))));
+    if (_loading && _episode == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0a0812),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))),
+      );
     }
     final ep = _episode;
     if (ep == null) {
@@ -1506,7 +1538,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
 
         // Overlay de seleccion de servidor (sondeo en vivo + confirmacion)
-        if (!_probeOverlayDismissed && (_probing || _probeChosen != null || !_sourceStarted || _prewarming))
+        if (!_probeOverlayDismissed && (_probing || _probeChosen != null || !_sourceStarted || _prewarming || _loading))
           _buildProbeOverlay(),
 
         // ── Everything below is hidden in PiP mode or in web embed player mode ──

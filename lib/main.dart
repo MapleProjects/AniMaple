@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File, FileMode;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -17,11 +17,37 @@ import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
 import 'pages/history_page.dart';
 import 'pages/following_page.dart';
+import 'dart:ui' show PlatformDispatcher;
+import 'package:path_provider/path_provider.dart';
 import 'widgets/downloads_fab.dart';
 import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
 
+void _setupCrashLogger() {
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _writeCrashLog('FlutterError', details.exceptionAsString(), details.stack);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('UNCAUGHT PLATFORM ERROR: $error');
+    _writeCrashLog('PlatformDispatcher', error.toString(), stack);
+    return true; // Evitar que el proceso termine abruptamente sin reporte
+  };
+}
+
+void _writeCrashLog(String source, String error, StackTrace? stack) {
+  try {
+    getApplicationSupportDirectory().then((dir) {
+      final file = File('${dir.path}/crash.log');
+      final now = DateTime.now().toIso8601String();
+      final content = '[$now] [$source]\nError: $error\nStack trace:\n${stack ?? ''}\n----------------------------------------\n';
+      file.writeAsStringSync(content, mode: FileMode.append);
+    });
+  } catch (_) {}
+}
+
 void main() async {
+  _setupCrashLogger();
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
