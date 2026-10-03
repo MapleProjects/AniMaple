@@ -21,6 +21,7 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.5
   media_kit_libs_windows_video: ^1.0.9
+  media_kit_libs_linux: ^1.2.1
   window_manager: ^0.5.2
   wakelock_plus: ^1.2.8
   google_sign_in: ^6.2.2
