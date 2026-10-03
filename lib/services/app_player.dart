@@ -228,6 +228,7 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('force-seekable', 'yes');
         if (Platform.isLinux) {
           await (platform as dynamic).setProperty('hwdec', 'no');
+          await (platform as dynamic).setProperty('opengl-es', 'yes');
         }
         await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
         await (platform as dynamic).setProperty('keep-open', 'yes');
