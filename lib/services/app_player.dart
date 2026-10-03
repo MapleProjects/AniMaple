@@ -69,7 +69,7 @@ class MediaKitAppPlayer implements AppPlayer {
     _player = mk.Player(
       configuration: const mk.PlayerConfiguration(
         title: 'AniMaple',
-        bufferSize: 32 * 1024 * 1024,
+        bufferSize: 64 * 1024 * 1024,
       ),
     );
     _videoController = mkv.VideoController(_player);
@@ -92,6 +92,15 @@ class MediaKitAppPlayer implements AppPlayer {
 
     _subscriptions.add(_player.stream.completed.listen((completed) {
       if (!_disposed && completed) {
+        final dur = _durationMs.value;
+        final pos = _positionMs.value;
+        // Verify that the video actually reached the end before signaling finished.
+        // On network streams or seeks, libmpv may emit eof-reached prematurely.
+        if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
+          debugPrint('MediaKit: spurious completed/eof ignored at $pos ms / $dur ms');
+          _player.play();
+          return;
+        }
         _finishedCount.value = _finishedCount.value + 1;
       }
     }));
@@ -139,7 +148,7 @@ class MediaKitAppPlayer implements AppPlayer {
 
   @override
   Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
-    if (_disposed) return;
+    _disposed = false;
     _error.value = null;
     _isLoading.value = true;
 
@@ -164,18 +173,27 @@ class MediaKitAppPlayer implements AppPlayer {
 
     final ua = effectiveHeaders['User-Agent']!;
     final ref = effectiveHeaders['Referer'] ?? '';
-    final headerString = effectiveHeaders.entries.map((e) => '${e.key}: ${e.value}').join(r'\r\n') + r'\r\n';
 
     try {
       final platform = _player.platform;
       if (platform != null) {
-        await (platform as dynamic)._setPropertyString('user-agent', ua);
+        await (platform as dynamic).setProperty('user-agent', ua);
         if (ref.isNotEmpty) {
-          await (platform as dynamic)._setPropertyString('referrer', ref);
+          await (platform as dynamic).setProperty('referrer', ref);
         }
-        await (platform as dynamic)._setPropertyString('demuxer-lavf-o', 'headers=$headerString');
+        await (platform as dynamic).setProperty('force-seekable', 'yes');
+        await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
+        await (platform as dynamic).setProperty('keep-open', 'yes');
+        await (platform as dynamic).setProperty('hr-seek', 'yes');
+        await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
+        await (platform as dynamic).setProperty('demuxer-readahead-secs', '120');
+        await (platform as dynamic).setProperty('demuxer-max-bytes', '134217728'); // 128 MB
+        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '67108864'); // 64 MB
+        await (platform as dynamic).setProperty('network-timeout', '30');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error applying mpv properties: $e');
+    }
 
     final media = mk.Media(
       url,
@@ -198,12 +216,12 @@ class MediaKitAppPlayer implements AppPlayer {
         if (enabled) {
           final shaderPath = await FsrService.getShaderFile();
           if (shaderPath != null && shaderPath.isNotEmpty) {
-            await (platform as dynamic)._setPropertyString('glsl-shaders', shaderPath);
-            await (platform as dynamic)._setPropertyString('scale', 'ewa_lanczos');
-            await (platform as dynamic)._setPropertyString('cscale', 'ewa_lanczos');
+            await (platform as dynamic).setProperty('glsl-shaders', shaderPath);
+            await (platform as dynamic).setProperty('scale', 'ewa_lanczos');
+            await (platform as dynamic).setProperty('cscale', 'ewa_lanczos');
           }
         } else {
-          await (platform as dynamic)._setPropertyString('glsl-shaders', '');
+          await (platform as dynamic).setProperty('glsl-shaders', '');
         }
       }
     } catch (e) {
@@ -226,13 +244,17 @@ class MediaKitAppPlayer implements AppPlayer {
   @override
   Future<void> seekTo(int positionMs) async {
     if (_disposed) return;
-    await _player.seek(Duration(milliseconds: positionMs));
+    _positionMs.value = positionMs;
+    _isLoading.value = true;
+    try {
+      await _player.seek(Duration(milliseconds: positionMs));
+    } catch (e) {
+      debugPrint('Error seeking in MediaKitAppPlayer: $e');
+    }
   }
 
   @override
   Future<void> close() async {
-    if (_disposed) return;
-    _disposed = true;
     _isPlaying.value = false;
     _isLoading.value = false;
     try {

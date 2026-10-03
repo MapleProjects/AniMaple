@@ -60,6 +60,7 @@ ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
 Set-Location "C:\Users\Maple\AniMaple\tools\installer"
 & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION="'"$VERSION"'" /DBUILD_DIR="C:\Users\Maple\AniMaple\build\windows\x64\runner\Release" /DINSTALLER_DIR="C:\Users\Maple\AniMaple\tools\installer" animaple.nsi
 Compress-Archive -Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\*" -DestinationPath "C:\Users\Maple\AniMaple\tools\installer\animaple-v'"$VERSION"'-windows.zip" -Force
+Copy-Item "C:\Users\Maple\AniMaple\tools\installer\animaple-v'"$VERSION"'-setup.exe" "C:\Users\Maple\Desktop\animaple-v'"$VERSION"'-setup.exe" -Force
 '
 
 # 6. Copiar instalador y paquete portable al host

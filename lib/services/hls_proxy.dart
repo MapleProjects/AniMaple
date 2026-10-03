@@ -167,135 +167,13 @@ class HlsProxy {
     }
   }
 
-  /// Fetch video file (MP4) using concurrent chunk workers when byte ranges are supported,
-  /// multiplying throughput on rate-limited hosts (like UpnShare and Mp4Upload).
+  /// Fetch video file (MP4) with transparent range forwarding and streaming.
   Future<void> _handleVideo(
     HttpRequest request,
     String videoUrl,
     String? customReferer,
   ) async {
-    final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true)
-      ..connectionTimeout = const Duration(seconds: 15);
-    try {
-      // 1. Probe remote stream metadata with a 0-0 Range probe
-      final probeReq = await client.getUrl(Uri.parse(videoUrl));
-      _applyHeaders(probeReq, videoUrl, customReferer);
-      probeReq.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
-      final probeRes = await probeReq.close();
-
-      int totalLength = -1;
-      final contentRange = probeRes.headers.value(HttpHeaders.contentRangeHeader);
-      if (contentRange != null) {
-        final m = RegExp(r'/(\d+)').firstMatch(contentRange);
-        if (m != null) totalLength = int.tryParse(m.group(1)!) ?? -1;
-      }
-      if (totalLength <= 0) {
-        totalLength = probeRes.headers.contentLength;
-      }
-      final supportsRanges = probeRes.statusCode == 206 ||
-          probeRes.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase() == 'bytes' ||
-          contentRange != null;
-
-      await probeRes.drain<void>();
-
-      // Fallback to direct pipe if remote server does not advertise range capability
-      if (!supportsRanges || totalLength <= 0) {
-        await _pipeDirectVideo(request, videoUrl, customReferer);
-        return;
-      }
-
-      // 2. Parse client range request
-      final clientRange = request.headers.value(HttpHeaders.rangeHeader);
-      int startByte = 0;
-      int endByte = totalLength - 1;
-
-      if (clientRange != null) {
-        final m = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(clientRange);
-        if (m != null) {
-          startByte = int.parse(m.group(1)!);
-          if (m.group(2) != null && m.group(2)!.isNotEmpty) {
-            endByte = int.parse(m.group(2)!);
-          }
-        }
-      }
-      if (endByte >= totalLength) endByte = totalLength - 1;
-      final contentLength = endByte - startByte + 1;
-
-      request.response.statusCode = (clientRange != null) ? 206 : 200;
-      request.response.headers.set('Access-Control-Allow-Origin', '*');
-      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-      request.response.headers.set(HttpHeaders.contentTypeHeader, 'video/mp4');
-      request.response.headers.set(HttpHeaders.contentLengthHeader, contentLength.toString());
-      if (clientRange != null) {
-        request.response.headers.set(HttpHeaders.contentRangeHeader, 'bytes $startByte-$endByte/$totalLength');
-      }
-
-      // 3. Concurrent multi-worker slice downloader
-      const chunkSize = 2 * 1024 * 1024; // 2 MB chunks
-      final sliceCount = ((contentLength + chunkSize - 1) ~/ chunkSize);
-      const concurrency = 3;
-
-      final chunkFutures = <int, Future<List<int>?>>{};
-
-      Future<List<int>?> fetchSlice(int sliceIndex) async {
-        final sliceStart = startByte + (sliceIndex * chunkSize);
-        final sliceEnd = (sliceStart + chunkSize - 1 > endByte) ? endByte : sliceStart + chunkSize - 1;
-
-        for (int attempt = 0; attempt < 2; attempt++) {
-          final sliceClient = HttpClient()
-            ..badCertificateCallback = ((cert, host, port) => true)
-            ..connectionTimeout = const Duration(seconds: 25);
-          try {
-            final req = await sliceClient.getUrl(Uri.parse(videoUrl));
-            _applyHeaders(req, videoUrl, customReferer);
-            req.headers.set(HttpHeaders.rangeHeader, 'bytes=$sliceStart-$sliceEnd');
-            final res = await req.close();
-            if (res.statusCode == 200 || res.statusCode == 206) {
-              final bytes = await res.fold<List<int>>(<int>[], (p, d) => p..addAll(d));
-              return bytes;
-            }
-          } catch (_) {
-            if (attempt == 1) return null;
-            await Future.delayed(const Duration(milliseconds: 300));
-          } finally {
-            sliceClient.close();
-          }
-        }
-        return null;
-      }
-
-      // Pre-schedule first window of slices
-      for (int i = 0; i < concurrency && i < sliceCount; i++) {
-        chunkFutures[i] = fetchSlice(i);
-      }
-
-      for (int i = 0; i < sliceCount; i++) {
-        // Pre-fetch ahead
-        final nextToPrefetch = i + concurrency;
-        if (nextToPrefetch < sliceCount && !chunkFutures.containsKey(nextToPrefetch)) {
-          chunkFutures[nextToPrefetch] = fetchSlice(nextToPrefetch);
-        }
-
-        final sliceData = await chunkFutures[i];
-        chunkFutures.remove(i);
-
-        if (sliceData != null && sliceData.isNotEmpty) {
-          request.response.add(sliceData);
-          await request.response.flush();
-        } else {
-          break;
-        }
-      }
-
-      await request.response.close();
-    } catch (_) {
-      try {
-        await request.response.close();
-      } catch (_) {}
-    } finally {
-      client.close();
-    }
+    await _pipeDirectVideo(request, videoUrl, customReferer);
   }
 
   Future<void> _pipeDirectVideo(
@@ -305,7 +183,7 @@ class HlsProxy {
   ) async {
     final client = HttpClient()
       ..badCertificateCallback = ((cert, host, port) => true)
-      ..connectionTimeout = const Duration(seconds: 20);
+      ..connectionTimeout = const Duration(seconds: 30);
     try {
       final req = await client.getUrl(Uri.parse(videoUrl));
       _applyHeaders(req, videoUrl, customReferer);
@@ -332,7 +210,15 @@ class HlsProxy {
         request.response.headers.set('Content-Type', 'video/mp4');
       }
 
-      await res.pipe(request.response);
+      try {
+        await res.pipe(request.response);
+      } catch (_) {
+        // Client disconnected (e.g. seek canceled previous range stream)
+      }
+    } catch (_) {
+      try {
+        await request.response.close();
+      } catch (_) {}
     } finally {
       client.close();
     }

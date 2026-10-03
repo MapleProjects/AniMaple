@@ -151,8 +151,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // (reconexión del mismo source preservando progreso).
   bool _sourceStarted = false;
 
-  // Mouse hover (desktop only)
-  bool _isHovering = false;
 
   // Mutable episode number — allows in-place episode switching
   late int _currentEp;
@@ -264,7 +262,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onMouseEnter(PointerEvent event) {
-    _isHovering = true;
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+      _controlsAnim!.forward();
+    }
+    _startHideTimer();
+  }
+
+  void _onMouseMove(PointerEvent event) {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
       _controlsAnim!.forward();
@@ -273,7 +278,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onMouseExit(PointerEvent event) {
-    _isHovering = false;
     if (!_isDragging && !_showCountdown) {
       _hideTimer?.cancel();
       setState(() => _controlsVisible = false);
@@ -281,7 +285,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
-  static Size _lastPipSize = const Size(480, 270);
+  static Size _lastPipSize = const Size(380, 214);
   Size? _savedWindowSize;
   Offset? _savedWindowPosition;
   bool _pipHovered = false;
@@ -290,13 +294,31 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (_isDesktop) {
       try {
         if (!_isPipMode) {
+          // Si la ventana está en pantalla completa o maximizada, restaurarla primero
+          if (_isFullscreen || await windowManager.isFullScreen()) {
+            await windowManager.setFullScreen(false);
+            _isFullscreen = false;
+          }
+          if (await windowManager.isMaximized()) {
+            await windowManager.unmaximize();
+          }
+
           _savedWindowSize = await windowManager.getSize();
           _savedWindowPosition = await windowManager.getPosition();
+
           await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
           await windowManager.setAlwaysOnTop(true);
           await windowManager.setAspectRatio(16 / 9);
-          await windowManager.setMinimumSize(const Size(320, 180));
-          await windowManager.setSize(_lastPipSize);
+          await windowManager.setMinimumSize(const Size(280, 158));
+          await windowManager.setMaximumSize(const Size(800, 450));
+          await windowManager.setResizable(true);
+
+          final targetSize = (_lastPipSize.width <= 500 && _lastPipSize.height <= 300)
+              ? _lastPipSize
+              : const Size(380, 214);
+          await windowManager.setSize(targetSize);
+          await windowManager.setAlignment(Alignment.bottomRight);
+
           setState(() {
             _isPipMode = true;
             _controlsVisible = false;
@@ -323,15 +345,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       if (_isPipMode) {
         try {
           final curSize = await windowManager.getSize();
-          if (curSize.width >= 280 && curSize.height >= 150) {
+          if (curSize.width >= 280 && curSize.width <= 700) {
             _lastPipSize = curSize;
           }
         } catch (_) {}
       }
-      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
-      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setMaximumSize(Size.infinite);
       await windowManager.setAspectRatio(0);
       await windowManager.setMinimumSize(const Size(800, 500));
+      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setResizable(true);
+
       if (_savedWindowSize != null) {
         await windowManager.setSize(_savedWindowSize!);
       }
@@ -408,7 +433,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   /// Cancela el reintento de reconexión si el video ya está reproduciéndose.
   void _stopReconnectIfPlaying() {
-    if (_reconnecting && _player.isPlaying.value) {
+    if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _reconnecting = false;
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
@@ -470,6 +495,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onFinished() {
+    final pos = _player.positionMs.value;
+    final dur = _player.durationMs.value;
+    // Don't treat seek stalls, buffer underruns, or premature network EOF as completion
+    if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
+      debugPrint('EpisodePage: Ignored premature onFinished at $pos ms / $dur ms');
+      _player.play();
+      return;
+    }
     if (_player.finishedCount.value > 0 && mounted && !_autoPlayedNext) {
       _autoPlayedNext = true;
       final has = _animeDetail != null && _currentEp < _animeDetail!.episodes.length;
@@ -510,6 +543,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO ERROR: $err');
+      // Si el reproductor está activamente reproduciendo, ignorar fallos secundarios de decoder/logs
+      if (_player.isPlaying.value) {
+        debugPrint('Ignoring non-fatal error while actively playing: $err');
+        return;
+      }
       final hadSource = _lastVideoUrl != null && _lastVideoUrl!.isNotEmpty;
 
       // El source NUNCA llegó a reproducirse: el servidor activo está caído
@@ -738,6 +776,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onPositionChanged() {
+    if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
+      _stopReconnectIfPlaying();
+    }
     if (_pendingSeek > 0 && _player.positionMs.value > 0) {
       final target = _pendingSeek;
       _pendingSeek = -1;
@@ -1344,10 +1385,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _startHideTimer() {
     _hideTimer?.cancel();
-    if (_isHovering) return; // Don't hide on desktop when mouse is over
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && !_isDragging && !_isHovering) setState(() => _controlsVisible = false);
-      _controlsAnim?.reverse();
+      if (mounted && !_isDragging && !_showCountdown && _player.isPlaying.value) {
+        setState(() => _controlsVisible = false);
+        _controlsAnim?.reverse();
+      }
     });
   }
 
@@ -1471,11 +1513,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (!_isPipMode && !isEmbed) ...[
 
         // Rueda de carga del reproductor: solo en reconexiones tras haber iniciado el capitulo
-        if (_sourceStarted && _reconnecting)
+        if (_sourceStarted && _reconnecting && !isPlaying)
           const CircularProgressIndicator(color: Color(0xFFd8b4fe), strokeWidth: 2.5),
 
         // Reconexión automática (pérdida de internet): aviso al usuario con diseño elegante
-        if (_reconnecting)
+        if (_reconnecting && !isPlaying)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 22),
             decoration: BoxDecoration(
@@ -1681,66 +1723,69 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         // PiP mode is handled natively by Android — no Flutter overlay
         ], // end if (!_isPipMode)
 
-        // Desktop PiP interactive overlay (hover controls, dragging, restore, close)
+        // Desktop PiP interactive overlay (hover controls, dragging, restore, resize)
         if (_isPipMode && _isDesktop)
           Positioned.fill(
-            child: MouseRegion(
-              onEnter: (_) => setState(() => _pipHovered = true),
-              onExit: (_) => setState(() => _pipHovered = false),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanStart: (_) => windowManager.startDragging(),
-                onDoubleTap: _exitPipDesktop,
-                child: AnimatedOpacity(
-                  opacity: _pipHovered ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 150),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.55),
-                    ),
-                    child: Stack(
-                      children: [
-                        // Top action bar
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: IconButton(
-                            icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 20),
-                            tooltip: 'Restaurar ventana',
-                            onPressed: _exitPipDesktop,
-                          ),
-                        ),
-                        // Center Play/Pause button
-                        Center(
-                          child: IconButton(
-                            iconSize: 44,
-                            icon: Icon(
-                              _player.isPlaying.value ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                              color: const Color(0xFFa78bfa),
+            child: DragToResizeArea(
+              resizeEdgeSize: 8,
+              child: MouseRegion(
+                onEnter: (_) => setState(() => _pipHovered = true),
+                onExit: (_) => setState(() => _pipHovered = false),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) => windowManager.startDragging(),
+                  onDoubleTap: _exitPipDesktop,
+                  child: AnimatedOpacity(
+                    opacity: _pipHovered ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 150),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                      ),
+                      child: Stack(
+                        children: [
+                          // Top action bar
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: IconButton(
+                              icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 20),
+                              tooltip: 'Restaurar ventana',
+                              onPressed: _exitPipDesktop,
                             ),
-                            onPressed: _togglePlayPause,
                           ),
-                        ),
-                        // Bottom progress indicator
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: ValueListenableBuilder<int>(
-                            valueListenable: _player.positionMs,
-                            builder: (context, pos, _) {
-                              final dur = _player.durationMs.value;
-                              final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
-                              return LinearProgressIndicator(
-                                value: progress,
-                                backgroundColor: Colors.white24,
-                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8b5cf6)),
-                                minHeight: 3,
-                              );
-                            },
+                          // Center Play/Pause button
+                          Center(
+                            child: IconButton(
+                              iconSize: 44,
+                              icon: Icon(
+                                _player.isPlaying.value ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                                color: const Color(0xFFa78bfa),
+                              ),
+                              onPressed: _togglePlayPause,
+                            ),
                           ),
-                        ),
-                      ],
+                          // Bottom progress indicator
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: ValueListenableBuilder<int>(
+                              valueListenable: _player.positionMs,
+                              builder: (context, pos, _) {
+                                final dur = _player.durationMs.value;
+                                final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+                                return LinearProgressIndicator(
+                                  value: progress,
+                                  backgroundColor: Colors.white24,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8b5cf6)),
+                                  minHeight: 3,
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1826,29 +1871,49 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       final topY = (constraints.maxHeight - trackH) / 2;
                                       final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
 
-                                      return Listener(
+                                      return GestureDetector(
                                         behavior: HitTestBehavior.opaque,
-                                        onPointerDown: (e) {
+                                        onTapDown: (details) {
+                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
+                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
+                                          final target = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble()).toInt();
+                                          _isDragging = false;
+                                          _dragValue = target.toDouble();
+                                          _player.seekTo(target);
+                                          _lastPositionMs = target;
+                                          setState(() {});
+                                          _startHideTimer();
+                                        },
+                                        onHorizontalDragStart: (details) {
                                           _isDragging = true;
                                           _hideTimer?.cancel();
-                                        },
-                                        onPointerMove: (e) {
-                                          final x = e.localPosition.dx.clamp(0.0, trackW);
-                                          final val = (x / trackW * dur).clamp(0.0, dur.toDouble());
+                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
+                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
+                                          final val = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble());
                                           setState(() { _dragValue = val; });
                                         },
-                                        onPointerUp: (e) {
-                                          final target = (_dragValue ?? dv).toInt().clamp(0, dur);
-                                          _player.seekTo(target);
+                                        onHorizontalDragUpdate: (details) {
+                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
+                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
+                                          final val = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble());
+                                          setState(() { _dragValue = val; });
+                                        },
+                                        onHorizontalDragEnd: (details) {
+                                          if (_dragValue != null) {
+                                            final target = _dragValue!.toInt().clamp(0, dur);
+                                            _player.seekTo(target);
+                                            _lastPositionMs = target;
+                                          }
                                           _isDragging = false;
                                           _dragValue = null;
                                           setState(() {});
                                           _startHideTimer();
                                         },
-                                        onPointerCancel: (e) {
+                                        onHorizontalDragCancel: () {
                                           _isDragging = false;
                                           _dragValue = null;
                                           setState(() {});
+                                          _startHideTimer();
                                         },
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1869,7 +1934,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                               // Active track
                                               Positioned(
                                                 top: topY, left: 0,
-                                                width: trackW * frac,
+                                                width: (trackW - 20).clamp(0.0, double.infinity) * frac,
                                                 child: Container(
                                                   height: trackH,
                                                   decoration: BoxDecoration(
@@ -1880,7 +1945,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                               ),
                                               // Thumb
                                               Positioned(
-                                                left: (trackW * frac) - 7,
+                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) - 7,
                                                 top: topY - 5,
                                                 child: Container(
                                                   width: 14, height: 14,
@@ -1949,7 +2014,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     );
 
     if (_isDesktop) {
-      return MouseRegion(onEnter: _onMouseEnter, onExit: _onMouseExit, child: playerWidget);
+      return MouseRegion(
+        onEnter: _onMouseEnter,
+        onHover: _onMouseMove,
+        onExit: _onMouseExit,
+        child: playerWidget,
+      );
     }
     return playerWidget;
   }
