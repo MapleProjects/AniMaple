@@ -53,8 +53,9 @@ class FsrService {
       if (!file.existsSync() || file.lengthSync() != data.length) {
         await file.writeAsString(data, flush: true);
       }
-      _cachedShaderPath = file.path;
-      return file.path;
+      final normalized = file.path.replaceAll(r'\', '/');
+      _cachedShaderPath = normalized;
+      return normalized;
     } catch (e) {
       debugPrint('FsrService getShaderFile error: $e');
       return null;

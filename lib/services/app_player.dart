@@ -203,30 +203,19 @@ class MediaKitAppPlayer implements AppPlayer {
           : null,
     );
     await _player.open(media, play: true);
-    if (FsrService.isEnabled.value) {
-      unawaited(setFsrEnabled(true));
-    }
   }
 
   @override
   Future<void> setFsrEnabled(bool enabled) async {
+    // Shaders multi-paso complejos con texturas intermedias agotan las swapchains
+    // de ANGLE/D3D11 en Windows (HRESULT 0x887A0022) provocando EGL Context Lost
+    // y caída del proceso. En desktop mantenemos la pipeline nativa limpia.
     try {
       final platform = _player.platform;
       if (platform != null) {
-        if (enabled) {
-          final shaderPath = await FsrService.getShaderFile();
-          if (shaderPath != null && shaderPath.isNotEmpty) {
-            await (platform as dynamic).setProperty('glsl-shaders', shaderPath);
-            await (platform as dynamic).setProperty('scale', 'ewa_lanczos');
-            await (platform as dynamic).setProperty('cscale', 'ewa_lanczos');
-          }
-        } else {
-          await (platform as dynamic).setProperty('glsl-shaders', '');
-        }
+        await (platform as dynamic).setProperty('glsl-shaders', '');
       }
-    } catch (e) {
-      debugPrint('Error applying FSR 2K in MediaKitAppPlayer: $e');
-    }
+    } catch (_) {}
   }
 
   @override
@@ -257,6 +246,10 @@ class MediaKitAppPlayer implements AppPlayer {
   Future<void> close() async {
     _isPlaying.value = false;
     _isLoading.value = false;
+    _positionMs.value = 0;
+    _durationMs.value = 0;
+    _finishedCount.value = 0;
+    _error.value = null;
     try {
       await _player.pause();
       await _player.stop();
@@ -270,6 +263,7 @@ class MediaKitAppPlayer implements AppPlayer {
     _isLoading.value = false;
     _positionMs.value = 0;
     _durationMs.value = 0;
+    _finishedCount.value = 0;
     _error.value = null;
     try {
       _player.pause();
