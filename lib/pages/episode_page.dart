@@ -452,12 +452,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _syncPipState(bool playing) {
+    if (!Platform.isAndroid) return;
     try {
       _pipChannel.invokeMethod('updatePipState', playing);
     } catch (_) {}
   }
 
   void _updateMediaSession(bool playing) {
+    if (!Platform.isAndroid) return;
     try {
       final duration = _player.durationMs.value;
       final position = _player.positionMs.value;
@@ -498,6 +500,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _dismissMediaNotification() {
+    if (!Platform.isAndroid) return;
     try {
       _mediaChannel.invokeMethod('dismissMediaNotification');
     } catch (_) {}

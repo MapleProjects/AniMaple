@@ -75,7 +75,8 @@ class MediaKitAppPlayer implements AppPlayer {
     _videoController = mkv.VideoController(
       _player,
       configuration: mkv.VideoControllerConfiguration(
-        enableHardwareAcceleration: !Platform.isLinux,
+        enableHardwareAcceleration: true,
+        hwdec: Platform.isLinux ? 'no' : 'auto',
       ),
     );
 
@@ -187,6 +188,9 @@ class MediaKitAppPlayer implements AppPlayer {
           await (platform as dynamic).setProperty('referrer', ref);
         }
         await (platform as dynamic).setProperty('force-seekable', 'yes');
+        if (Platform.isLinux) {
+          await (platform as dynamic).setProperty('hwdec', 'no');
+        }
         await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
         await (platform as dynamic).setProperty('keep-open', 'yes');
         await (platform as dynamic).setProperty('hr-seek', 'yes');
