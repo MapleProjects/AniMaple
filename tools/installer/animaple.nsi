@@ -64,7 +64,32 @@ Var isUpdate
 ;--------------------------------
 ; Functions
 
+Function CloseApp
+    DetailPrint "Cerrando AniMaple si esta en ejecucion..."
+    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
+    Sleep 500
+
+    IfFileExists "$INSTDIR\animaple.exe" 0 DoneCheck
+    StrCpy $R0 0
+CheckLoop:
+    ClearErrors
+    FileOpen $R1 "$INSTDIR\animaple.exe" "a"
+    IfErrors 0 FileUnlocked
+    ; Sigue bloqueado por el sistema operativo o proceso residual
+    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
+    Sleep 1000
+    IntOp $R0 $R0 + 1
+    ${If} $R0 < 10
+        Goto CheckLoop
+    ${EndIf}
+    Goto DoneCheck
+FileUnlocked:
+    FileClose $R1
+DoneCheck:
+FunctionEnd
+
 Function .onInit
+    Call CloseApp
     StrCpy $isUpdate "0"
     ReadRegStr $0 HKCU "Software\AniMaple" "InstallPath"
     ${If} $0 != ""
@@ -72,23 +97,14 @@ Function .onInit
     ${EndIf}
 FunctionEnd
 
-Function CloseApp
-    nsExec::ExecToStack 'taskkill /F /IM animaple.exe'
-    Pop $0
-    Pop $1
-    Sleep 1000
-FunctionEnd
-
 ;--------------------------------
 ; Main Section
 
 Section "AniMaple" SecMain
     
-    ; Close app if updating
-    ${If} $isUpdate == "1"
-        DetailPrint "Cerrando AniMaple para actualizar..."
-        Call CloseApp
-    ${EndIf}
+    ; Asegurar que la aplicacion este completamente cerrada y desbloqueada
+    DetailPrint "Asegurando que AniMaple este cerrado..."
+    Call CloseApp
     
     ; Install (overwrites files, keeps data)
     CreateDirectory "$INSTDIR"
@@ -128,15 +144,18 @@ Section "AniMaple" SecMain
     ExecWait 'ie4uinit.exe -ClearIconCache'
     ExecWait 'ie4uinit.exe -show'
     
+    ; En modo silencioso, ejecutar AniMaple automaticamente
+    IfSilent 0 NotSilent
+    Exec '"$INSTDIR\animaple.exe"'
+NotSilent:
+    
 SectionEnd
 
 ;--------------------------------
 ; Uninstall
 
 Section "Uninstall"
-    nsExec::ExecToStack 'taskkill /F /IM animaple.exe'
-    Pop $0
-    Pop $1
+    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
     Sleep 1000
     
     RMDir /r "$INSTDIR"
