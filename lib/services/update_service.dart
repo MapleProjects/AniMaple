@@ -48,7 +48,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '1.2.10';
+  static const String appVersion = '2.0.0';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -59,13 +59,13 @@ class UpdateService {
   static String? get latestVersion => _pending?.latestVersion;
   static bool get isUpdateAvailable => _pending != null;
 
-  /// Versión actual instalada (ej. "1.2.9").
+  /// Versión actual instalada (ej. "2.0.0").
   static String get currentVersion => _currentVersion ?? appVersion;
   static String? _currentVersion;
 
   static bool _checked = false;
 
-  /// Lee la versión instalada desde el canal nativo (PackageManager en Android) o fallback.
+  /// Lee la versión instalada desde el canal nativo (Android), registro (Windows) o fallback.
   static Future<String?> _loadCurrentVersion() async {
     if (Platform.isAndroid) {
       try {
@@ -73,6 +73,26 @@ class UpdateService {
         if (v != null && v.isNotEmpty) {
           _currentVersion = v;
           return v;
+        }
+      } catch (_) {}
+    } else if (Platform.isWindows) {
+      try {
+        final res = await Process.run('reg', [
+          'query',
+          r'HKCU\Software\AniMaple',
+          '/v',
+          'Version',
+        ]);
+        if (res.exitCode == 0) {
+          final out = res.stdout.toString();
+          final match = RegExp(r'Version\s+REG_SZ\s+([0-9\.]+)').firstMatch(out);
+          if (match != null) {
+            final v = match.group(1)?.trim();
+            if (v != null && v.isNotEmpty) {
+              _currentVersion = v;
+              return v;
+            }
+          }
         }
       } catch (_) {}
     }
@@ -276,11 +296,8 @@ class UpdateService {
         }
         debugPrint('Update: ejecutando instalador $filePath');
         await Process.start(filePath, [], mode: ProcessStartMode.detached);
-        // Cierra la app para permitir que el instalador sobrescriba los binarios
-        Future.delayed(const Duration(milliseconds: 300), () {
-          exit(0);
-        });
-        return true;
+        // Cierra la app inmediatamente para liberar el ejecutable y las librerías dinámicas
+        exit(0);
       } catch (e) {
         debugPrint('Update Windows install error: $e');
         return false;
