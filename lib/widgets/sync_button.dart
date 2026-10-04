@@ -75,7 +75,7 @@ class _SyncButtonState extends State<SyncButton> {
   Future<void> _handleTap() async {
     if (!_signedIn && !_remembered) {
       // Iniciar sesión y arrancar la sincronización automática.
-      final ok = await SyncService.signIn();
+      final ok = await SyncService.signIn(context: context);
       if (!mounted) return;
       if (ok) {
         // Sube el historial local existente y trae el remoto (una sola sync).

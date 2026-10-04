@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show BuildContext;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,7 @@ import '../models/anime.dart';
 import 'api_service.dart';
 import 'gdrive_config.dart';
 import 'desktop_google_auth.dart';
+import 'tv_service.dart';
 
 /// SyncService — sincroniza historial y favoritos contra el almacenamiento
 /// personal del usuario en Google Drive (appDataFolder).
@@ -175,8 +177,29 @@ class SyncService {
 
   /// Login interactivo con la cuenta Google del usuario.
   /// Devuelve true si quedó autenticado con token usable.
-  static Future<bool> signIn() async {
+  static Future<bool> signIn({BuildContext? context}) async {
     lastError = null;
+
+    // En televisores Android TV: NUNCA abrir navegadores externos mediante loopback
+    // porque el sistema operativo liquida la app por falta de RAM al pasar a segundo plano.
+    // Usamos el flujo nativo de TVs (Device Authorization Grant - RFC 8628).
+    if (TvService.isTvMode) {
+      final ok = await DesktopGoogleAuth.signInDeviceFlow(context: context);
+      if (ok) {
+        _lastRemoteVersion = null;
+        if (!await _cacheAuthHeaders(prompt: false)) {
+          lastError = 'No se pudo obtener el token de acceso de Google Drive.';
+          return false;
+        }
+        startAutoSync();
+        _notifySessionChanged();
+        debugPrint('Sync: signed in via TV Device Flow as $accountEmail');
+        return true;
+      }
+      lastError = 'No se completó la vinculación con Google.';
+      return false;
+    }
+
     if (!googleSignInSupported) {
       final ok = await DesktopGoogleAuth.signIn();
       if (ok) {
@@ -210,21 +233,22 @@ class SyncService {
       return true;
     } catch (e) {
       debugPrint('Sync native signIn error: $e');
-      // En dispositivos como Android TV con restricciones de Google Play Services:
-      // Si el login nativo falla, intentar fallback web (DesktopGoogleAuth)
+      // Si el login nativo falla (p.ej. error 12500 de Play Services),
+      // recurrir al Device Flow seguro sin cerrar la app
+      if (context != null && !context.mounted) return false;
       try {
-        final desktopOk = await DesktopGoogleAuth.signIn();
-        if (desktopOk) {
+        final deviceOk = await DesktopGoogleAuth.signInDeviceFlow(context: context);
+        if (deviceOk) {
           _lastRemoteVersion = null;
           if (await _cacheAuthHeaders(prompt: false)) {
             startAutoSync();
             _notifySessionChanged();
-            debugPrint('Sync: signed in via web fallback as $accountEmail');
+            debugPrint('Sync: signed in via Device Flow fallback as $accountEmail');
             return true;
           }
         }
       } catch (fallbackErr) {
-        debugPrint('Sync web fallback error: $fallbackErr');
+        debugPrint('Sync device fallback error: $fallbackErr');
       }
       lastError = 'Error al iniciar sesión con Google: $e';
       return false;
@@ -819,38 +843,84 @@ class SyncService {
     return at.isAfter(bt);
   }
 
-  /// Crea el archivo en appDataFolder si no existe. Devuelve su id.
+  /// Crea el archivo en appDataFolder (o en Drive si el scope es drive.file) si no existe. Devuelve su id.
   static Future<String?> _ensureFileId() async {
     if (_fileId != null) return _fileId;
     final existing = await _findFileId();
     if (existing != null) return existing;
-    final res = await _driveRequest(
-      'POST',
-      '/files',
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': _fileName,
-        'parents': ['appDataFolder'],
-      }),
-    );
-    final id = res?['id'] as String?;
-    if (id != null) _fileId = id;
-    return id;
+
+    // 1. Intentar crear en appDataFolder si el scope es drive.appdata
+    try {
+      final res = await _driveRequest(
+        'POST',
+        '/files',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': _fileName,
+          'parents': ['appDataFolder'],
+        }),
+      );
+      final id = res?['id'] as String?;
+      if (id != null) {
+        _fileId = id;
+        return id;
+      }
+    } catch (e) {
+      debugPrint('Sync: appDataFolder create skip (posible scope drive.file): $e');
+    }
+
+    // 2. Fallback: crear directamente en Drive del usuario (scope drive.file en Android TV)
+    try {
+      final res = await _driveRequest(
+        'POST',
+        '/files',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': _fileName,
+        }),
+      );
+      final id = res?['id'] as String?;
+      if (id != null) _fileId = id;
+      return id;
+    } catch (e) {
+      debugPrint('Sync: error al crear archivo en Drive: $e');
+      return null;
+    }
   }
 
-  /// Busca el archivo en el appDataFolder por nombre.
-  /// Si hay múltiples copias (dos dispositivos crearon a la vez), borra los
-  /// duplicados y se queda con la primera — evita split-brain de "dos
-  /// archivos distintos con el mismo nombre que nunca convergen".
+  /// Busca el archivo de sincronización.
+  /// Primero consulta appDataFolder; si no existe o el scope es drive.file,
+  /// consulta en el Drive del usuario. Elimina duplicados si los hubiere.
   static Future<String?> _findFileId() async {
     if (!isSignedIn || _authHeaders == null) return null;
     try {
-      final q = Uri.encodeComponent("name='$_fileName'");
-      final res = await _driveRequest(
-        'GET',
-        '/files?spaces=appDataFolder&q=$q&fields=files(id,name)',
-      );
-      final files = (res?['files'] as List? ?? []).cast<Map>().toList();
+      final q = Uri.encodeComponent("name='$_fileName' and trashed=false");
+      List<Map> files = [];
+
+      // 1. Buscar en appDataFolder (si el token tiene drive.appdata)
+      try {
+        final res = await _driveRequest(
+          'GET',
+          '/files?spaces=appDataFolder&q=$q&fields=files(id,name)',
+        );
+        files = (res?['files'] as List? ?? []).cast<Map>().toList();
+      } catch (e) {
+        debugPrint('Sync: appDataFolder search skip: $e');
+      }
+
+      // 2. Si no hay archivo en appDataFolder, buscar en Drive del usuario (drive.file)
+      if (files.isEmpty) {
+        try {
+          final res = await _driveRequest(
+            'GET',
+            '/files?q=$q&fields=files(id,name)',
+          );
+          files = (res?['files'] as List? ?? []).cast<Map>().toList();
+        } catch (e) {
+          debugPrint('Sync: Drive search skip: $e');
+        }
+      }
+
       if (files.isEmpty) return null;
 
       final first = files.first['id'] as String?;

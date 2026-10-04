@@ -4,40 +4,34 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../main.dart' show AniMapleApp;
 import 'gdrive_config.dart';
 
-/// Auth de escritorio para Google (Windows/Linux).
+/// Auth de escritorio y Android TV para Google.
 ///
-/// `google_sign_in` NO tiene implementación para Windows/Linux, así que en
-/// desktop usamos el flujo estándar de "Installed App":
-///   Authorization Code  +  PKCE  +  loopback redirect en 127.0.0.1
-///
-/// Flujo:
-/// 1. La app levanta un HttpServer en `127.0.0.1:<puerto aleatorio>`.
-/// 2. Abre el navegador a accounts.google.com con client_id, scope
-///    drive.appdata, code_challenge (PKCE) y access_type=offline.
-/// 3. Google redirige a `http://127.0.0.1:<puerto>/?code=...` → servidor local
-///    captura el authorization code y cierra.
-/// 4. La app canjea code → access_token + refresh_token (guardados en disco).
-/// 5. Con el access_token construye el header `Authorization: Bearer ...`.
-///
-/// El redirect a loopback 127.0.0.1 es aceptado por Google y NO requiere
-/// registrar cada puerto (basta con que el OAuth client permita "desktop" o
-/// tenga habilitado http://127.0.0.1 en "Authorized redirect URIs").
+/// Soporta dos flujos principales:
+/// 1. Flujo Loopback (Windows / Linux):
+///    Authorization Code + PKCE + loopback redirect en 127.0.0.1
+/// 2. Flujo Device Authorization Grant (Android TV / RFC 8628):
+///    Genera código corto (google.com/device) y realiza polling en segundo plano,
+///    sin abrir navegadores externos ni provocar que la app sea cerrada por el LMK.
 class DesktopGoogleAuth {
   DesktopGoogleAuth._();
 
   static const _authEndpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
   static const _tokenEndpoint = 'https://oauth2.googleapis.com/token';
+  static const _deviceEndpoint = 'https://oauth2.googleapis.com/device/code';
   static const _userInfoEndpoint =
       'https://www.googleapis.com/oauth2/v2/userinfo';
   static const _scope =
-      'openid email profile https://www.googleapis.com/auth/drive.appdata';
+      'openid email profile https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
+  static const _tvScope =
+      'openid email profile https://www.googleapis.com/auth/drive.file';
 
   // Claves de persistencia (SharedPreferences).
   static const _pkAccessToken = 'desktop_oauth_access_token';
@@ -46,6 +40,7 @@ class DesktopGoogleAuth {
   static const _pkEmail = 'desktop_oauth_email';
   static const _pkName = 'desktop_oauth_name';
   static const _pkPhoto = 'desktop_oauth_photo';
+  static const _pkIsTvClient = 'desktop_oauth_is_tv_client';
 
   static String? _accessToken;
   static String? _refreshToken;
@@ -53,6 +48,7 @@ class DesktopGoogleAuth {
   static String? _email;
   static String? _name;
   static String? _photoUrl;
+  static bool _isTvClient = false;
 
   // Getters para la UI (espejo de SyncService).
   static bool get isSignedIn => _accessToken != null;
@@ -60,16 +56,15 @@ class DesktopGoogleAuth {
   static String? get accountDisplayName => _name;
   static String? get accountPhotoUrl => _photoUrl;
 
-  /// Config del OAuth client para desktop.
-  /// Por defecto usa el Web Server Client ID y Secret de la app; se puede
-  /// sobreescribir con --dart-define=GOOGLE_DESKTOP_CLIENT_ID=...
-  /// y --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=...
+  /// Config del OAuth client para desktop o TV.
   static String get _clientId {
+    if (_isTvClient) return GDriveConfig.tvClientId;
     const envVal = String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_ID');
     return envVal.isNotEmpty ? envVal : GDriveConfig.webServerClientId;
   }
 
   static String get _clientSecret {
+    if (_isTvClient) return GDriveConfig.tvClientSecret;
     const envVal = String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_SECRET');
     return envVal.isNotEmpty ? envVal : GDriveConfig.clientSecret;
   }
@@ -83,6 +78,7 @@ class DesktopGoogleAuth {
     _email = p.getString(_pkEmail);
     _name = p.getString(_pkName);
     _photoUrl = p.getString(_pkPhoto);
+    _isTvClient = p.getBool(_pkIsTvClient) ?? false;
   }
 
   /// Restaura una sesión persistida. Devuelve true si hay token (o lo
@@ -157,7 +153,276 @@ class DesktopGoogleAuth {
     await p.setString(_pkEmail, _email ?? '');
     await p.setString(_pkName, _name ?? '');
     await p.setString(_pkPhoto, _photoUrl ?? '');
+    await p.setBool(_pkIsTvClient, false);
     return true;
+  }
+
+  /// Inicia el flujo de autenticación para TVs y dispositivos con memoria limitada
+  /// (Device Authorization Grant - RFC 8628).
+  ///
+  /// Muestra un diálogo en pantalla con la URL (google.com/device) y el código corto,
+  /// mientras realiza polling silencioso en segundo plano sin abrir navegadores externos.
+  static Future<bool> signInDeviceFlow({BuildContext? context}) async {
+    final ctx = context ?? AniMapleApp.navigatorKey.currentContext;
+    if (ctx == null) {
+      debugPrint('TvAuth: contexto no disponible para mostrar diálogo');
+      return false;
+    }
+
+    try {
+      // 1. Solicitar código de dispositivo a Google
+      final devResp = await http.post(
+        Uri.parse(_deviceEndpoint),
+        body: {
+          'client_id': GDriveConfig.tvClientId,
+          'scope': _tvScope,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (devResp.statusCode != 200) {
+        debugPrint('TvAuth device code error ${devResp.statusCode}: ${devResp.body}');
+        return false;
+      }
+
+      final devData = jsonDecode(devResp.body) as Map<String, dynamic>;
+      final deviceCode = devData['device_code'] as String?;
+      final userCode = devData['user_code'] as String?;
+      final verificationUrl =
+          (devData['verification_url'] as String? ?? 'https://www.google.com/device')
+              .replaceFirst('https://', '');
+      final interval = (devData['interval'] as int?) ?? 5;
+      final expiresIn = (devData['expires_in'] as int?) ?? 1800;
+
+      if (deviceCode == null || userCode == null) {
+        debugPrint('TvAuth: respuesta de Google sin códigos válidos');
+        return false;
+      }
+
+      bool userCancelled = false;
+      bool authSuccess = false;
+
+      // 2. Iniciar polling en segundo plano
+      final pollFuture = Future<bool>(() async {
+        final deadline = DateTime.now().add(Duration(seconds: expiresIn));
+        var currentInterval = interval;
+
+        while (!userCancelled && DateTime.now().isBefore(deadline)) {
+          await Future.delayed(Duration(seconds: currentInterval));
+          if (userCancelled) break;
+
+          try {
+            final pollResp = await http.post(
+              Uri.parse(_tokenEndpoint),
+              body: {
+                'client_id': GDriveConfig.tvClientId,
+                'client_secret': GDriveConfig.tvClientSecret,
+                'device_code': deviceCode,
+                'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+              },
+            ).timeout(const Duration(seconds: 15));
+
+            if (pollResp.statusCode == 200) {
+              final tokenData = jsonDecode(pollResp.body) as Map<String, dynamic>;
+              _isTvClient = true;
+              await _applyTokenResponse(tokenData);
+
+              // Obtener perfil si no vino en id_token
+              if (_email == null || _name == null) {
+                await _fetchProfile();
+              }
+
+              final p = await SharedPreferences.getInstance();
+              await p.setString(_pkAccessToken, _accessToken!);
+              await p.setString(_pkRefreshToken, _refreshToken ?? '');
+              await p.setInt(_pkExpires, _expiresAt ?? 0);
+              await p.setString(_pkEmail, _email ?? '');
+              await p.setString(_pkName, _name ?? '');
+              await p.setString(_pkPhoto, _photoUrl ?? '');
+              await p.setBool(_pkIsTvClient, true);
+
+              authSuccess = true;
+              break;
+            }
+
+            final pollErr = jsonDecode(pollResp.body) as Map<String, dynamic>;
+            final errType = pollErr['error'] as String? ?? '';
+
+            if (errType == 'authorization_pending') {
+              continue;
+            } else if (errType == 'slow_down') {
+              currentInterval += 5;
+              continue;
+            } else if (errType == 'access_denied' || errType == 'expired_token') {
+              debugPrint('TvAuth: autorización denegada o expirada ($errType)');
+              break;
+            } else {
+              debugPrint('TvAuth: error en polling: $pollErr');
+              break;
+            }
+          } catch (e) {
+            debugPrint('TvAuth polling cycle skip: $e');
+          }
+        }
+        return authSuccess;
+      });
+
+      // 3. Mostrar diálogo en pantalla adaptado para control remoto
+      if (!ctx.mounted) return false;
+      await showDialog<bool>(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (dialogCtx) {
+          pollFuture.then((success) {
+            if (success && dialogCtx.mounted) {
+              Navigator.of(dialogCtx).pop(true);
+            }
+          });
+
+          return PopScope(
+            canPop: true,
+            onPopInvokedWithResult: (didPop, _) {
+              userCancelled = true;
+            },
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF140f22),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF2d2244), width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              content: SizedBox(
+                width: 480,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 40),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Iniciar sesión con Google',
+                      style: TextStyle(
+                        color: Color(0xFFf3f0fa),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Para sincronizar tus favoritos e historial en tu TV sin navegador:',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Color(0xFFa29cb6), fontSize: 13, height: 1.4),
+                    ),
+                    const SizedBox(height: 20),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1c162e),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF382b54)),
+                      ),
+                      child: Column(
+                        children: [
+                          const Text(
+                            '1. En tu teléfono o PC entra a:',
+                            style: TextStyle(color: Color(0xFF8e86a4), fontSize: 13),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            verificationUrl,
+                            style: const TextStyle(
+                              color: Color(0xFFa78bfa),
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            '2. Escribe este código:',
+                            style: TextStyle(color: Color(0xFF8e86a4), fontSize: 13),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF281f3d),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFF8b5cf6).withValues(alpha: 0.6),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: SelectableText(
+                              userCode,
+                              style: const TextStyle(
+                                color: Color(0xFFffffff),
+                                fontSize: 28,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 4.0,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Color(0xFFa78bfa),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          'Esperando confirmación en tu teléfono…',
+                          style: TextStyle(color: Color(0xFFb8b2cb), fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    ElevatedButton(
+                      autofocus: true,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF251d38),
+                        foregroundColor: const Color(0xFFe2def0),
+                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: const BorderSide(color: Color(0xFF3d2f5a)),
+                        ),
+                      ),
+                      onPressed: () {
+                        userCancelled = true;
+                        Navigator.of(dialogCtx).pop(false);
+                      },
+                      child: const Text('Cancelar', style: TextStyle(fontSize: 14)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      userCancelled = true;
+      return authSuccess;
+    } catch (e) {
+      debugPrint('TvAuth signInDeviceFlow error: $e');
+      return false;
+    }
   }
 
   /// Página HTML que se muestra en el navegador tras el redirect, indicando
@@ -372,12 +637,14 @@ p{color:#6d6488;margin:0}
     await p.remove(_pkEmail);
     await p.remove(_pkName);
     await p.remove(_pkPhoto);
+    await p.remove(_pkIsTvClient);
     _accessToken = null;
     _refreshToken = null;
     _expiresAt = null;
     _email = null;
     _name = null;
     _photoUrl = null;
+    _isTvClient = false;
   }
 
   static String _base64UrlNoPad(List<int> bytes) =>
