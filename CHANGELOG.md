@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v2.0.4
+
+### Novedades y mejoras
+- Código QR interactivo en el inicio de sesión para Android TV: escanea con la cámara del celular para abrir directamente la confirmación de Google con el código ya insertado.
+- Corrección del estado de cuenta y avatar en Android TV tras completar la vinculación con Google Drive.
+- Cierre automático y reactivo del diálogo de vinculación una vez otorgada la autorización.
+- Persistencia de sesión y restauración inmediata en TV sin depender de Google Play Services.
+
 ## v2.0.3
 
 ### Novedades y mejoras
