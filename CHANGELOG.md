@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v2.0.3
+
+### Novedades y mejoras
+- Autenticación Google para Android TV mediante flujo de dispositivos (Google Device Authorization Grant RFC 8628). Vinculación con código en pantalla sin salir de la app ni requerir navegador web en el televisor.
+- Sincronización en la nube con Google Drive compatible con ámbitos restringidos y dispositivos de entrada limitada.
+- Optimización de retención de memoria y mitigación del cierre por Low Memory Killer en televisores con recursos reducidos.
+- Análisis de código estático y depuración de canales nativos para máxima estabilidad.
+
 ## v2.0.2
 
 ### Novedades y mejoras
