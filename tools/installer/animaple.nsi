@@ -66,6 +66,7 @@ Var isUpdate
 
 Function CloseApp
     DetailPrint "Cerrando AniMaple si esta en ejecucion..."
+    Sleep 500
     nsExec::Exec 'taskkill /F /T /IM animaple.exe'
     Sleep 500
 

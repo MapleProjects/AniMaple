@@ -11,7 +11,19 @@
 
 #pragma comment(lib, "shell32.lib")
 
+bool g_is_closing = false;
+
 static LONG WINAPI NativeCrashHandler(EXCEPTION_POINTERS* exceptionInfo) {
+  DWORD code = (exceptionInfo && exceptionInfo->ExceptionRecord) ? exceptionInfo->ExceptionRecord->ExceptionCode : 0;
+  void* addr = (exceptionInfo && exceptionInfo->ExceptionRecord) ? exceptionInfo->ExceptionRecord->ExceptionAddress : nullptr;
+
+  // Si la aplicación ya está cerrándose o actualizándose, terminar inmediatamente
+  // para evitar ventanas de error del sistema operativo (0xC0000005 por descarga de DLLs).
+  if (g_is_closing) {
+    TerminateProcess(GetCurrentProcess(), code ? code : 0);
+    return EXCEPTION_EXECUTE_HANDLER;
+  }
+
   wchar_t localAppData[MAX_PATH];
   std::wstring logPath = L"crash_native.log";
   if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData))) {
@@ -19,9 +31,6 @@ static LONG WINAPI NativeCrashHandler(EXCEPTION_POINTERS* exceptionInfo) {
     CreateDirectoryW(dir.c_str(), NULL);
     logPath = dir + L"\\crash_native.log";
   }
-
-  DWORD code = (exceptionInfo && exceptionInfo->ExceptionRecord) ? exceptionInfo->ExceptionRecord->ExceptionCode : 0;
-  void* addr = (exceptionInfo && exceptionInfo->ExceptionRecord) ? exceptionInfo->ExceptionRecord->ExceptionAddress : nullptr;
 
   std::wofstream log(logPath, std::ios::app);
   if (log.is_open()) {
@@ -38,7 +47,8 @@ static LONG WINAPI NativeCrashHandler(EXCEPTION_POINTERS* exceptionInfo) {
   swprintf_s(msg, 512, L"AniMaple experimento un fallo y se cerro.\nCodigo de excepcion: 0x%08X\n\nEl reporte de fallo se guardo en:\n%s", code, logPath.c_str());
   MessageBoxW(NULL, msg, L"AniMaple - Error inesperado", MB_OK | MB_ICONERROR);
 
-  return EXCEPTION_CONTINUE_SEARCH;
+  TerminateProcess(GetCurrentProcess(), code ? code : 1);
+  return EXCEPTION_EXECUTE_HANDLER;
 }
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,

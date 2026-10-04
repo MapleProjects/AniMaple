@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:window_manager/window_manager.dart';
+import 'app_player.dart';
 
 /// Información de una actualización disponible.
 class UpdateInfo {
@@ -48,7 +50,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.0';
+  static const String appVersion = '2.0.1';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -330,8 +332,31 @@ class UpdateService {
         }
         debugPrint('Update: ejecutando instalador $filePath');
         await Process.start(filePath, [], mode: ProcessStartMode.detached);
-        // Cierra la app inmediatamente para liberar el ejecutable y las librerías dinámicas
-        exit(0);
+
+        // Detener reproducción y liberar texturas nativas / libmpv antes de cerrar
+        try {
+          AppPlayer.disposeGlobal();
+        } catch (_) {}
+
+        // Cierre ordenado de la ventana para permitir que el motor de Flutter y plugins
+        // destruyan sus recursos de forma limpia sin generar excepciones de acceso a memoria (0xC0000005)
+        try {
+          await windowManager.destroy();
+        } catch (_) {
+          try {
+            await _channel.invokeMethod('closeApp');
+          } catch (_) {}
+        }
+
+        // Si la ventana no finalizó el proceso en 1.2s, terminar limpiamente sin CRT teardown
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          try {
+            Process.run('taskkill', ['/F', '/PID', '$pid']);
+          } catch (_) {
+            exit(0);
+          }
+        });
+        return true;
       } catch (e) {
         debugPrint('Update Windows install error: $e');
         return false;

@@ -43,6 +43,15 @@ abstract class AppPlayer {
     }
   }
 
+  /// Cierra de forma ordenada cualquier instancia de reproductor activa para liberar recursos.
+  static void disposeGlobal() {
+    if (isDesktopPlatform && MediaKitAppPlayer._instance != null) {
+      try {
+        MediaKitAppPlayer._instance!.dispose();
+      } catch (_) {}
+    }
+  }
+
   factory AppPlayer.create() {
     if (isDesktopPlatform) {
       final player = MediaKitAppPlayer.instance;
