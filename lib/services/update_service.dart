@@ -95,6 +95,21 @@ class UpdateService {
           }
         }
       } catch (_) {}
+    } else if (Platform.isLinux) {
+      try {
+        final res = await Process.run('pacman', ['-Q', 'animaple-bin']);
+        if (res.exitCode == 0) {
+          final out = res.stdout.toString();
+          final match = RegExp(r'animaple-bin\s+([0-9\.]+)').firstMatch(out);
+          if (match != null) {
+            final v = match.group(1)?.trim();
+            if (v != null && v.isNotEmpty) {
+              _currentVersion = v;
+              return v;
+            }
+          }
+        }
+      } catch (_) {}
     }
     _currentVersion = appVersion;
     return _currentVersion;
@@ -147,6 +162,25 @@ class UpdateService {
             downloadUrl = a['browser_download_url'] as String?;
             downloadFileName = name;
             if (name == 'app-release.apk') {
+              break;
+            }
+          }
+        }
+      } else if (Platform.isLinux) {
+        for (final a in assets) {
+          final name = (a as Map)['name'] as String? ?? '';
+          if (name.toLowerCase().endsWith('.pkg.tar.zst')) {
+            downloadUrl = a['browser_download_url'] as String?;
+            downloadFileName = name;
+            break;
+          }
+        }
+        if (downloadUrl == null) {
+          for (final a in assets) {
+            final name = (a as Map)['name'] as String? ?? '';
+            if (name.toLowerCase().endsWith('.tar.gz') && name.toLowerCase().contains('linux')) {
+              downloadUrl = a['browser_download_url'] as String?;
+              downloadFileName = name;
               break;
             }
           }
@@ -311,6 +345,31 @@ class UpdateService {
         debugPrint('Update install invoke error: $e');
         return false;
       }
+    } else if (Platform.isLinux) {
+      try {
+        final file = File(filePath);
+        if (!await file.exists()) {
+          debugPrint('Update Linux: archivo no encontrado en $filePath');
+          return false;
+        }
+        if (filePath.endsWith('.pkg.tar.zst')) {
+          final whichPkexec = await Process.run('which', ['pkexec']);
+          final whichPacman = await Process.run('which', ['pacman']);
+          if (whichPkexec.exitCode == 0 && whichPacman.exitCode == 0) {
+            debugPrint('Update Linux: ejecutando pkexec pacman -U $filePath');
+            final res = await Process.run('pkexec', ['pacman', '-U', '--noconfirm', filePath]);
+            if (res.exitCode == 0) {
+              exit(0);
+            } else {
+              debugPrint('Update Linux pkexec code ${res.exitCode}: ${res.stderr}');
+              return false;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Update Linux error: $e');
+        return false;
+      }
     }
     return false;
   }
@@ -408,6 +467,7 @@ class UpdateService {
   /// ANTES de descargar, para que no haya que volver a bajar el APK si era la
   /// primera vez. Devuelve true si se puede proceder a descargar.
   static Future<bool> ensureInstallPermission(BuildContext context) async {
+    if (!Platform.isAndroid) return true;
     bool canInstall;
     try {
       canInstall = await _channel
@@ -563,9 +623,13 @@ class UpdateService {
         await Future<void>.delayed(const Duration(milliseconds: 500));
       } else {
         // El instalador no se pudo lanzar (permiso/rechazo): notificar.
-        errorMsg.value = Platform.isWindows
-            ? 'No se pudo iniciar el instalador de actualización.'
-            : 'No se pudo iniciar la instalación. Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
+        if (Platform.isWindows) {
+          errorMsg.value = 'No se pudo iniciar el instalador de actualización.';
+        } else if (Platform.isLinux) {
+          errorMsg.value = 'No se pudo completar la instalación del paquete. Puedes actualizar con:\nparu -Syu animaple-bin';
+        } else {
+          errorMsg.value = 'No se pudo iniciar la instalación. Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
+        }
         await cleanupDownloaded();
       }
     } catch (e) {

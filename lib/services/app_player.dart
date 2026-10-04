@@ -104,7 +104,7 @@ class MediaKitAppPlayer implements AppPlayer {
     );
 
     _subscriptions.add(_player.stream.log.listen((event) {
-      if (event.level == mk.MPVLogLevel.warn || event.level == mk.MPVLogLevel.error) {
+      if (event.level == 'warn' || event.level == 'error') {
         _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
       }
     }));
@@ -245,6 +245,10 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('cache', 'yes');
         await (platform as dynamic).setProperty('cache-on-disk', 'yes');
         await (platform as dynamic).setProperty('cache-dir', cachePath);
+        await (platform as dynamic).setProperty('cache-pause', 'yes');
+        await (platform as dynamic).setProperty('cache-pause-initial', 'yes');
+        await (platform as dynamic).setProperty('cache-pause-wait', '5');
+        await (platform as dynamic).setProperty('cache-secs', '300');
         await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
         await (platform as dynamic).setProperty('keep-open', 'yes');
         await (platform as dynamic).setProperty('hr-seek', 'yes');
@@ -252,7 +256,7 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('demuxer-readahead-secs', '300');
         await (platform as dynamic).setProperty('demuxer-max-bytes', '536870912'); // 512 MB en disco
         await (platform as dynamic).setProperty('demuxer-max-back-bytes', '134217728'); // 128 MB en disco
-        await (platform as dynamic).setProperty('network-timeout', '35');
+        await (platform as dynamic).setProperty('network-timeout', '40');
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');

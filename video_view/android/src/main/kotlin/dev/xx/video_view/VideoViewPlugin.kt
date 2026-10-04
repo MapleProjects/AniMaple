@@ -68,14 +68,14 @@ class VideoController(
 		val loadControl = DefaultLoadControl.Builder()
 			.setAllocator(allocator)
 			.setBufferDurationsMs(
-				if (isLowRam) 15_000 else 25_000,
-				if (isLowRam) 30_000 else 60_000,
-				1_500,
-				if (isLowRam) 2_500 else 3_000
+				if (isLowRam) 25_000 else 40_000,
+				if (isLowRam) 50_000 else 90_000,
+				4_500,
+				if (isLowRam) 6_000 else 8_000
 			)
-			.setBackBuffer(if (isLowRam) 5_000 else 15_000, true)
+			.setBackBuffer(if (isLowRam) 10_000 else 20_000, true)
 			.setPrioritizeTimeOverSizeThresholds(true)
-			.setTargetBufferBytes(if (isLowRam) 24 * 1024 * 1024 else 48 * 1024 * 1024)
+			.setTargetBufferBytes(if (isLowRam) 32 * 1024 * 1024 else 64 * 1024 * 1024)
 			.build()
 
 		val trackSelector = DefaultTrackSelector(context).apply {

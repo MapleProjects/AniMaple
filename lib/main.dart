@@ -286,7 +286,7 @@ class _MainShellState extends State<MainShell> {
       valueListenable: TvService.isTv,
       builder: (context, isTv, _) {
         final screenWidth = MediaQuery.of(context).size.width;
-        final isWideLayout = isTv || screenWidth > 900;
+        final isWideLayout = isTv || Platform.isLinux || Platform.isWindows || screenWidth > 800;
 
         if (isWideLayout) {
           return Scaffold(

@@ -12,6 +12,7 @@ import '../services/hls_proxy.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/webview_player.dart';
+import '../widgets/tv_focusable.dart';
 import '../services/tv_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
@@ -63,13 +64,16 @@ class _ServerQualityCandidate {
 
 enum _PlayerTvFocus {
   none,
+  backButton,
   seekBar,
   playPause,
   fullscreen,
+  pageContent,
 }
 
 class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
   _PlayerTvFocus _tvFocus = _PlayerTvFocus.none;
+  final FocusNode _pageContentFocusNode = FocusNode();
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
@@ -99,12 +103,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   double? _seekDelta;
   bool _seekAnimating = false;
 
-  // Double-tap seek accumulation
+  // Double-tap seek accumulation and continuous remote seek
   int _seekAccumulatorMs = 0;
   DateTime? _lastSeekTapTime;
   int _seekBasePosition = 0;
   static const Duration _seekAccumulationWindow = Duration(milliseconds: 1500);
   Timer? _seekResetTimer;
+  Timer? _seekDebounceTimer;
+  int? _targetSeekPositionMs;
 
   // PiP
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
@@ -256,8 +262,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   // ── Controles de teclado y control remoto D-Pad / TV ──
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final isDown = event is KeyDownEvent;
+    final isRepeat = event is KeyRepeatEvent;
+    if (!isDown && !isRepeat) return KeyEventResult.ignored;
     final key = event.logicalKey;
+
+    final isSeekKey = key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.mediaRewind ||
+        key == LogicalKeyboardKey.mediaFastForward;
+
+    // Solo permitir repetición continua en las teclas de adelantar y retroceder
+    if (isRepeat && !isSeekKey) {
+      return KeyEventResult.ignored;
+    }
 
     if (TvService.isTvMode) {
       if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.backspace) {
@@ -269,11 +287,42 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           });
           _controlsAnim?.reverse();
           return KeyEventResult.handled;
+        } else if (_isFullscreen) {
+          _toggleFullscreen();
+          return KeyEventResult.handled;
+        } else {
+          _closePlayback();
+          return KeyEventResult.handled;
         }
       }
 
+      if (_tvFocus == _PlayerTvFocus.pageContent) {
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _showControlsTemporarily();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.playPause;
+          });
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      }
+
       if (!_controlsVisible) {
-        if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.arrowUp) {
+        if (key == LogicalKeyboardKey.arrowDown) {
+          if (!_isFullscreen) {
+            setState(() {
+              _tvFocus = _PlayerTvFocus.pageContent;
+            });
+            _pageContentFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          _showControlsTemporarily();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
           _showControlsTemporarily();
           setState(() {
             _tvFocus = _PlayerTvFocus.seekBar;
@@ -309,7 +358,24 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
 
       // ── Controles visibles en TV ──
-      if (_tvFocus == _PlayerTvFocus.seekBar) {
+      if (_tvFocus == _PlayerTvFocus.backButton) {
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA) {
+          _closePlayback();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.handled;
+      } else if (_tvFocus == _PlayerTvFocus.seekBar) {
         if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
           _seekRelative(-9900);
           _startHideTimer();
@@ -328,6 +394,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowUp) {
+          if (!_isFullscreen) {
+            _startHideTimer();
+            setState(() {
+              _tvFocus = _PlayerTvFocus.backButton;
+            });
+            return KeyEventResult.handled;
+          }
           _hideTimer?.cancel();
           setState(() {
             _controlsVisible = false;
@@ -366,6 +439,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
+          if (!_isFullscreen) {
+            _hideTimer?.cancel();
+            setState(() {
+              _controlsVisible = false;
+              _tvFocus = _PlayerTvFocus.pageContent;
+            });
+            _controlsAnim?.reverse();
+            _pageContentFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
           _startHideTimer();
           return KeyEventResult.handled;
         }
@@ -399,6 +482,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
+          if (!_isFullscreen) {
+            _hideTimer?.cancel();
+            setState(() {
+              _controlsVisible = false;
+              _tvFocus = _PlayerTvFocus.pageContent;
+            });
+            _controlsAnim?.reverse();
+            _pageContentFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
           _startHideTimer();
           return KeyEventResult.handled;
         }
@@ -1037,7 +1130,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _countdownTimer?.cancel();
     _positionTimer?.cancel();
     _seekResetTimer?.cancel();
+    _seekDebounceTimer?.cancel();
     _reconnectTimer?.cancel();
+    _pageContentFocusNode.dispose();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
@@ -1519,9 +1614,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       backgroundColor: const Color(0xFF0a0812),
       appBar: (_isFullscreen || _isPipMode) ? null : AppBar(
         backgroundColor: const Color(0xFF0a0812),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: _closePlayback,
+        leading: Container(
+          margin: const EdgeInsets.all(6),
+          decoration: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.backButton)
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFa78bfa), width: 2.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF8b5cf6).withValues(alpha: 0.55),
+                      blurRadius: 14,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                )
+              : null,
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: _closePlayback,
+          ),
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1681,7 +1792,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _seekRelative(int deltaMs) {
     final now = DateTime.now();
-    final pos = _player.positionMs.value;
     final dur = _player.durationMs.value;
 
     // Accumulate seeks within the time window
@@ -1689,13 +1799,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _seekAccumulatorMs += deltaMs;
     } else {
       // New sequence — reset accumulator
-      _seekBasePosition = pos;
+      _seekBasePosition = _player.positionMs.value;
       _seekAccumulatorMs = deltaMs;
     }
     _lastSeekTapTime = now;
 
     final target = (_seekBasePosition + _seekAccumulatorMs).clamp(0, dur);
-    _player.seekTo(target);
+    _targetSeekPositionMs = target;
+    _dragValue = target.toDouble();
 
     _seekDelta = _seekAccumulatorMs.toDouble();
     _seekAnimating = true;
@@ -1704,15 +1815,27 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     // Restart fade animation on each tap
     _seekFadeAnim!.forward(from: 0);
 
+    // Debounce del seek real en el reproductor para no saturar la red al mantener presionado
+    _seekDebounceTimer?.cancel();
+    _seekDebounceTimer = Timer(const Duration(milliseconds: 320), () {
+      if (!mounted) return;
+      final finalTarget = _targetSeekPositionMs;
+      _targetSeekPositionMs = null;
+      if (finalTarget != null) {
+        _player.seekTo(finalTarget);
+      }
+    });
+
     // Cancel previous reset timer, start new one
     _seekResetTimer?.cancel();
-    _seekResetTimer = Timer(const Duration(milliseconds: 800), () {
+    _seekResetTimer = Timer(const Duration(milliseconds: 900), () {
       if (!mounted) return;
       _seekFadeAnim!.reverse().then((_) {
         if (mounted) {
           setState(() {
             _seekAnimating = false;
             _seekDelta = null;
+            _dragValue = null;
           });
         }
       });
@@ -2383,36 +2506,48 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       child: Row(
         children: [
           Expanded(
-            child: SizedBox(
-              height: 44,
-              child: ElevatedButton.icon(
-                onPressed: hasPrev ? _goPrev : null,
-                icon: const Icon(Icons.skip_previous_rounded, size: 20),
-                label: const Text('Anterior', style: TextStyle(fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: hasPrev ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
-                  foregroundColor: hasPrev ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  side: BorderSide(color: hasPrev ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
-                  elevation: 0,
+            child: TvFocusable(
+              focusNode: hasPrev ? _pageContentFocusNode : null,
+              onTap: hasPrev ? _goPrev : null,
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 44,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: hasPrev ? _goPrev : null,
+                  icon: const Icon(Icons.skip_previous_rounded, size: 20),
+                  label: const Text('Anterior', style: TextStyle(fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: hasPrev ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
+                    foregroundColor: hasPrev ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    side: BorderSide(color: hasPrev ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                    elevation: 0,
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: SizedBox(
-              height: 44,
-              child: ElevatedButton.icon(
-                onPressed: hasNext ? _goNext : null,
-                icon: const Icon(Icons.skip_next_rounded, size: 20),
-                label: const Text('Siguiente', style: TextStyle(fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: hasNext ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
-                  foregroundColor: hasNext ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  side: BorderSide(color: hasNext ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
-                  elevation: 0,
+            child: TvFocusable(
+              focusNode: !hasPrev ? _pageContentFocusNode : null,
+              onTap: hasNext ? _goNext : null,
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 44,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: hasNext ? _goNext : null,
+                  icon: const Icon(Icons.skip_next_rounded, size: 20),
+                  label: const Text('Siguiente', style: TextStyle(fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: hasNext ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
+                    foregroundColor: hasNext ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    side: BorderSide(color: hasNext ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                    elevation: 0,
+                  ),
                 ),
               ),
             ),
@@ -2518,20 +2653,28 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                     );
                   }
 
-                  return OutlinedButton.icon(
-                    onPressed: () => DownloadSheet.show(
+                  return TvFocusable(
+                    onTap: () => DownloadSheet.show(
                       context,
                       _animeDetail!,
                       preselected: {n},
                     ),
-                    icon: const Icon(Icons.download_rounded, size: 17),
-                    label: const Text('Descargar'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFa78bfa),
-                      side: const BorderSide(color: Color(0xFF3b2f5c)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      minimumSize: const Size(0, 34),
+                    borderRadius: BorderRadius.circular(8),
+                    child: OutlinedButton.icon(
+                      onPressed: () => DownloadSheet.show(
+                        context,
+                        _animeDetail!,
+                        preselected: {n},
+                      ),
+                      icon: const Icon(Icons.download_rounded, size: 17),
+                      label: const Text('Descargar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFa78bfa),
+                        side: const BorderSide(color: Color(0xFF3b2f5c)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        minimumSize: const Size(0, 34),
+                      ),
                     ),
                   );
                 },
@@ -2549,10 +2692,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             final isWatched = _watchedEpisodes.contains(e.number) && !isCurrent;
             final isDownloaded =
                 DownloadService.instance.isDownloaded(widget.animeSlug, e.number);
-            return GestureDetector(
+            return TvFocusable(
               onTap: () {
                 if (!isCurrent) _switchEpisode(e.number);
               },
+              borderRadius: BorderRadius.circular(8),
               child: Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(

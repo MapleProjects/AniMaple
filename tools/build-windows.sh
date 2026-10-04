@@ -10,10 +10,10 @@ echo "=== AniMaple Windows Native Build ==="
 echo "Directorio del proyecto: $REPO_DIR"
 
 # 1. Verificar estado de la máquina virtual
-VM_STATE=$(sudo virsh domstate "$VM_NAME" 2>/dev/null || echo "shut off")
+VM_STATE=$(virsh -c qemu:///system domstate "$VM_NAME" 2>/dev/null || echo "shut off")
 if [ "$VM_STATE" != "ejecutando" ] && [ "$VM_STATE" != "running" ]; then
     echo "Iniciando máquina virtual $VM_NAME..."
-    sudo virsh start "$VM_NAME"
+    virsh -c qemu:///system start "$VM_NAME"
     echo "Esperando que Windows y SSH inicien..."
     until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 "$VM_USER@$VM_IP" "hostname" >/dev/null 2>&1; do
         sleep 2
@@ -69,6 +69,8 @@ mkdir -p "$DIST_DIR"
 echo "Copiando binarios finales a $DIST_DIR..."
 scp -o StrictHostKeyChecking=no "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-setup.exe" "$DIST_DIR/"
 scp -o StrictHostKeyChecking=no "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-windows.zip" "$DIST_DIR/"
+cp -f "$DIST_DIR/animaple-v$VERSION-setup.exe" /home/maple/Escritorio/
 
 echo "=== Compilación completada con éxito ==="
 ls -lh "$DIST_DIR"
+ls -lh "/home/maple/Escritorio/animaple-v$VERSION-setup.exe"

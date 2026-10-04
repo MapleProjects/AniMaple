@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
@@ -78,7 +79,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final hideTitle = TvService.isTvMode || MediaQuery.of(context).size.width > 900;
+    final hideTitle = TvService.isTvMode || Platform.isLinux || Platform.isWindows || MediaQuery.of(context).size.width > 800;
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
