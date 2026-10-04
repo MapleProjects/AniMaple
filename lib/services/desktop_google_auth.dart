@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -190,6 +191,8 @@ class DesktopGoogleAuth {
       final verificationUrl =
           (devData['verification_url'] as String? ?? 'https://www.google.com/device')
               .replaceFirst('https://', '');
+      final qrUrl = (devData['verification_url_complete'] as String?) ??
+          'https://www.google.com/device?user_code=$userCode';
       final interval = (devData['interval'] as int?) ?? 5;
       final expiresIn = (devData['expires_in'] as int?) ?? 1800;
 
@@ -273,8 +276,8 @@ class DesktopGoogleAuth {
         barrierDismissible: false,
         builder: (dialogCtx) {
           pollFuture.then((success) {
-            if (success && dialogCtx.mounted) {
-              Navigator.of(dialogCtx).pop(true);
+            if (dialogCtx.mounted) {
+              Navigator.of(dialogCtx).pop(success);
             }
           });
 
@@ -291,113 +294,179 @@ class DesktopGoogleAuth {
               ),
               contentPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
               content: SizedBox(
-                width: 480,
+                width: 620,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 40),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Iniciar sesión con Google',
-                      style: TextStyle(
-                        color: Color(0xFFf3f0fa),
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 28),
+                        ),
+                        const SizedBox(width: 14),
+                        const Text(
+                          'Vincular con tu Cuenta de Google',
+                          style: TextStyle(
+                            color: Color(0xFFf3f0fa),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Para sincronizar tus favoritos e historial en tu TV sin navegador:',
+                      'Escanea el código QR con la cámara de tu celular o ingresa el código manualmente.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFFa29cb6), fontSize: 13, height: 1.4),
+                      style: TextStyle(color: Color(0xFFa29cb6), fontSize: 13),
                     ),
                     const SizedBox(height: 20),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1c162e),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF382b54)),
-                      ),
-                      child: Column(
+                    IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Text(
-                            '1. En tu teléfono o PC entra a:',
-                            style: TextStyle(color: Color(0xFF8e86a4), fontSize: 13),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            verificationUrl,
-                            style: const TextStyle(
-                              color: Color(0xFFa78bfa),
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            '2. Escribe este código:',
-                            style: TextStyle(color: Color(0xFF8e86a4), fontSize: 13),
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF281f3d),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: const Color(0xFF8b5cf6).withValues(alpha: 0.6),
-                                width: 1.5,
+                          // 1. Código QR con user_code ya incluido
+                          Expanded(
+                            flex: 5,
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1c162e),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFF382b54)),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: QrImageView(
+                                      data: qrUrl,
+                                      version: QrVersions.auto,
+                                      size: 135.0,
+                                      backgroundColor: Colors.white,
+                                      padding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  const Text(
+                                    'Escanear con celular',
+                                    style: TextStyle(
+                                      color: Color(0xFFa78bfa),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    'Código listo para confirmar',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: SelectableText(
-                              userCode,
-                              style: const TextStyle(
-                                color: Color(0xFFffffff),
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 4.0,
+                          ),
+                          const SizedBox(width: 14),
+                          // 2. Método Manual (código en pantalla)
+                          Expanded(
+                            flex: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1c162e),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFF382b54)),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    'O entra desde tu navegador a:',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    verificationUrl,
+                                    style: const TextStyle(
+                                      color: Color(0xFFa78bfa),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  const Text(
+                                    'Escribe este código:',
+                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF281f3d),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.6),
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: SelectableText(
+                                      userCode,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Color(0xFFffffff),
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 2.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: const [
                         SizedBox(
-                          width: 18,
-                          height: 18,
+                          width: 16,
+                          height: 16,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2.2,
+                            strokeWidth: 2,
                             color: Color(0xFFa78bfa),
                           ),
                         ),
-                        SizedBox(width: 12),
+                        SizedBox(width: 10),
                         Text(
                           'Esperando confirmación en tu teléfono…',
                           style: TextStyle(color: Color(0xFFb8b2cb), fontSize: 13),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
                     ElevatedButton(
                       autofocus: true,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF251d38),
                         foregroundColor: const Color(0xFFe2def0),
-                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                           side: const BorderSide(color: Color(0xFF3d2f5a)),

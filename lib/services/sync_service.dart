@@ -68,13 +68,11 @@ class SyncService {
   static final ValueNotifier<int> stateVersion = ValueNotifier<int>(0);
 
   /// Profile info (photo, nombre) para el avatar del AppBar.
-  /// En desktop se resuelve desde DesktopGoogleAuth (google_sign_in no existe).
-  static String? get accountDisplayName => googleSignInSupported
-      ? _account?.displayName
-      : DesktopGoogleAuth.accountDisplayName;
-  static String? get accountPhotoUrl => googleSignInSupported
-      ? _account?.photoUrl
-      : DesktopGoogleAuth.accountPhotoUrl;
+  /// Se resuelve desde _account o DesktopGoogleAuth (TV / Windows / Linux).
+  static String? get accountDisplayName =>
+      _account?.displayName ?? DesktopGoogleAuth.accountDisplayName;
+  static String? get accountPhotoUrl =>
+      _account?.photoUrl ?? DesktopGoogleAuth.accountPhotoUrl;
 
   /// Último error visible para la UI (patrón de la app: errores siempre visibles).
   static String? lastError;
@@ -82,9 +80,9 @@ class SyncService {
 
   static GoogleSignInAccount? get account => _account;
   static bool get isSignedIn =>
-      googleSignInSupported ? _account != null : DesktopGoogleAuth.isSignedIn;
+      _account != null || DesktopGoogleAuth.isSignedIn;
   static String? get accountEmail =>
-      googleSignInSupported ? _account?.email : DesktopGoogleAuth.accountEmail;
+      _account?.email ?? DesktopGoogleAuth.accountEmail;
 
   /// ¿Google Sign-In usa el SDK nativo (google_sign_in)? Solo lo hay en
   /// Android/iOS/macOS/web. En Windows (y Linux) usamos DesktopGoogleAuth.
@@ -126,6 +124,17 @@ class SyncService {
   /// En 6.x: signInSilently() consulta a Google Play Services en segundo plano
   /// SIN mostrar ningún diálogo emergente ni ventana del sistema.
   static Future<bool> tryRestoreSession() async {
+    // En modo TV o en plataformas sin SDK nativo, priorizar DesktopGoogleAuth.
+    if (TvService.isTvMode || !googleSignInSupported) {
+      final desktopOk = await DesktopGoogleAuth.tryRestore();
+      if (desktopOk) {
+        _lastRemoteVersion = null;
+        await _cacheAuthHeaders(prompt: false);
+        _notifySessionChanged();
+        return true;
+      }
+      if (TvService.isTvMode) return false;
+    }
     if (DesktopGoogleAuth.isSignedIn) {
       final desktopOk = await DesktopGoogleAuth.tryRestore();
       if (desktopOk) {
@@ -191,6 +200,11 @@ class SyncService {
           lastError = 'No se pudo obtener el token de acceso de Google Drive.';
           return false;
         }
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(
+              _rememberedAccountKey, accountEmail ?? 'signed-in');
+        } catch (_) {}
         startAutoSync();
         _notifySessionChanged();
         debugPrint('Sync: signed in via TV Device Flow as $accountEmail');
