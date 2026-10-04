@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v2.0.2
+
+### Novedades y mejoras
+- Optimización y estabilidad en la sincronización de cuenta y copia de seguridad en la nube para televisores y dispositivos Android TV.
+- Mejoras en la barra de reproducción y navegación fluida con control remoto.
+- Cierre optimizado y seguro en Windows durante el proceso de actualización automática.
+- Actualización del canal de releases y verificador automático para todas las plataformas.
+
 ## v2.0.1
 
 ### Novedades y mejoras
