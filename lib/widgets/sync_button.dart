@@ -130,7 +130,7 @@ class _SyncButtonState extends State<SyncButton> {
     if (err == null || !mounted) return;
     String displayMsg = err;
     if (err.contains('12500')) {
-      displayMsg = 'Error 12500: Verifica que tu TV tenga Google Play Services y una cuenta activa.';
+      displayMsg = 'Error 12500 al autenticar con Google. Revisa tu cuenta en la TV o autoriza el acceso a Drive.';
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

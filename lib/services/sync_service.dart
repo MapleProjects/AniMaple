@@ -97,13 +97,13 @@ class SyncService {
   static GoogleSignIn _getGoogleSignIn() {
     return _googleSignIn ??= GoogleSignIn(
       scopes: const [_scopeDriveAppdata],
-      // En Android, Google Play Services autentica mediante el package name y la firma SHA-1.
-      // Pasar clientId o serverClientId (Web) fuerza requestIdToken y requestServerAuthCode,
-      // lo que dispara PlatformException / ApiException 12500 en Android TV y dispositivos sin backend.
-      clientId: defaultTargetPlatform == TargetPlatform.android
+      // En Android, clientId no está soportado y si se pasa sobreescribe serverClientId.
+      // serverClientId DEBE ser el Web Application Client ID para que Google Play Services
+      // pueda emitir tokens de Google Drive API.
+      clientId: null,
+      serverClientId: GDriveConfig.webServerClientId.isEmpty
           ? null
-          : (GDriveConfig.androidClientId.isEmpty ? null : GDriveConfig.androidClientId),
-      serverClientId: null,
+          : GDriveConfig.webServerClientId,
     );
   }
 
@@ -114,33 +114,50 @@ class SyncService {
   /// Inicializa el singleton de Google Sign-In (o carga la sesión desktop).
   /// Debe llamarse una sola vez, antes de cualquier otro método.
   static Future<void> initialize() async {
-    if (!googleSignInSupported) {
-      await DesktopGoogleAuth.load();
-      return;
+    await DesktopGoogleAuth.load();
+    if (googleSignInSupported) {
+      _getGoogleSignIn();
     }
-    _getGoogleSignIn();
   }
 
   /// Restaura una sesión previa (silencioso, sin UI emergente).
   /// En 6.x: signInSilently() consulta a Google Play Services en segundo plano
   /// SIN mostrar ningún diálogo emergente ni ventana del sistema.
   static Future<bool> tryRestoreSession() async {
-    if (!googleSignInSupported) {
-      return DesktopGoogleAuth.tryRestore();
+    if (DesktopGoogleAuth.isSignedIn) {
+      final desktopOk = await DesktopGoogleAuth.tryRestore();
+      if (desktopOk) {
+        _lastRemoteVersion = null;
+        await _cacheAuthHeaders(prompt: false);
+        _notifySessionChanged();
+        return true;
+      }
     }
-    try {
-      final restored = await _getGoogleSignIn().signInSilently(reAuthenticate: false);
-      if (restored == null) return false;
-      _account = restored;
-      _lastRemoteVersion = null;
-      await _cacheAuthHeaders(prompt: false);
-      _notifySessionChanged();
-      return true;
-    } catch (e) {
-      // Sin red o sin sesión aún — no es un error fatal.
-      debugPrint('Sync: restore session skipped: $e');
-      return false;
+    if (googleSignInSupported) {
+      try {
+        final restored = await _getGoogleSignIn().signInSilently(reAuthenticate: false);
+        if (restored != null) {
+          _account = restored;
+          _lastRemoteVersion = null;
+          await _cacheAuthHeaders(prompt: false);
+          _notifySessionChanged();
+          return true;
+        }
+      } catch (e) {
+        // Sin red o sin sesión aún — no es un error fatal.
+        debugPrint('Sync: restore session skipped: $e');
+      }
     }
+    if (!DesktopGoogleAuth.isSignedIn) {
+      final desktopOk = await DesktopGoogleAuth.tryRestore();
+      if (desktopOk) {
+        _lastRemoteVersion = null;
+        await _cacheAuthHeaders(prompt: false);
+        _notifySessionChanged();
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Fuerza recalcular auth headers si la sesión existe pero no hay token.
@@ -192,8 +209,24 @@ class SyncService {
       debugPrint('Sync: signed in as ${account.email}');
       return true;
     } catch (e) {
+      debugPrint('Sync native signIn error: $e');
+      // En dispositivos como Android TV con restricciones de Google Play Services:
+      // Si el login nativo falla, intentar fallback web (DesktopGoogleAuth)
+      try {
+        final desktopOk = await DesktopGoogleAuth.signIn();
+        if (desktopOk) {
+          _lastRemoteVersion = null;
+          if (await _cacheAuthHeaders(prompt: false)) {
+            startAutoSync();
+            _notifySessionChanged();
+            debugPrint('Sync: signed in via web fallback as $accountEmail');
+            return true;
+          }
+        }
+      } catch (fallbackErr) {
+        debugPrint('Sync web fallback error: $fallbackErr');
+      }
       lastError = 'Error al iniciar sesión con Google: $e';
-      debugPrint('Sync signIn error: $e');
       return false;
     }
   }
@@ -201,10 +234,11 @@ class SyncService {
   static Future<void> signOut() async {
     stopAutoSync();
     if (googleSignInSupported) {
-      await _getGoogleSignIn().signOut();
-    } else {
-      await DesktopGoogleAuth.signOut();
+      try {
+        await _getGoogleSignIn().signOut();
+      } catch (_) {}
     }
+    await DesktopGoogleAuth.signOut();
     _account = null;
     _authHeaders = null;
     _fileId = null;
@@ -221,23 +255,32 @@ class SyncService {
   /// Obtiene (o refresca) los headers de autorización para drive.appdata.
   /// Con [prompt]=true permite mostrar UI de consentimiento si hace falta.
   static Future<bool> _cacheAuthHeaders({required bool prompt}) async {
-    if (!googleSignInSupported) {
+    if (_account == null && DesktopGoogleAuth.isSignedIn) {
       final headers = await DesktopGoogleAuth.authorizationHeaders();
       if (headers == null) return false;
       _authHeaders = headers;
       return true;
     }
     final account = _account;
-    if (account == null) return false;
-    try {
-      final headers = await account.authHeaders;
-      if (headers.isEmpty) return false;
-      _authHeaders = headers;
-      return true;
-    } catch (e) {
-      debugPrint('Sync auth headers error: $e');
-      return false;
+    if (account != null) {
+      try {
+        final headers = await account.authHeaders;
+        if (headers.isNotEmpty) {
+          _authHeaders = headers;
+          return true;
+        }
+      } catch (e) {
+        debugPrint('Sync auth headers error: $e');
+      }
     }
+    if (DesktopGoogleAuth.isSignedIn) {
+      final headers = await DesktopGoogleAuth.authorizationHeaders();
+      if (headers != null) {
+        _authHeaders = headers;
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Sincronización completa bidireccional (se usa en arranque, polling y
