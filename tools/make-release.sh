@@ -271,6 +271,8 @@ else:
         git commit -m "update to v$TARGET_VERSION" || true
     fi
 
+    cd "$REPO_DIR"
+
     echo ""
     echo "✓ Release v$TARGET_VERSION publicada con éxito en GitHub:"
     gh release view "v$TARGET_VERSION"
