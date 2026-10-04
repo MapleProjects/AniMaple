@@ -1,6 +1,11 @@
 package dev.xx.video_view
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.os.Handler
@@ -20,16 +25,24 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry.SurfaceProducer
+import java.io.File
 import kotlin.math.roundToInt
 
 @UnstableApi
@@ -43,21 +56,45 @@ class VideoController(
 	val subId = subSurfaceProducer.id().toInt()
 	private var pendingHeaders: Map<String, String>? = null
 	private val exoPlayer: ExoPlayer = run {
+		val context = binding.applicationContext
+		val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+		val isTv = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+				context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+				context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+		val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+		val isLowRam = isTv || (activityManager?.isLowRamDevice == true)
+
 		val allocator = DefaultAllocator(true, 64 * 1024)
 		val loadControl = DefaultLoadControl.Builder()
 			.setAllocator(allocator)
 			.setBufferDurationsMs(
-				30_000,
-				120_000,
-				2_000,
-				4_000
+				if (isLowRam) 15_000 else 25_000,
+				if (isLowRam) 30_000 else 60_000,
+				1_500,
+				if (isLowRam) 2_500 else 3_000
 			)
-			.setBackBuffer(30_000, true)
+			.setBackBuffer(if (isLowRam) 5_000 else 15_000, true)
 			.setPrioritizeTimeOverSizeThresholds(true)
-			.setTargetBufferBytes(128 * 1024 * 1024)
+			.setTargetBufferBytes(if (isLowRam) 24 * 1024 * 1024 else 48 * 1024 * 1024)
 			.build()
 
-		ExoPlayer.Builder(binding.applicationContext)
+		val trackSelector = DefaultTrackSelector(context).apply {
+			setParameters(
+				buildUponParameters()
+					.setForceHighestSupportedBitrate(true)
+					.setExceedRendererCapabilitiesIfNecessary(true)
+					.setAllowVideoMixedMimeTypeAdaptiveness(true)
+					.setAllowVideoNonSeamlessAdaptiveness(true)
+			)
+		}
+
+		val renderersFactory = DefaultRenderersFactory(context).apply {
+			setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+			setEnableDecoderFallback(true)
+		}
+
+		ExoPlayer.Builder(context, renderersFactory)
+			.setTrackSelector(trackSelector)
 			.setLoadControl(loadControl)
 			.setSeekParameters(SeekParameters.CLOSEST_SYNC)
 			.build()
@@ -98,6 +135,7 @@ class VideoController(
 		tryRelease(surfaceProducer)
 		tryRelease(subSurfaceProducer)
 		eventSink?.endOfStream()
+		VideoViewPlugin.clearPlaybackCache(binding.applicationContext)
 	}
 
 	fun open(source: String, headers: Map<String, String>? = null): Any? {
@@ -166,7 +204,17 @@ class VideoController(
 						override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
 						override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {}
 					})
-				val mediaSource = DefaultMediaSourceFactory(httpFactory)
+
+				// Delegar la caché de reproducción al almacenamiento del dispositivo (/player_playback_cache).
+				// Alivia el uso de RAM, soporta precarga continua para conexiones lentas y evita caídas en episodios largos.
+				val cacheDataSourceFactory = CacheDataSource.Factory()
+					.setCache(VideoViewPlugin.getPlaybackCache(binding.applicationContext))
+					.setUpstreamDataSourceFactory(httpFactory)
+					.setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+				val loadErrorPolicy = DefaultLoadErrorHandlingPolicy(8)
+				val mediaSource = DefaultMediaSourceFactory(cacheDataSourceFactory)
+					.setLoadErrorHandlingPolicy(loadErrorPolicy)
 					.createMediaSource(mediaItem)
 				exoPlayer.setMediaSource(mediaSource)
 			} else {
@@ -209,6 +257,7 @@ class VideoController(
 		if (exoPlayer.trackSelectionParameters.overrides.isNotEmpty()) {
 			exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon().clearOverrides().build()
 		}
+		VideoViewPlugin.clearPlaybackCache(binding.applicationContext)
 		return null
 	}
 
@@ -591,7 +640,12 @@ class VideoController(
 				}
 			}
 			if (hasVideo) {
-				subSurfaceProducer.setSize(width, height)
+				try {
+					surfaceProducer.setSize(width, height)
+				} catch (_: Throwable) {}
+				try {
+					subSurfaceProducer.setSize(width, height)
+				} catch (_: Throwable) {}
 			}
 			eventSink?.success(mapOf(
 				"event" to "videoSize",
@@ -763,16 +817,71 @@ class VideoViewPlugin : FlutterPlugin, ActivityAware {
 					val enabled = call.argument<Boolean>("enabled")
 					result.success(player?.overrideTrack(groupId!!, trackId!!, enabled!!))
 				}
+				"clearPlaybackCache" -> {
+					clearPlaybackCache(binding.applicationContext)
+					result.success(true)
+				}
 				else -> {
 					result.notImplemented()
 				}
 			}
 		}
+		// Limpieza proactiva de archivos de caché huérfanos al iniciar el engine
+		clearPlaybackCache(binding.applicationContext)
 	}
 
 	override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
 		methodChannel.setMethodCallHandler(null)
 		clear()
+		clearPlaybackCache(binding.applicationContext)
+	}
+
+	companion object {
+		@Volatile
+		private var playbackCache: SimpleCache? = null
+		private var databaseProvider: StandaloneDatabaseProvider? = null
+
+		@Synchronized
+		fun getPlaybackCache(context: Context): SimpleCache {
+			val existing = playbackCache
+			if (existing != null) return existing
+			val cacheDir = File(context.cacheDir, "player_playback_cache")
+			if (!cacheDir.exists()) {
+				cacheDir.mkdirs()
+			}
+			val evictor = LeastRecentlyUsedCacheEvictor(1024L * 1024L * 1024L) // 1 GB en disco
+			val dbProvider = StandaloneDatabaseProvider(context)
+			databaseProvider = dbProvider
+			val cache = SimpleCache(cacheDir, evictor, dbProvider)
+			playbackCache = cache
+			return cache
+		}
+
+		@Synchronized
+		fun clearPlaybackCache(context: Context) {
+			try {
+				playbackCache?.let { cache ->
+					val keys = cache.keys.toSet()
+					for (key in keys) {
+						try {
+							cache.removeResource(key)
+						} catch (_: Throwable) {}
+					}
+				}
+			} catch (_: Throwable) {}
+			try {
+				if (playbackCache == null) {
+					val cacheDir = File(context.cacheDir, "player_playback_cache")
+					if (cacheDir.exists()) {
+						cacheDir.listFiles()?.forEach { file ->
+							try {
+								file.deleteRecursively()
+							} catch (_: Throwable) {}
+						}
+					}
+				}
+			} catch (_: Throwable) {}
+		}
 	}
 
 	override fun onAttachedToActivity(binding: ActivityPluginBinding) {

@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.0.1
+
+### Novedades y mejoras
+- Soporte para televisores y dispositivos Android TV con navegación fluida mediante control remoto y selección de elementos optimizada.
+- Almacenamiento dinámico de reproducción en caché para precarga eficiente sin saturar la memoria del dispositivo.
+- Limpieza automática de archivos temporales al cambiar o finalizar episodios para evitar residuos en el almacenamiento.
+- Mayor estabilidad y rendimiento general en conexiones lentas mediante reconexión inteligente continua.
+- Corrección de anomalías visuales en la zona inferior de la pantalla durante episodios extensos.
+- Selección automática de la máxima resolución disponible en transmisiones con múltiples calidades.
+
 ## v2.0.0
 
 ### Novedades y mejoras

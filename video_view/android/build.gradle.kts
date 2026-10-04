@@ -34,6 +34,8 @@ dependencies {
 	implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
 	implementation("androidx.media3:media3-exoplayer-smoothstreaming:$media3Version")
 	implementation("androidx.media3:media3-effect:$media3Version")
+	implementation("androidx.media3:media3-datasource:$media3Version")
+	implementation("androidx.media3:media3-database:$media3Version")
 }
 
 repositories {

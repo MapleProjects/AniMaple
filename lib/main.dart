@@ -12,6 +12,8 @@ import 'services/notification_service.dart';
 import 'services/update_service.dart';
 import 'services/fsr_service.dart';
 import 'services/hls_proxy.dart';
+import 'services/tv_service.dart';
+import 'services/app_player.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/calendar_page.dart';
@@ -65,6 +67,7 @@ void main() async {
   _setupCrashLogger();
   _setupFileLogger();
   WidgetsFlutterBinding.ensureInitialized();
+  await TvService.init();
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
     MediaKit.ensureInitialized();
@@ -76,6 +79,8 @@ void main() async {
   // anteriores (crash/apagado a mitad de descarga).
   unawaited(DownloadService.instance.init());
   unawaited(FsrService.init());
+  // Limpieza proactiva de cualquier resto de caché de reproducción previa
+  unawaited(AppPlayer.clearPlaybackCacheGlobal());
 
   // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
   // google_sign_in 6.x usa signInSilently() (100% invisible en Android, sin
@@ -277,52 +282,145 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          const HomePage(),
-          const SearchPage(),
-          const CalendarPage(),
-          HistoryPage(key: _historyKey),
-          FollowingPage(key: _followingKey),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: _onTabChanged,
-        backgroundColor: const Color(0xFF0a0812).withValues(alpha: 0.95),
-        surfaceTintColor: Colors.transparent,
-        indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home, color: Color(0xFFa78bfa)),
-            label: 'Inicio',
+    return ValueListenableBuilder<bool>(
+      valueListenable: TvService.isTv,
+      builder: (context, isTv, _) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isWideLayout = isTv || screenWidth > 900;
+
+        if (isWideLayout) {
+          return Scaffold(
+            body: Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: _currentIndex,
+                  onDestinationSelected: _onTabChanged,
+                  backgroundColor: const Color(0xFF0e0b18),
+                  indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.25),
+                  selectedIconTheme: const IconThemeData(color: Color(0xFFa78bfa), size: 28),
+                  unselectedIconTheme: const IconThemeData(color: Color(0xFF6d6488), size: 24),
+                  selectedLabelTextStyle: const TextStyle(
+                    color: Color(0xFFa78bfa),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  unselectedLabelTextStyle: const TextStyle(
+                    color: Color(0xFF6d6488),
+                    fontSize: 12,
+                  ),
+                  labelType: NavigationRailLabelType.all,
+                  leading: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: ShaderMask(
+                      shaderCallback: (bounds) => const LinearGradient(
+                        colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
+                      ).createShader(bounds),
+                      child: const Text(
+                        'AniMaple',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                          color: Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  destinations: const [
+                    NavigationRailDestination(
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
+                      label: Text('Inicio'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.search_outlined),
+                      selectedIcon: Icon(Icons.search),
+                      label: Text('Catálogo'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.calendar_today_outlined),
+                      selectedIcon: Icon(Icons.calendar_today),
+                      label: Text('Horario'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.history_outlined),
+                      selectedIcon: Icon(Icons.history),
+                      label: Text('Historial'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.favorite_outline),
+                      selectedIcon: Icon(Icons.favorite),
+                      label: Text('Mi lista'),
+                    ),
+                  ],
+                ),
+                const VerticalDivider(thickness: 1, width: 1, color: Color(0xFF1e1832)),
+                Expanded(
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: [
+                      const HomePage(),
+                      const SearchPage(),
+                      const CalendarPage(),
+                      HistoryPage(key: _historyKey),
+                      FollowingPage(key: _followingKey),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            floatingActionButton: isTv ? null : const DownloadsFab(),
+          );
+        }
+
+        return Scaffold(
+          body: IndexedStack(
+            index: _currentIndex,
+            children: [
+              const HomePage(),
+              const SearchPage(),
+              const CalendarPage(),
+              HistoryPage(key: _historyKey),
+              FollowingPage(key: _followingKey),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search, color: Color(0xFFa78bfa)),
-            label: 'Catálogo',
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _currentIndex,
+            onDestinationSelected: _onTabChanged,
+            backgroundColor: const Color(0xFF0a0812).withValues(alpha: 0.95),
+            surfaceTintColor: Colors.transparent,
+            indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home, color: Color(0xFFa78bfa)),
+                label: 'Inicio',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.search_outlined),
+                selectedIcon: Icon(Icons.search, color: Color(0xFFa78bfa)),
+                label: 'Catálogo',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.calendar_today_outlined),
+                selectedIcon: Icon(Icons.calendar_today, color: Color(0xFFa78bfa)),
+                label: 'Horario',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.history_outlined),
+                selectedIcon: Icon(Icons.history, color: Color(0xFFa78bfa)),
+                label: 'Historial',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.favorite_outline),
+                selectedIcon: Icon(Icons.favorite, color: Color(0xFFa78bfa)),
+                label: 'Mi lista',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_today_outlined),
-            selectedIcon: Icon(Icons.calendar_today, color: Color(0xFFa78bfa)),
-            label: 'Horario',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history, color: Color(0xFFa78bfa)),
-            label: 'Historial',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.favorite_outline),
-            selectedIcon: Icon(Icons.favorite, color: Color(0xFFa78bfa)),
-            label: 'Mi lista',
-          ),
-        ],
-      ),
-      floatingActionButton: const DownloadsFab(),
+          floatingActionButton: const DownloadsFab(),
+        );
+      },
     );
   }
 }

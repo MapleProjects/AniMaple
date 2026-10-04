@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/download_service.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
+import '../widgets/tv_focusable.dart';
 import 'episode_page.dart';
 
 class DetailPage extends StatefulWidget {
@@ -287,9 +288,10 @@ class _DetailPageState extends State<DetailPage> {
                   final isQueued = _dl.isQueued(anime.slug, ep.number);
                   final epProgress =
                       _dl.progress.value['${anime.slug}#${ep.number}'];
-                  return InkWell(
+                  return TvFocusable(
                     onTap: () => _playEpisode(anime, ep.number),
                     borderRadius: BorderRadius.circular(8),
+                    scaleOnFocus: 1.10,
                     child: Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFF110e1a),

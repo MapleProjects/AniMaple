@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../widgets/error_dialog.dart';
+import '../widgets/tv_focusable.dart';
 import 'episode_page.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -83,7 +84,7 @@ class HistoryPageState extends State<HistoryPage> {
               itemCount: _history.length,
               itemBuilder: (ctx, i) {
                 final h = _history[i];
-                return GestureDetector(
+                return TvFocusable(
                   onTap: () => Navigator.push(context, MaterialPageRoute(
                     builder: (_) => EpisodePage(
                       animeSlug: h.animeSlug,
@@ -91,6 +92,7 @@ class HistoryPageState extends State<HistoryPage> {
                       animeTitle: h.animeTitle,
                     ),
                   )),
+                  borderRadius: BorderRadius.circular(10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

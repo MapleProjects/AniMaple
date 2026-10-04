@@ -97,12 +97,13 @@ class SyncService {
   static GoogleSignIn _getGoogleSignIn() {
     return _googleSignIn ??= GoogleSignIn(
       scopes: const [_scopeDriveAppdata],
-      clientId: GDriveConfig.androidClientId.isEmpty
+      // En Android, Google Play Services autentica mediante el package name y la firma SHA-1.
+      // Pasar clientId o serverClientId (Web) fuerza requestIdToken y requestServerAuthCode,
+      // lo que dispara PlatformException / ApiException 12500 en Android TV y dispositivos sin backend.
+      clientId: defaultTargetPlatform == TargetPlatform.android
           ? null
-          : GDriveConfig.androidClientId,
-      serverClientId: GDriveConfig.webServerClientId.isEmpty
-          ? null
-          : GDriveConfig.webServerClientId,
+          : (GDriveConfig.androidClientId.isEmpty ? null : GDriveConfig.androidClientId),
+      serverClientId: null,
     );
   }
 

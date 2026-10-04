@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
+import 'package:path_provider/path_provider.dart';
 import 'package:video_view/video_view.dart' as vv;
 import 'fsr_service.dart';
 
@@ -31,6 +33,15 @@ abstract class AppPlayer {
   Future<void> setFsrEnabled(bool enabled);
 
   Widget buildView({BoxFit fit = BoxFit.contain});
+
+  /// Purga proactivamente cualquier resto de caché de reproducción en disco.
+  static Future<void> clearPlaybackCacheGlobal() async {
+    if (isDesktopPlatform) {
+      MediaKitAppPlayer._cleanDiskCache();
+    } else {
+      await VideoViewAppPlayer.clearPlaybackCache();
+    }
+  }
 
   factory AppPlayer.create() {
     if (isDesktopPlatform) {
@@ -225,14 +236,23 @@ class MediaKitAppPlayer implements AppPlayer {
           await (platform as dynamic).setProperty('hwdec', 'no');
           await (platform as dynamic).setProperty('opengl-es', 'yes');
         }
+        final tempDir = await getTemporaryDirectory();
+        final cachePath = '${tempDir.path}/animaple_player_cache';
+        try {
+          Directory(cachePath).createSync(recursive: true);
+        } catch (_) {}
+
+        await (platform as dynamic).setProperty('cache', 'yes');
+        await (platform as dynamic).setProperty('cache-on-disk', 'yes');
+        await (platform as dynamic).setProperty('cache-dir', cachePath);
         await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
         await (platform as dynamic).setProperty('keep-open', 'yes');
         await (platform as dynamic).setProperty('hr-seek', 'yes');
         await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
-        await (platform as dynamic).setProperty('demuxer-readahead-secs', '120');
-        await (platform as dynamic).setProperty('demuxer-max-bytes', '134217728'); // 128 MB
-        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '67108864'); // 64 MB
-        await (platform as dynamic).setProperty('network-timeout', '30');
+        await (platform as dynamic).setProperty('demuxer-readahead-secs', '300');
+        await (platform as dynamic).setProperty('demuxer-max-bytes', '536870912'); // 512 MB en disco
+        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '134217728'); // 128 MB en disco
+        await (platform as dynamic).setProperty('network-timeout', '35');
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');
@@ -247,6 +267,16 @@ class MediaKitAppPlayer implements AppPlayer {
           : null,
     );
     await _player.open(media, play: true);
+  }
+
+  static void _cleanDiskCache() {
+    try {
+      final tmp = Directory.systemTemp;
+      final cacheDir = Directory('${tmp.path}/animaple_player_cache');
+      if (cacheDir.existsSync()) {
+        cacheDir.deleteSync(recursive: true);
+      }
+    } catch (_) {}
   }
 
   @override
@@ -298,6 +328,7 @@ class MediaKitAppPlayer implements AppPlayer {
       await _player.pause();
       await _player.stop();
     } catch (_) {}
+    _cleanDiskCache();
   }
 
   @override
@@ -313,6 +344,7 @@ class MediaKitAppPlayer implements AppPlayer {
       _player.pause();
       _player.stop();
     } catch (_) {}
+    _cleanDiskCache();
   }
 
   static final GlobalKey _videoWidgetKey = GlobalKey();
@@ -460,10 +492,19 @@ class VideoViewAppPlayer implements AppPlayer {
     _vvController.seekTo(positionMs);
   }
 
+  static const MethodChannel _vvChannel = MethodChannel('VideoViewPlugin');
+
+  static Future<void> clearPlaybackCache() async {
+    try {
+      await _vvChannel.invokeMethod('clearPlaybackCache');
+    } catch (_) {}
+  }
+
   @override
   Future<void> close() async {
     if (_disposed) return;
     _vvController.close();
+    unawaited(clearPlaybackCache());
   }
 
   @override
@@ -477,6 +518,7 @@ class VideoViewAppPlayer implements AppPlayer {
     _vvController.finishedTimes.removeListener(_onFinished);
     _vvController.mediaInfo.removeListener(_onMediaInfo);
     _vvController.dispose();
+    unawaited(clearPlaybackCache());
   }
 
   @override
@@ -488,3 +530,4 @@ class VideoViewAppPlayer implements AppPlayer {
     );
   }
 }
+

@@ -4,10 +4,12 @@ import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.NotificationManager
 import android.app.RemoteAction
+import android.app.UiModeManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.net.Uri
@@ -32,12 +34,14 @@ class MainActivity : FlutterActivity() {
     private val NOTIF_CHANNEL = "com.mapleprojects.animaple/notifications"
     private val UPDATE_CHANNEL = "com.mapleprojects.animaple/updater"
     private val DOWNLOAD_CHANNEL = "com.mapleprojects.animaple/downloads"
+    private val TV_CHANNEL = "com.mapleprojects.animaple/tv"
 
     private var pipMethodChannel: MethodChannel? = null
     private var mediaMethodChannel: MethodChannel? = null
     private var notifMethodChannel: MethodChannel? = null
     private var updateMethodChannel: MethodChannel? = null
     private var downloadMethodChannel: MethodChannel? = null
+    private var tvMethodChannel: MethodChannel? = null
 
     // ── PiP State ──
     private var isPipSupported = false
@@ -66,11 +70,25 @@ class MainActivity : FlutterActivity() {
     // ── Engine Configuration ──
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        isPipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        val isTv = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                   packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                   packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+        isPipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                         !isTv &&
+                         packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
         // Cachear el engine: PlaybackService lo usa para reenviar a Dart los
         // controles de la notificación media (play/pause/stop/seek).
         FlutterEngineCache.getInstance().put("animaple_main_engine", flutterEngine)
+
+        // Limpieza de cualquier residuo de caché de reproducción en caso de cierre forzado previo
+        try {
+            val playbackCacheDir = File(cacheDir, "player_playback_cache")
+            if (playbackCacheDir.exists()) {
+                playbackCacheDir.deleteRecursively()
+            }
+        } catch (_: Exception) {}
 
         try { unregisterReceiver(pipPauseReceiver) } catch (_: Exception) {}
 
@@ -140,6 +158,24 @@ class MainActivity : FlutterActivity() {
         Notifier.ensureNewEpisodeChannel(this)
         setupNotificationChannel(flutterEngine)
         setupUpdateChannel(flutterEngine)
+        setupTvChannel(flutterEngine)
+    }
+
+    // ── Android TV Channel ──
+    private fun setupTvChannel(flutterEngine: FlutterEngine) {
+        tvMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TV_CHANNEL)
+        tvMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isTvMode" -> {
+                    val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+                    val isTv = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                               packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                               packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+                    result.success(isTv)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     // ── Updater Channel ──

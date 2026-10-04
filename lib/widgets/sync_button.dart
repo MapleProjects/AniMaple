@@ -128,8 +128,16 @@ class _SyncButtonState extends State<SyncButton> {
   void _showErrorOnly() {
     final err = SyncService.lastError;
     if (err == null || !mounted) return;
+    String displayMsg = err;
+    if (err.contains('12500')) {
+      displayMsg = 'Error 12500: Verifica que tu TV tenga Google Play Services y una cuenta activa.';
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(err), backgroundColor: Colors.red.shade800),
+      SnackBar(
+        content: Text(displayMsg),
+        backgroundColor: Colors.red.shade800,
+        duration: const Duration(seconds: 4),
+      ),
     );
   }
 

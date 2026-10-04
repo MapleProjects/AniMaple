@@ -649,17 +649,19 @@ class ApiService {
 
   /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
   /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
+  /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
+  /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
   static Future<Map<String, dynamic>> resolveHighestQualityHls(
     String masterUrl, {
     Map<String, String>? headers,
   }) async {
     try {
       final uri = Uri.parse(masterUrl);
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
       final req = await client.getUrl(uri);
       req.headers.set('User-Agent', _ua);
       headers?.forEach((k, v) => req.headers.set(k, v));
-      final resp = await req.close().timeout(const Duration(seconds: 4));
+      final resp = await req.close().timeout(const Duration(seconds: 12));
       if (resp.statusCode == 200) {
         final body = await utf8.decodeStream(resp);
         if (body.contains('#EXT-X-STREAM-INF')) {
@@ -681,16 +683,27 @@ class ApiService {
               if (bwMatch != null) {
                 bw = int.tryParse(bwMatch.group(1)!) ?? 0;
               }
-
-              if (i + 1 < lines.length) {
-                final child = lines[i + 1].trim();
-                if (child.isNotEmpty && !child.startsWith('#')) {
-                  if (h > maxHeight || (h == maxHeight && bw > maxBw) || bestChild == null) {
-                    maxHeight = h;
-                    maxBw = bw;
-                    bestChild = child;
-                  }
+              if (h == 0 && bw > 0) {
+                if (bw >= 3200000) {
+                  h = 1080;
+                } else if (bw >= 1600000) {
+                  h = 720;
+                } else if (bw >= 750000) {
+                  h = 480;
+                } else {
+                  h = 360;
                 }
+              }
+
+              for (var j = i + 1; j < lines.length; j++) {
+                final child = lines[j].trim();
+                if (child.isEmpty || child.startsWith('#')) continue;
+                if (h > maxHeight || (h == maxHeight && bw > maxBw) || bestChild == null) {
+                  maxHeight = h;
+                  maxBw = bw;
+                  bestChild = child;
+                }
+                break;
               }
             }
           }
@@ -699,7 +712,7 @@ class ApiService {
           if (bestChild != null && !bestChild.startsWith('#')) {
             return {
               'url': uri.resolve(bestChild).toString(),
-              'height': maxHeight > 0 ? maxHeight : 720,
+              'height': maxHeight > 0 ? maxHeight : 1080,
               'bandwidth': maxBw,
             };
           }
@@ -903,9 +916,22 @@ class ApiService {
 
     final source = data['source'] as String?;
     final fallbackList = data['fallback'] as List?;
-    final fallbackMp4 = fallbackList != null && fallbackList.isNotEmpty
-        ? (fallbackList[0] as Map)['file'] as String?
-        : null;
+    String? fallbackMp4;
+    if (fallbackList != null && fallbackList.isNotEmpty) {
+      int maxQ = -1;
+      for (final item in fallbackList) {
+        if (item is Map) {
+          final file = item['file'] as String?;
+          final label = '${item['label'] ?? ''} ${file ?? ''}'.toLowerCase();
+          final match = RegExp(r'(\d{3,4})p?').firstMatch(label);
+          final q = match != null ? (int.tryParse(match.group(1)!) ?? 0) : 0;
+          if ((q > maxQ || fallbackMp4 == null) && file != null && file.isNotEmpty) {
+            maxQ = q;
+            fallbackMp4 = file;
+          }
+        }
+      }
+    }
 
     final streamUrl = source ?? fallbackMp4;
     if (streamUrl != null && streamUrl.isNotEmpty) {
@@ -1027,8 +1053,19 @@ class ApiService {
                   '(() => {'
                   '  try {'
                   '    if (window.jwplayer && window.jwplayer().getConfig) {'
-                  '      const sources = window.jwplayer().getConfig().playlist[0].sources;'
-                  '      if (sources && sources.length > 0 && sources[0].file) return sources[0].file;'
+                  '      const list = window.jwplayer().getConfig().playlist[0].sources;'
+                  '      if (list && list.length > 0) {'
+                  '        let best = list[0];'
+                  '        let maxQ = -1;'
+                  '        for (const s of list) {'
+                  '          if (!s || !s.file) continue;'
+                  '          const text = ((s.label || "") + " " + s.file).toLowerCase();'
+                  '          const m = text.match(/(\\d{3,4})p?/);'
+                  '          const q = m ? parseInt(m[1], 10) : 0;'
+                  '          if (q > maxQ) { maxQ = q; best = s; }'
+                  '        }'
+                  '        if (best && best.file) return best.file;'
+                  '      }'
                   '    }'
                   '    const v = document.querySelector("video");'
                   '    if (v && v.src && v.src.startsWith("http")) return v.src;'
@@ -1194,7 +1231,7 @@ class ApiService {
       while (stopwatch.elapsedMilliseconds < 15000) {
         try {
           final res = await send('Runtime.evaluate', {
-            'expression': '(() => { try { return window.jwplayer().getConfig().playlist[0].sources[0].file; } catch(e) { return null; } })()',
+            'expression': '(() => { try { const list = window.jwplayer().getConfig().playlist[0].sources; if (!list || list.length === 0) return null; let best = list[0]; let maxQ = -1; for (const s of list) { if (!s || !s.file) continue; const text = ((s.label || "") + " " + s.file).toLowerCase(); const m = text.match(/(\\d{3,4})p?/); const q = m ? parseInt(m[1], 10) : 0; if (q > maxQ) { maxQ = q; best = s; } } return best && best.file ? best.file : null; } catch(e) { return null; } })()',
           });
           final val = res?['result']?['value'] as String?;
           if (val != null && val.isNotEmpty) {

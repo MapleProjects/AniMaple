@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../pages/detail_page.dart';
+import 'tv_focusable.dart';
 
 class EpisodeCard extends StatelessWidget {
   final RecentEpisode episode;
@@ -16,10 +17,11 @@ class EpisodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
       onTap: onTap ?? () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => DetailPage(slug: episode.animeSlug),
       )),
+      borderRadius: BorderRadius.circular(10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -109,10 +111,11 @@ class EpisodeCardGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
       onTap: onTap ?? () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => DetailPage(slug: episode.animeSlug),
       )),
+      borderRadius: BorderRadius.circular(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -208,10 +211,11 @@ class EpisodeCardLandscape extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
       onTap: onTap ?? () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => DetailPage(slug: episode.animeSlug),
       )),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
         height: 110,
         decoration: BoxDecoration(

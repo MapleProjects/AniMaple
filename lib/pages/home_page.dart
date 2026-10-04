@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
+import '../services/tv_service.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/episode_card.dart';
 import '../widgets/sync_button.dart';
@@ -77,22 +78,26 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final hideTitle = TvService.isTvMode || MediaQuery.of(context).size.width > 900;
     return Scaffold(
       appBar: AppBar(
-        title: ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
-          ).createShader(bounds),
-          child: const Text(
-            'AniMaple',
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 22,
-              color: Colors.white,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
+        automaticallyImplyLeading: false,
+        title: hideTitle
+            ? null
+            : ShaderMask(
+                shaderCallback: (bounds) => const LinearGradient(
+                  colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
+                ).createShader(bounds),
+                child: const Text(
+                  'AniMaple',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 22,
+                    color: Colors.white,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
         actions: const [
           Padding(
             padding: EdgeInsets.only(right: 8),

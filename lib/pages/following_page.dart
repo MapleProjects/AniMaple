@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../widgets/tv_focusable.dart';
 import 'detail_page.dart';
 import 'downloads_page.dart';
 
@@ -146,10 +147,11 @@ class FollowingPageState extends State<FollowingPage>
             return _queuedCard(slug);
           }
           final f = _following[i];
-          return GestureDetector(
+          return TvFocusable(
             onTap: () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => DetailPage(slug: f.animeSlug),
             )),
+            borderRadius: BorderRadius.circular(10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

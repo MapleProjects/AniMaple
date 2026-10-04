@@ -12,6 +12,7 @@ import '../services/hls_proxy.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/webview_player.dart';
+import '../services/tv_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -60,7 +61,15 @@ class _ServerQualityCandidate {
   });
 }
 
+enum _PlayerTvFocus {
+  none,
+  seekBar,
+  playPause,
+  fullscreen,
+}
+
 class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
+  _PlayerTvFocus _tvFocus = _PlayerTvFocus.none;
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
@@ -160,6 +169,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    if (TvService.isTvMode) {
+      _isFullscreen = true;
+    }
     _currentEp = widget.episodeNumber;
     _player = AppPlayer.create();
     _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
@@ -241,20 +253,230 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     });
   }
 
-  // ── Desktop-only: keyboard shortcut F + mouse hover ──
+  // ── Controles de teclado y control remoto D-Pad / TV ──
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.keyF) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    if (TvService.isTvMode) {
+      if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.backspace) {
+        if (_controlsVisible) {
+          _hideTimer?.cancel();
+          setState(() {
+            _controlsVisible = false;
+            _tvFocus = _PlayerTvFocus.none;
+          });
+          _controlsAnim?.reverse();
+          return KeyEventResult.handled;
+        }
+      }
+
+      if (!_controlsVisible) {
+        if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.arrowUp) {
+          _showControlsTemporarily();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
+          _seekRelative(-9900);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
+          _seekRelative(9900);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA ||
+            key == LogicalKeyboardKey.mediaPlayPause) {
+          _togglePlayPause();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.mediaPlay) {
+          _player.play();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.mediaPause) {
+          _player.pause();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      }
+
+      // ── Controles visibles en TV ──
+      if (_tvFocus == _PlayerTvFocus.seekBar) {
+        if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
+          _seekRelative(-9900);
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
+          _seekRelative(9900);
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.playPause;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _hideTimer?.cancel();
+          setState(() {
+            _controlsVisible = false;
+            _tvFocus = _PlayerTvFocus.none;
+          });
+          _controlsAnim?.reverse();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA ||
+            key == LogicalKeyboardKey.mediaPlayPause) {
+          _togglePlayPause();
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+      } else if (_tvFocus == _PlayerTvFocus.playPause) {
+        if (key == LogicalKeyboardKey.arrowRight) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.fullscreen;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA ||
+            key == LogicalKeyboardKey.mediaPlayPause) {
+          _togglePlayPause();
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+      } else if (_tvFocus == _PlayerTvFocus.fullscreen) {
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.playPause;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight) {
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA) {
+          _toggleFullscreen();
+          _startHideTimer();
+          return KeyEventResult.handled;
+        }
+      } else {
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _startHideTimer();
+          setState(() {
+            _tvFocus = _PlayerTvFocus.seekBar;
+          });
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _hideTimer?.cancel();
+          setState(() {
+            _controlsVisible = false;
+            _tvFocus = _PlayerTvFocus.none;
+          });
+          _controlsAnim?.reverse();
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      if (_controlsVisible) {
+        setState(() => _controlsVisible = false);
+        _controlsAnim?.reverse();
+        return KeyEventResult.handled;
+      } else if (_isFullscreen && _isDesktop) {
         _toggleFullscreen();
         return KeyEventResult.handled;
       }
-      if (event.logicalKey == LogicalKeyboardKey.escape && _isFullscreen) {
-        _toggleFullscreen();
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.space) {
-        _togglePlayPause();
+    }
+    if (key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.gameButtonA ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
+      _togglePlayPause();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.mediaPlay) {
+      _player.play();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.mediaPause) {
+      _player.pause();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.mediaRewind) {
+      _seekRelative(-9900);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.mediaFastForward) {
+      _seekRelative(9900);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown) {
+      if (!_controlsVisible) {
+        _showControlsTemporarily();
         return KeyEventResult.handled;
       }
     }
@@ -702,13 +924,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         height = q['height'] as int? ?? 720;
         bandwidth = q['bandwidth'] as int? ?? 0;
       } else if (videoType == 'mp4') {
-        final lower = videoUrl.toLowerCase();
-        if (lower.contains('1080') || s.server.toLowerCase().contains('1080')) {
-          height = 1080;
-        } else if (lower.contains('720') || s.server.toLowerCase().contains('720')) {
-          height = 720;
-        } else if (lower.contains('480')) {
-          height = 480;
+        final lower = '$videoUrl ${s.server}'.toLowerCase();
+        final match = RegExp(r'(\d{3,4})p?').firstMatch(lower);
+        if (match != null) {
+          final parsed = int.tryParse(match.group(1)!) ?? 0;
+          if (parsed >= 240 && parsed <= 4320) {
+            height = parsed;
+          }
         }
       }
 
@@ -990,20 +1212,29 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final valid = results.whereType<_ServerQualityCandidate>().toList();
 
     if (valid.isNotEmpty) {
-      // Ordenar por velocidad real medida: un 1080p que entrega 1 Mbps corta;
-      // un 720p a 6 Mbps fluye. Penalizamos servidores sin medicion (lentos/caidos).
+      // Priorizar siempre la mayor resolución disponible (1080p > 720p > 480p > 360p).
+      // Con la caché en disco y precarga continua, conexiones limitadas reproducen fluidamente 1080p.
       valid.sort((a, b) {
-        // Mbps suficiente para reproducir sin cortes (2.5 Mbps minimo util)
-        final goodA = a.measuredMbps >= 2.5 ? 1 : 0;
-        final goodB = b.measuredMbps >= 2.5 ? 1 : 0;
-        if (goodA != goodB) return goodB.compareTo(goodA);
-        if (goodA == 1) {
-          // ambos buenos: mayor calidad, y a igualdad menor latencia
-          if (a.height != b.height) return b.height.compareTo(a.height);
-          return a.responseTimeMs.compareTo(b.responseTimeMs);
+        // Servidor con fallo absoluto queda al final
+        final aliveA = (a.measuredMbps > 0.0 || a.responseTimeMs < 8000) ? 1 : 0;
+        final aliveB = (b.measuredMbps > 0.0 || b.responseTimeMs < 8000) ? 1 : 0;
+        if (aliveA != aliveB) return aliveB.compareTo(aliveA);
+
+        // 1. Mayor resolución siempre primero
+        if (a.height != b.height) {
+          return b.height.compareTo(a.height);
         }
-        // ninguno bueno: el que mas fluido se mida
-        if (a.measuredMbps != b.measuredMbps) return b.measuredMbps.compareTo(a.measuredMbps);
+
+        // 2. A igual resolución, preferir ancho de banda medido suficiente (>= 2.0 Mbps)
+        final goodA = a.measuredMbps >= 2.0 ? 1 : 0;
+        final goodB = b.measuredMbps >= 2.0 ? 1 : 0;
+        if (goodA != goodB) return goodB.compareTo(goodA);
+
+        if (a.measuredMbps != b.measuredMbps) {
+          return b.measuredMbps.compareTo(a.measuredMbps);
+        }
+
+        // 3. Menor latencia de respuesta
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
@@ -1311,8 +1542,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     );
 
     final wrapped = PopScope(
-      canPop: true,
+      canPop: !_controlsVisible,
       onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _controlsVisible) {
+          setState(() => _controlsVisible = false);
+          _controlsAnim?.reverse();
+          return;
+        }
         if (didPop) {
           _player.close();
           _syncPipState(false);
@@ -1326,10 +1562,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       child: scaffold,
     );
 
-    if (_isDesktop) {
-      return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: wrapped);
-    }
-    return wrapped;
+    return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: wrapped);
   }
 
   Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
@@ -1420,9 +1653,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _startHideTimer() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
+    _hideTimer = Timer(Duration(seconds: TvService.isTvMode ? 4 : 3), () {
       if (mounted && !_isDragging && !_showCountdown && _player.isPlaying.value) {
-        setState(() => _controlsVisible = false);
+        setState(() {
+          _controlsVisible = false;
+          _tvFocus = _PlayerTvFocus.none;
+        });
         _controlsAnim?.reverse();
       }
     });
@@ -1493,38 +1729,44 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Widget _buildProbeOverlay() {
     final chosen = _probeChosen;
     final anyStarted = _probeSpeeds.isNotEmpty;
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: Container(
-          color: const Color(0xFF07050d).withValues(alpha: 0.65),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 380),
-            transitionBuilder: (child, anim) => FadeTransition(
-              opacity: anim,
-              child: ScaleTransition(
-                scale: Tween<double>(begin: 0.96, end: 1.0).animate(
-                  CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-                ),
-                child: child,
-              ),
+    final isTv = TvService.isTvMode;
+
+    final content = Container(
+      color: const Color(0xFF07050d).withValues(alpha: isTv ? 0.95 : 0.65),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 380),
+        transitionBuilder: (child, anim) => FadeTransition(
+          opacity: anim,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1.0).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
             ),
-            child: chosen != null
-                ? _ProbeChosenCard(
-                    key: ValueKey('chosen_$chosen'),
-                    server: chosen,
-                    prewarming: _prewarming,
-                  )
-                : _ProbeScanPanel(
-                    key: const ValueKey('scan'),
-                    speeds: _probeSpeeds,
-                    started: anyStarted,
-                  ),
+            child: child,
           ),
         ),
+        child: chosen != null
+            ? _ProbeChosenCard(
+                key: ValueKey('chosen_$chosen'),
+                server: chosen,
+                prewarming: _prewarming,
+              )
+            : _ProbeScanPanel(
+                key: const ValueKey('scan'),
+                speeds: _probeSpeeds,
+                started: anyStarted,
+              ),
       ),
+    );
+
+    return ClipRect(
+      child: isTv
+          ? content
+          : BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+              child: content,
+            ),
     );
   }
 
@@ -1975,19 +2217,41 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                                   decoration: BoxDecoration(
                                                     color: const Color(0xFF8b5cf6),
                                                     borderRadius: BorderRadius.circular(2),
+                                                    boxShadow: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
+                                                        ? [
+                                                            BoxShadow(
+                                                              color: const Color(0xFF8b5cf6).withValues(alpha: 0.8),
+                                                              blurRadius: 8,
+                                                              spreadRadius: 1,
+                                                            ),
+                                                          ]
+                                                        : null,
                                                   ),
                                                 ),
                                               ),
                                               // Thumb
                                               Positioned(
-                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) - 7,
-                                                top: topY - 5,
+                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) -
+                                                    (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 10 : 7),
+                                                top: topY - (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 8 : 5),
                                                 child: Container(
-                                                  width: 14, height: 14,
+                                                  width: TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 20 : 14,
+                                                  height: TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 20 : 14,
                                                   decoration: BoxDecoration(
                                                     color: const Color(0xFF8b5cf6),
                                                     shape: BoxShape.circle,
-                                                    boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
+                                                    border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
+                                                        ? Border.all(color: Colors.white, width: 2.5)
+                                                        : null,
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
+                                                            ? const Color(0xFF8b5cf6).withValues(alpha: 0.8)
+                                                            : Colors.black45,
+                                                        blurRadius: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar) ? 10 : 4,
+                                                        spreadRadius: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar) ? 2 : 0,
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
                                               ),
@@ -2005,9 +2269,24 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                   children: [
                                     GestureDetector(
                                       onTap: _togglePlayPause,
-                                      child: Icon(
-                                        isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                        color: Colors.white, size: 26,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
+                                              ? const Color(0xFF8b5cf6).withValues(alpha: 0.35)
+                                              : Colors.transparent,
+                                          border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
+                                              ? Border.all(color: const Color(0xFFa78bfa), width: 2)
+                                              : null,
+                                        ),
+                                        child: Icon(
+                                          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
+                                              ? const Color(0xFFa78bfa)
+                                              : Colors.white,
+                                          size: 26,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
@@ -2016,19 +2295,36 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                       style: const TextStyle(color: Colors.white70, fontSize: 12),
                                     ),
                                     const Spacer(),
-                                    GestureDetector(
-                                      onTap: _enterPip,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(4),
-                                        child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
+                                    if (!TvService.isTvMode) ...[
+                                      GestureDetector(
+                                        onTap: _enterPip,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 12),
+                                      const SizedBox(width: 12),
+                                    ],
                                     GestureDetector(
                                       onTap: _toggleFullscreen,
-                                      child: Icon(
-                                        _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                                        color: Colors.white, size: 22,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(6),
+                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
+                                              ? const Color(0xFF8b5cf6).withValues(alpha: 0.35)
+                                              : Colors.transparent,
+                                          border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
+                                              ? Border.all(color: const Color(0xFFa78bfa), width: 2)
+                                              : null,
+                                        ),
+                                        child: Icon(
+                                          _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
+                                              ? const Color(0xFFa78bfa)
+                                              : Colors.white,
+                                          size: 22,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -2345,30 +2641,39 @@ class _GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final container = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradientColors ??
+              [
+                const Color(0xFF18122c).withValues(alpha: TvService.isTvMode ? 0.95 : 0.85),
+                const Color(0xFF0e0a1a).withValues(alpha: TvService.isTvMode ? 0.98 : 0.90),
+              ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          color: borderColor ?? const Color(0xFF8b5cf6).withValues(alpha: 0.22),
+          width: 1.0,
+        ),
+      ),
+      child: child,
+    );
+
+    if (TvService.isTvMode) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: container,
+      );
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: gradientColors ??
-                  [
-                    const Color(0xFF18122c).withValues(alpha: 0.85),
-                    const Color(0xFF0e0a1a).withValues(alpha: 0.90),
-                  ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(
-              color: borderColor ?? const Color(0xFF8b5cf6).withValues(alpha: 0.22),
-              width: 1.0,
-            ),
-          ),
-          child: child,
-        ),
+        child: container,
       ),
     );
   }
