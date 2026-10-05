@@ -64,5 +64,21 @@ void main() {
         expect(head.statusCode, inInclusiveRange(200, 206));
       }
     }, timeout: const Timeout(Duration(seconds: 45)));
+
+    test('4. MP4Upload resolver resolves to direct mp4 video', () async {
+      const mp4Embed = 'https://www.mp4upload.com/embed-2rnb4udygmki.html';
+      final res = await ApiService.fetchVideoUrl(mp4Embed);
+      expect(res['type'], 'mp4');
+      final streamUrl = res['url'] as String;
+      expect(streamUrl, isNotEmpty);
+      expect(streamUrl, contains('.mp4'));
+
+      final head = await http.get(Uri.parse(streamUrl), headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.mp4upload.com/',
+        'Range': 'bytes=0-100',
+      });
+      expect(head.statusCode, inInclusiveRange(200, 206));
+    }, timeout: const Timeout(Duration(seconds: 45)));
   });
 }

@@ -27,6 +27,8 @@ class HlsProxy {
   final Map<String, List<String>> _playlistSegments = {};
   final Map<String, Uint8List> _segmentCache = {};
   final Map<String, Future<Uint8List>> _inFlight = {};
+  final Map<String, int> _videoLengths = {};
+  final Map<String, bool> _videoSupportsRanges = {};
   static const int _prefetchWindow = 4;
   static const int _maxCacheSize = 20;
 
@@ -46,6 +48,8 @@ class HlsProxy {
     _segmentCache.clear();
     _inFlight.clear();
     _playlistSegments.clear();
+    _videoLengths.clear();
+    _videoSupportsRanges.clear();
   }
 
   /// Proxy an m3u8 URL: rewrites segment URLs to go through this proxy.
@@ -279,13 +283,153 @@ class HlsProxy {
     await res.pipe(request.response);
   }
 
-  /// Fetch video file (MP4) with transparent range forwarding and streaming.
+  /// Fetch video file (MP4) using concurrent chunk workers when byte ranges are supported,
+  /// multiplying throughput on rate-limited hosts (such as Mp4Upload and Voe MP4 fallback).
   Future<void> _handleVideo(
     HttpRequest request,
     String videoUrl,
     String? customReferer,
   ) async {
-    await _pipeDirectVideo(request, videoUrl, customReferer);
+    final clientRange = request.headers.value(HttpHeaders.rangeHeader);
+
+    // If request is a tiny probe (e.g. bytes=0-0 or < 512KB range), pipe directly without worker overhead
+    if (clientRange != null) {
+      final m = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(clientRange);
+      if (m != null) {
+        final start = int.tryParse(m.group(1)!) ?? 0;
+        final end = int.tryParse(m.group(2)!) ?? 0;
+        if (end >= start && (end - start) < 512 * 1024) {
+          await _pipeDirectVideo(request, videoUrl, customReferer);
+          return;
+        }
+      }
+    }
+
+    int totalLength = _videoLengths[videoUrl] ?? -1;
+    bool? supportsRanges = _videoSupportsRanges[videoUrl];
+
+    if (totalLength <= 0 || supportsRanges == null) {
+      try {
+        final probeReq = await _client.getUrl(Uri.parse(videoUrl));
+        _applyHeaders(probeReq, videoUrl, customReferer);
+        probeReq.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
+        final probeRes = await probeReq.close();
+
+        final contentRange = probeRes.headers.value(HttpHeaders.contentRangeHeader);
+        if (contentRange != null) {
+          final m = RegExp(r'/(\d+)').firstMatch(contentRange);
+          if (m != null) totalLength = int.tryParse(m.group(1)!) ?? -1;
+        }
+        if (totalLength <= 0) {
+          totalLength = probeRes.headers.contentLength;
+        }
+        supportsRanges = probeRes.statusCode == 206 ||
+            probeRes.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase() == 'bytes' ||
+            contentRange != null;
+
+        await probeRes.drain<void>();
+
+        if (totalLength > 0) {
+          _videoLengths[videoUrl] = totalLength;
+          _videoSupportsRanges[videoUrl] = supportsRanges;
+        }
+      } catch (_) {
+        await _pipeDirectVideo(request, videoUrl, customReferer);
+        return;
+      }
+    }
+
+    if (!supportsRanges || totalLength <= 0) {
+      await _pipeDirectVideo(request, videoUrl, customReferer);
+      return;
+    }
+
+    // Parse requested byte range
+    int startByte = 0;
+    int endByte = totalLength - 1;
+
+    if (clientRange != null) {
+      final m = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(clientRange);
+      if (m != null) {
+        startByte = int.parse(m.group(1)!);
+        if (m.group(2) != null && m.group(2)!.isNotEmpty) {
+          endByte = int.parse(m.group(2)!);
+        }
+      }
+    }
+    if (endByte >= totalLength) endByte = totalLength - 1;
+    final contentLength = endByte - startByte + 1;
+
+    request.response.statusCode = (clientRange != null) ? HttpStatus.partialContent : HttpStatus.ok;
+    request.response.headers.set('Access-Control-Allow-Origin', '*');
+    request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+    request.response.headers.set(HttpHeaders.contentTypeHeader, 'video/mp4');
+    request.response.headers.set(HttpHeaders.contentLengthHeader, contentLength.toString());
+    if (clientRange != null) {
+      request.response.headers.set(HttpHeaders.contentRangeHeader, 'bytes $startByte-$endByte/$totalLength');
+    }
+
+    // Concurrent multi-worker slice streaming (2MB slices, 4 concurrent workers)
+    const chunkSize = 2 * 1024 * 1024;
+    final sliceCount = ((contentLength + chunkSize - 1) ~/ chunkSize);
+    const concurrency = 4;
+
+    final chunkFutures = <int, Future<Uint8List?>>{};
+
+    Future<Uint8List?> fetchSlice(int sliceIndex) async {
+      final sliceStart = startByte + (sliceIndex * chunkSize);
+      final sliceEnd = (sliceStart + chunkSize - 1 > endByte) ? endByte : sliceStart + chunkSize - 1;
+
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final req = await _client.getUrl(Uri.parse(videoUrl));
+          _applyHeaders(req, videoUrl, customReferer);
+          req.headers.set(HttpHeaders.rangeHeader, 'bytes=$sliceStart-$sliceEnd');
+          final res = await req.close();
+          if (res.statusCode == 200 || res.statusCode == 206) {
+            final builder = BytesBuilder(copy: false);
+            await for (final chunk in res) {
+              builder.add(chunk);
+            }
+            return builder.takeBytes();
+          }
+        } catch (_) {
+          if (attempt == 1) return null;
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+      }
+      return null;
+    }
+
+    try {
+      // Schedule initial window of slices
+      for (int i = 0; i < concurrency && i < sliceCount; i++) {
+        chunkFutures[i] = fetchSlice(i);
+      }
+
+      for (int i = 0; i < sliceCount; i++) {
+        final nextToPrefetch = i + concurrency;
+        if (nextToPrefetch < sliceCount && !chunkFutures.containsKey(nextToPrefetch)) {
+          chunkFutures[nextToPrefetch] = fetchSlice(nextToPrefetch);
+        }
+
+        final sliceData = await chunkFutures[i];
+        chunkFutures.remove(i);
+
+        if (sliceData != null && sliceData.isNotEmpty) {
+          request.response.add(sliceData);
+          await request.response.flush();
+        } else {
+          break;
+        }
+      }
+
+      await request.response.close();
+    } catch (_) {
+      try {
+        await request.response.close();
+      } catch (_) {}
+    }
   }
 
   Future<void> _pipeDirectVideo(

@@ -987,7 +987,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
     final sw = Stopwatch()..start();
     try {
-      if (s.server.toLowerCase().contains('byse')) {
+      if (s.server.toLowerCase().contains('byse') && !ApiService.isByseCached(s.url)) {
         return null;
       }
       final data = await ApiService.fetchVideoUrl(s.url)

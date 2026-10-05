@@ -888,14 +888,21 @@ class ApiService {
     });
 
     var body = resp.body;
-    final redirMatch = RegExp(r"window\.location\.href\s*=\s*'([^']+)'").firstMatch(body);
-    if (redirMatch != null) {
-      targetUrl = redirMatch.group(1)!;
-      resp = await _http.get(Uri.parse(targetUrl), headers: {
-        'User-Agent': _ua,
-        'Referer': embedUrl,
-      });
-      body = resp.body;
+    for (var hop = 0; hop < 3; hop++) {
+      final redirMatch = RegExp(r"window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*)['" + '"]([^' + "'" + '"]+)[\'"]')
+          .firstMatch(body);
+      if (redirMatch != null) {
+        final next = redirMatch.group(1)!;
+        if (next == targetUrl) break;
+        targetUrl = next;
+        resp = await _http.get(Uri.parse(targetUrl), headers: {
+          'User-Agent': _ua,
+          'Referer': embedUrl,
+        });
+        body = resp.body;
+      } else {
+        break;
+      }
     }
 
     final scriptMatch = RegExp(r'<script type="application/json">\s*\["([^"]+)"\]\s*</script>').firstMatch(body);
@@ -983,6 +990,8 @@ class ApiService {
   }
 
   static final Map<String, Map<String, dynamic>> _byseCache = {};
+
+  static bool isByseCached(String url) => _byseCache.containsKey(url);
 
   static Future<Map<String, dynamic>> _resolveByse(String embedUrl) async {
     if (_byseCache.containsKey(embedUrl)) {
