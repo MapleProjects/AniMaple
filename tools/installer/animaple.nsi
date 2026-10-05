@@ -67,7 +67,7 @@ Var isUpdate
 Function CloseApp
     DetailPrint "Cerrando AniMaple si esta en ejecucion..."
     Sleep 500
-    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
     Sleep 500
 
     IfFileExists "$INSTDIR\animaple.exe" 0 DoneCheck
@@ -77,7 +77,7 @@ CheckLoop:
     FileOpen $R1 "$INSTDIR\animaple.exe" "a"
     IfErrors 0 FileUnlocked
     ; Sigue bloqueado por el sistema operativo o proceso residual
-    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
     Sleep 1000
     IntOp $R0 $R0 + 1
     ${If} $R0 < 10
@@ -90,12 +90,15 @@ DoneCheck:
 FunctionEnd
 
 Function .onInit
-    Call CloseApp
-    StrCpy $isUpdate "0"
     ReadRegStr $0 HKCU "Software\AniMaple" "InstallPath"
     ${If} $0 != ""
+        StrCpy $INSTDIR $0
         StrCpy $isUpdate "1"
+    ${Else}
+        StrCpy $INSTDIR "$LOCALAPPDATA\AniMaple"
+        StrCpy $isUpdate "0"
     ${EndIf}
+    Call CloseApp
 FunctionEnd
 
 ;--------------------------------
@@ -155,8 +158,36 @@ SectionEnd
 ;--------------------------------
 ; Uninstall
 
+Function un.CloseApp
+    DetailPrint "Cerrando AniMaple si esta en ejecucion..."
+    Sleep 500
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
+    Sleep 500
+
+    IfFileExists "$INSTDIR\animaple.exe" 0 DoneUnCheck
+    StrCpy $R0 0
+UnCheckLoop:
+    ClearErrors
+    FileOpen $R1 "$INSTDIR\animaple.exe" "a"
+    IfErrors 0 FileUnUnlocked
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
+    Sleep 1000
+    IntOp $R0 $R0 + 1
+    ${If} $R0 < 10
+        Goto UnCheckLoop
+    ${EndIf}
+    Goto DoneUnCheck
+FileUnUnlocked:
+    FileClose $R1
+DoneUnCheck:
+FunctionEnd
+
+Function un.onInit
+    Call un.CloseApp
+FunctionEnd
+
 Section "Uninstall"
-    nsExec::Exec 'taskkill /F /T /IM animaple.exe'
+    Call un.CloseApp
     Sleep 1000
     
     RMDir /r "$INSTDIR"
