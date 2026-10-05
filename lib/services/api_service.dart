@@ -212,21 +212,72 @@ class ApiService {
     }
   }
 
-  /// Repara títulos persistidos con mojibake de latin1→UTF-8. Antes del fix
-  /// de `_jsonFrom`, los títulos se guardaban en SharedPreferences con la
-  /// decodificación latin1 por defecto → tildes rotas ("Ã©" en vez de "é").
-  /// Si el texto ya es correcto, se devuelve igual (sin tocar).
+  static const _cp1252ToByte = <int, int>{
+    0x20AC: 0x80, // €
+    0x201A: 0x82, // ‚
+    0x0192: 0x83, // ƒ
+    0x201E: 0x84, // „
+    0x2026: 0x85, // …
+    0x2020: 0x86, // †
+    0x2021: 0x87, // ‡
+    0x02C6: 0x88, // ˆ
+    0x2030: 0x89, // ‰
+    0x0160: 0x8A, // Š
+    0x2039: 0x8B, // ‹
+    0x0152: 0x8C, // Œ
+    0x017D: 0x8E, // Ž
+    0x2018: 0x91, // ‘
+    0x2019: 0x92, // ’
+    0x201C: 0x93, // “
+    0x201D: 0x94, // ”
+    0x2022: 0x95, // •
+    0x2013: 0x96, // –
+    0x2014: 0x97, // —
+    0x02DC: 0x98, // ˜
+    0x2122: 0x99, // ™
+    0x0161: 0x9A, // š
+    0x203A: 0x9B, // ›
+    0x0153: 0x9C, // œ
+    0x017E: 0x9E, // ž
+    0x0178: 0x9F, // Ÿ
+  };
+
+  /// Repara títulos persistidos con mojibake de latin1 / Windows-1252 → UTF-8.
+  /// Corrige estrellas (â˜† → ☆, â˜… → ★), tildes ("Ã©" → "é") y emojis.
+  /// Si el texto ya es correcto, se devuelve intacto.
   static String _fixMojibake(String s) {
     if (s.isEmpty) return s;
-    // Señal típica de mojibake: "Ã" precede a tildes/ñ(UTF-8 de 2 bytes),
-    // "Â" a símbolos. Sin eso, el texto ya está limpio.
-    if (!s.contains('Ã') && !s.contains('Â')) return s;
-    try {
-      final bytes = latin1.encode(s);
-      return utf8.decode(bytes, allowMalformed: true);
-    } catch (_) {
-      return s;
+    var cur = s;
+    for (var depth = 0; depth < 2; depth++) {
+      if (!cur.codeUnits.any((c) => (c >= 0x80 && c <= 0xFF) || _cp1252ToByte.containsKey(c))) {
+        break;
+      }
+      try {
+        final bytes = <int>[];
+        var possible = true;
+        for (final unit in cur.runes) {
+          final mapped = _cp1252ToByte[unit];
+          if (mapped != null) {
+            bytes.add(mapped);
+          } else if (unit <= 0xFF) {
+            bytes.add(unit);
+          } else {
+            possible = false;
+            break;
+          }
+        }
+        if (!possible) break;
+        final decoded = utf8.decode(bytes, allowMalformed: false);
+        if (decoded.length < cur.length) {
+          cur = decoded;
+        } else {
+          break;
+        }
+      } catch (_) {
+        break;
+      }
     }
+    return cur;
   }
 
   // ── Recent episodes ─────────────────────────────────
@@ -889,8 +940,12 @@ class ApiService {
 
     var body = resp.body;
     for (var hop = 0; hop < 3; hop++) {
-      final redirMatch = RegExp(r"window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*)['" + '"]([^' + "'" + '"]+)[\'"]')
-          .firstMatch(body);
+      final redirMatch = RegExp(
+        r"window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*)['"
+        '"]([^'
+        "'"
+        r'"]+)[\x27"]',
+      ).firstMatch(body);
       if (redirMatch != null) {
         final next = redirMatch.group(1)!;
         if (next == targetUrl) break;
@@ -1365,8 +1420,23 @@ class ApiService {
     final raw = prefs.getStringList('history') ?? [];
     // Tombstone por el capítulo borrado: el sync no lo resucitará.
     final deleted = await fetchDeletedHistory();
-    final now = DateTime.now().toUtc().toIso8601String();
-    deleted['$animeSlug#$episodeNumber'] = now;
+    DateTime tombstoneTime = DateTime.now().toUtc();
+    for (final s in raw) {
+      try {
+        final j = jsonDecode(s) as Map<String, dynamic>;
+        if (j['anime_slug'] == animeSlug &&
+            j['episode_number'] == episodeNumber) {
+          final watchedStr = j['watched_at'] as String?;
+          if (watchedStr != null) {
+            final watchedAt = DateTime.tryParse(watchedStr);
+            if (watchedAt != null && !watchedAt.isBefore(tombstoneTime)) {
+              tombstoneTime = watchedAt.add(const Duration(seconds: 1));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    deleted['$animeSlug#$episodeNumber'] = tombstoneTime.toIso8601String();
     raw.removeWhere((s) {
       final j = jsonDecode(s) as Map<String, dynamic>;
       return j['anime_slug'] == animeSlug &&
@@ -1500,7 +1570,22 @@ class ApiService {
     final raw = prefs.getStringList('followed') ?? [];
     // Tombstone: el sync no debe volver a traer un favorito eliminado.
     final deleted = await fetchDeletedFollowed();
-    deleted['$animeId'] = DateTime.now().toUtc().toIso8601String();
+    DateTime tombstoneTime = DateTime.now().toUtc();
+    for (final s in raw) {
+      try {
+        final j = jsonDecode(s) as Map<String, dynamic>;
+        if (j['anime_id'] == animeId) {
+          final folStr = j['followed_at'] as String?;
+          if (folStr != null) {
+            final folAt = DateTime.tryParse(folStr);
+            if (folAt != null && !folAt.isBefore(tombstoneTime)) {
+              tombstoneTime = folAt.add(const Duration(seconds: 1));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    deleted['$animeId'] = tombstoneTime.toIso8601String();
     await saveDeletedFollowed(deleted);
     raw.removeWhere((s) => (jsonDecode(s) as Map)['anime_id'] == animeId);
     await prefs.setStringList('followed', raw);

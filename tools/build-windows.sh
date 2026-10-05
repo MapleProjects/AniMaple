@@ -5,6 +5,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VM_NAME="Windows11"
 VM_IP="192.168.122.237"
 VM_USER="Maple"
+SSH_OPTS="-o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
 
 echo "=== AniMaple Windows Native Build ==="
 echo "Directorio del proyecto: $REPO_DIR"
@@ -15,7 +16,7 @@ if [ "$VM_STATE" != "ejecutando" ] && [ "$VM_STATE" != "running" ]; then
     echo "Iniciando máquina virtual $VM_NAME..."
     virsh -c qemu:///system start "$VM_NAME"
     echo "Esperando que Windows y SSH inicien..."
-    until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 "$VM_USER@$VM_IP" "hostname" >/dev/null 2>&1; do
+    until ssh $SSH_OPTS -o ConnectTimeout=2 "$VM_USER@$VM_IP" "hostname" >/dev/null 2>&1; do
         sleep 2
     done
 fi
@@ -28,7 +29,7 @@ echo "Versión detectada: v$VERSION"
 
 # 3. Sincronizar código fuente a la máquina virtual vía tar sobre SSH
 echo "Sincronizando código fuente a C:\\Users\\$VM_USER\\AniMaple..."
-ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
+ssh $SSH_OPTS "$VM_USER@$VM_IP" '
 if (Test-Path "C:\Users\Maple\AniMaple") {
     # Conservar .dart_tool o build si se desea incremental, o limpiar
     Get-ChildItem "C:\Users\Maple\AniMaple" -Exclude "build", ".dart_tool" | Remove-Item -Recurse -Force
@@ -42,13 +43,13 @@ tar --exclude='.git' \
     --exclude='.dart_tool' \
     --exclude='*.qcow2' \
     --exclude='*.iso' \
-    -czf - -C "$REPO_DIR" . | ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" 'tar -xzf - -C C:\Users\Maple\AniMaple'
+    -czf - -C "$REPO_DIR" . | ssh $SSH_OPTS "$VM_USER@$VM_IP" 'tar -xzf - -C C:\Users\Maple\AniMaple'
 
 echo "Código fuente sincronizado exitosamente."
 
 # 4. Compilar proyecto en Windows con Flutter y MSVC
 echo "Limpiando binarios previos y ejecutando flutter pub get + flutter build windows --release..."
-ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
+ssh $SSH_OPTS "$VM_USER@$VM_IP" '
 $ErrorActionPreference = "Stop"
 if (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release") {
     Remove-Item "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release" -Recurse -Force
@@ -65,7 +66,7 @@ if (-not (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\an
 
 # 5. Generar instalador con NSIS y paquete ZIP portátil
 echo "Generando instalador NSIS y comprimido portátil..."
-ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
+ssh $SSH_OPTS "$VM_USER@$VM_IP" '
 $ErrorActionPreference = "Stop"
 Set-Location "C:\Users\Maple\AniMaple\tools\installer"
 & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION="'"$VERSION"'" /DBUILD_DIR="C:\Users\Maple\AniMaple\build\windows\x64\runner\Release" /DINSTALLER_DIR="C:\Users\Maple\AniMaple\tools\installer" animaple.nsi
@@ -78,8 +79,8 @@ Copy-Item "C:\Users\Maple\AniMaple\tools\installer\animaple-v'"$VERSION"'-setup.
 DIST_DIR="$REPO_DIR/build/windows-release"
 mkdir -p "$DIST_DIR"
 echo "Copiando binarios finales a $DIST_DIR..."
-scp -o StrictHostKeyChecking=no "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-setup.exe" "$DIST_DIR/"
-scp -o StrictHostKeyChecking=no "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-windows.zip" "$DIST_DIR/"
+scp $SSH_OPTS "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-setup.exe" "$DIST_DIR/"
+scp $SSH_OPTS "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-windows.zip" "$DIST_DIR/"
 cp -f "$DIST_DIR/animaple-v$VERSION-setup.exe" /home/maple/Escritorio/
 
 echo "=== Compilación completada con éxito ==="

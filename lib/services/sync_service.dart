@@ -1012,13 +1012,17 @@ class SyncService {
         : _driveApiBase;
     final uri = Uri.parse('$base$path');
     final req = http.Request(method, uri)
-      ..headers.addAll({...auth, if (headers != null) ...headers})
-      ..body = body ?? '';
+      ..headers.addAll({...auth, if (headers != null) ...headers});
+    if (body != null) {
+      req.headers['content-type'] = 'application/json; charset=utf-8';
+      req.bodyBytes = utf8.encode(body);
+    }
 
     final streamed = await http.Client()
         .send(req)
         .timeout(const Duration(seconds: 30));
-    final res = String.fromCharCodes(await streamed.stream.toBytes());
+    final bytes = await streamed.stream.toBytes();
+    final res = utf8.decode(bytes, allowMalformed: true);
 
     debugPrint('Sync: $method $path → ${streamed.statusCode}');
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {

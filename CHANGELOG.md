@@ -8,6 +8,8 @@
 - Medición precisa de caudal y latencia multimedia descargando fragmentos binarios reales en lugar de manifiestos en caché.
 - Selección inteligente de servidores con umbrales mínimos de viabilidad por resolución para evitar almacenamiento en búfer.
 - Elevación administrativa garantizada mediante ShellExecute RunAs al actualizar desde la aplicación en Windows para evitar fallos de permisos UAC al ejecutar el instalador.
+- Corrección de caracteres especiales, estrellas (★, ☆), acentos y emojis en historial y favoritos mediante decodificación UTF-8 rigurosa y normalización CP1252.
+- Resolución de sincronización en eliminación de historial: asignación de tombstones consistentes para evitar la reaparición de capítulos ante discrepancias horarias entre dispositivos.
 - Tolerancia multicadena de redirecciones en el resolutor de Voe y sondeo en memoria sin bloqueo para Byse.
 
 ## v2.0.6
