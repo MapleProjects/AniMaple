@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 /// Local HTTP proxy that fixes content-type and headers for HLS / MP4 streams.
 ///
@@ -18,6 +19,17 @@ class HlsProxy {
   static const String _defaultUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
+  final HttpClient _client = HttpClient()
+    ..badCertificateCallback = ((_, __, ___) => true)
+    ..maxConnectionsPerHost = 24
+    ..idleTimeout = const Duration(seconds: 60);
+
+  final Map<String, List<String>> _playlistSegments = {};
+  final Map<String, Uint8List> _segmentCache = {};
+  final Map<String, Future<Uint8List>> _inFlight = {};
+  static const int _prefetchWindow = 4;
+  static const int _maxCacheSize = 20;
+
   /// Start the proxy server on a random available loopback port.
   Future<void> start() async {
     if (_server != null) return;
@@ -31,6 +43,9 @@ class HlsProxy {
     await _server?.close(force: true);
     _server = null;
     _port = 0;
+    _segmentCache.clear();
+    _inFlight.clear();
+    _playlistSegments.clear();
   }
 
   /// Proxy an m3u8 URL: rewrites segment URLs to go through this proxy.
@@ -105,66 +120,163 @@ class HlsProxy {
     String m3u8Url,
     String? customReferer,
   ) async {
-    final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true)
-      ..connectionTimeout = const Duration(seconds: 15);
-    try {
-      final req = await client.getUrl(Uri.parse(m3u8Url));
-      _applyHeaders(req, m3u8Url, customReferer);
-      final res = await req.close();
-      final body = await res.transform(utf8.decoder).join();
+    final req = await _client.getUrl(Uri.parse(m3u8Url));
+    _applyHeaders(req, m3u8Url, customReferer);
+    final res = await req.close();
+    final body = await res.transform(utf8.decoder).join();
 
-      final rewritten = _rewriteM3U8(body, m3u8Url, customReferer);
+    final rewritten = _rewriteM3U8(body, m3u8Url, customReferer);
 
-      request.response
-        ..statusCode = res.statusCode
-        ..headers.set('Content-Type', 'application/vnd.apple.mpegurl')
-        ..headers.set('Access-Control-Allow-Origin', '*')
-        ..headers.set('Cache-Control', 'no-cache')
-        ..write(rewritten)
-        ..close();
-    } finally {
-      client.close();
-    }
+    request.response
+      ..statusCode = res.statusCode
+      ..headers.set('Content-Type', 'application/vnd.apple.mpegurl')
+      ..headers.set('Access-Control-Allow-Origin', '*')
+      ..headers.set('Cache-Control', 'no-cache')
+      ..write(rewritten);
+    await request.response.close();
   }
 
-  /// Fetch a segment and return it with correct content-type.
+  /// Fetch a segment with intelligent in-memory caching and predictive prefetching.
   Future<void> _handleSegment(
     HttpRequest request,
     String segmentUrl,
     String? customReferer,
   ) async {
-    final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true)
-      ..connectionTimeout = const Duration(seconds: 20);
+    final ref = customReferer ?? _refererOf(segmentUrl);
+    final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
+
     try {
-      final req = await client.getUrl(Uri.parse(segmentUrl));
-      _applyHeaders(req, segmentUrl, customReferer);
+      final bytes = await _getOrFetchSegment(segmentUrl, ref);
 
-      final range = request.headers.value(HttpHeaders.rangeHeader);
-      if (range != null && range.isNotEmpty) {
-        req.headers.set(HttpHeaders.rangeHeader, range);
-      }
-
-      final res = await req.close();
-
-      request.response.statusCode = res.statusCode;
       request.response.headers.set('Access-Control-Allow-Origin', '*');
       request.response.headers.set('Content-Type', 'video/mp4');
 
-      final contentRange = res.headers.value(HttpHeaders.contentRangeHeader);
-      if (contentRange != null) {
-        request.response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
-      }
-      final contentLength = res.headers.contentLength;
-      if (contentLength > 0) {
-        request.response.headers.contentLength = contentLength;
+      if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
+        final parts = rangeHeader.substring(6).split('-');
+        final start = int.tryParse(parts[0]) ?? 0;
+        final end = (parts.length > 1 && parts[1].isNotEmpty)
+            ? (int.tryParse(parts[1]) ?? bytes.length - 1)
+            : bytes.length - 1;
+
+        if (start < bytes.length && end >= start) {
+          final clampedEnd = end >= bytes.length ? bytes.length - 1 : end;
+          final slice = bytes.sublist(start, clampedEnd + 1);
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes $start-$clampedEnd/${bytes.length}',
+          );
+          request.response.headers.contentLength = slice.length;
+          request.response.add(slice);
+          await request.response.close();
+          _triggerPrefetchAfter(segmentUrl, ref);
+          return;
+        }
       }
 
-      await res.pipe(request.response);
-    } finally {
-      client.close();
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentLength = bytes.length;
+      request.response.add(bytes);
+      await request.response.close();
+
+      _triggerPrefetchAfter(segmentUrl, ref);
+    } catch (e) {
+      await _pipeDirectSegment(request, segmentUrl, customReferer);
     }
+  }
+
+  Future<Uint8List> _getOrFetchSegment(String url, String referer) async {
+    if (_segmentCache.containsKey(url)) {
+      return _segmentCache[url]!;
+    }
+    if (_inFlight.containsKey(url)) {
+      return await _inFlight[url]!;
+    }
+
+    final future = _downloadSegment(url, referer);
+    _inFlight[url] = future;
+    try {
+      final bytes = await future;
+      _addToCache(url, bytes);
+      return bytes;
+    } finally {
+      _inFlight.remove(url);
+    }
+  }
+
+  Future<Uint8List> _downloadSegment(String url, String referer) async {
+    final req = await _client.getUrl(Uri.parse(url));
+    _applyHeaders(req, url, referer);
+    final resp = await req.close();
+    if (resp.statusCode != 200 && resp.statusCode != 206) {
+      throw HttpException('HTTP ${resp.statusCode} fetching segment', uri: Uri.parse(url));
+    }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in resp) {
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  void _addToCache(String url, Uint8List bytes) {
+    if (_segmentCache.length >= _maxCacheSize) {
+      _segmentCache.remove(_segmentCache.keys.first);
+    }
+    _segmentCache[url] = bytes;
+  }
+
+  void _triggerPrefetchAfter(String currentUrl, String referer) {
+    for (final segs in _playlistSegments.values) {
+      final idx = segs.indexOf(currentUrl);
+      if (idx >= 0) {
+        for (var i = 1; i <= _prefetchWindow; i++) {
+          final targetIdx = idx + i;
+          if (targetIdx < segs.length) {
+            final nextUrl = segs[targetIdx];
+            if (!_segmentCache.containsKey(nextUrl) && !_inFlight.containsKey(nextUrl)) {
+              final f = _downloadSegment(nextUrl, referer);
+              _inFlight[nextUrl] = f;
+              f.then((bytes) {
+                _addToCache(nextUrl, bytes);
+              }).catchError((_) {}).whenComplete(() {
+                _inFlight.remove(nextUrl);
+              });
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  Future<void> _pipeDirectSegment(
+    HttpRequest request,
+    String segmentUrl,
+    String? customReferer,
+  ) async {
+    final req = await _client.getUrl(Uri.parse(segmentUrl));
+    _applyHeaders(req, segmentUrl, customReferer);
+
+    final range = request.headers.value(HttpHeaders.rangeHeader);
+    if (range != null && range.isNotEmpty) {
+      req.headers.set(HttpHeaders.rangeHeader, range);
+    }
+
+    final res = await req.close();
+    request.response.statusCode = res.statusCode;
+    request.response.headers.set('Access-Control-Allow-Origin', '*');
+    request.response.headers.set('Content-Type', 'video/mp4');
+
+    final contentRange = res.headers.value(HttpHeaders.contentRangeHeader);
+    if (contentRange != null) {
+      request.response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    }
+    final contentLength = res.headers.contentLength;
+    if (contentLength > 0) {
+      request.response.headers.contentLength = contentLength;
+    }
+
+    await res.pipe(request.response);
   }
 
   /// Fetch video file (MP4) with transparent range forwarding and streaming.
@@ -181,11 +293,8 @@ class HlsProxy {
     String videoUrl,
     String? customReferer,
   ) async {
-    final client = HttpClient()
-      ..badCertificateCallback = ((cert, host, port) => true)
-      ..connectionTimeout = const Duration(seconds: 30);
     try {
-      final req = await client.getUrl(Uri.parse(videoUrl));
+      final req = await _client.getUrl(Uri.parse(videoUrl));
       _applyHeaders(req, videoUrl, customReferer);
 
       final range = request.headers.value(HttpHeaders.rangeHeader);
@@ -213,14 +322,12 @@ class HlsProxy {
       try {
         await res.pipe(request.response);
       } catch (_) {
-        // Client disconnected (e.g. seek canceled previous range stream)
+        // Client disconnected
       }
     } catch (_) {
       try {
         await request.response.close();
       } catch (_) {}
-    } finally {
-      client.close();
     }
   }
 
@@ -240,19 +347,22 @@ class HlsProxy {
     final refParam = customReferer != null && customReferer.isNotEmpty
         ? '&ref=${Uri.encodeComponent(customReferer)}'
         : '';
+    final segments = <String>[];
 
     for (final line in lines) {
       final trimmed = line.trim();
       if (trimmed.isEmpty) {
         result.add(line);
       } else if (trimmed.startsWith('#')) {
-        // Rewrite URI="..." inside tags like EXT-X-MAP, EXT-X-KEY, EXT-X-MEDIA
         result.add(trimmed.replaceAllMapped(
           RegExp(r'URI="([^"]+)"'),
           (m) {
             final uriVal = m.group(1)!;
             final resolved = _absoluteUrl(uriVal, base);
             final path = resolved.toLowerCase().contains('.m3u8') ? 'play.m3u8' : 'segment';
+            if (path == 'segment') {
+              segments.add(resolved);
+            }
             return 'URI="http://127.0.0.1:$_port/$path?url=${Uri.encodeComponent(resolved)}$refParam"';
           },
         ));
@@ -263,11 +373,16 @@ class HlsProxy {
             'http://127.0.0.1:$_port/play.m3u8?url=${Uri.encodeComponent(resolved)}$refParam',
           );
         } else {
+          segments.add(resolved);
           result.add(
             'http://127.0.0.1:$_port/segment?url=${Uri.encodeComponent(resolved)}$refParam',
           );
         }
       }
+    }
+
+    if (segments.isNotEmpty) {
+      _playlistSegments[baseUrl] = segments;
     }
 
     return result.join('\n');

@@ -1310,26 +1310,52 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       // Priorizar siempre la mayor resolución disponible (1080p > 720p > 480p > 360p).
       // Con la caché en disco y precarga continua, conexiones limitadas reproducen fluidamente 1080p.
       valid.sort((a, b) {
-        // Servidor con fallo absoluto queda al final
-        final aliveA = (a.measuredMbps > 0.0 || a.responseTimeMs < 8000) ? 1 : 0;
-        final aliveB = (b.measuredMbps > 0.0 || b.responseTimeMs < 8000) ? 1 : 0;
+        // Servidor con fallo absoluto o latencia inmanejable queda al final
+        final aliveA = (a.measuredMbps > 0.0 && a.responseTimeMs < 10000) ? 1 : 0;
+        final aliveB = (b.measuredMbps > 0.0 && b.responseTimeMs < 10000) ? 1 : 0;
         if (aliveA != aliveB) return aliveB.compareTo(aliveA);
 
-        // 1. Mayor resolución siempre primero
+        // Umbral de viabilidad para reproducción fluida sin cortes/buffering:
+        // 1080p requiere al menos 3.0 Mbps estables
+        // 720p requiere al menos 1.8 Mbps estables
+        // <= 480p requiere al menos 0.8 Mbps
+        double minBw(int h) {
+          if (h >= 1080) return 3.0;
+          if (h >= 720) return 1.8;
+          return 0.8;
+        }
+
+        final viableA = a.measuredMbps >= minBw(a.height) ? 1 : 0;
+        final viableB = b.measuredMbps >= minBw(b.height) ? 1 : 0;
+
+        // Si uno es viable para su resolución y el otro no entrega suficiente ancho de banda,
+        // priorizar el servidor viable para evitar congelamiento de reproducción.
+        if (viableA != viableB) return viableB.compareTo(viableA);
+
+        // A igualdad de viabilidad:
+        // 1. Si ambos son viables y tienen diferente resolución, mayor resolución primero
+        if (viableA == 1 && a.height != b.height) {
+          return b.height.compareTo(a.height);
+        }
+
+        // 2. Si hay una diferencia significativa de velocidad real (>= 1.5 Mbps),
+        // preferir el que entregue notablemente mayor ancho de banda
+        final speedDiff = b.measuredMbps - a.measuredMbps;
+        if (speedDiff.abs() >= 1.5) {
+          return b.measuredMbps.compareTo(a.measuredMbps);
+        }
+
+        // 3. Resolución disponible
         if (a.height != b.height) {
           return b.height.compareTo(a.height);
         }
 
-        // 2. A igual resolución, preferir ancho de banda medido suficiente (>= 2.0 Mbps)
-        final goodA = a.measuredMbps >= 2.0 ? 1 : 0;
-        final goodB = b.measuredMbps >= 2.0 ? 1 : 0;
-        if (goodA != goodB) return goodB.compareTo(goodA);
-
+        // 4. Ancho de banda medido
         if (a.measuredMbps != b.measuredMbps) {
           return b.measuredMbps.compareTo(a.measuredMbps);
         }
 
-        // 3. Menor latencia de respuesta
+        // 5. Menor latencia de respuesta
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
@@ -1399,8 +1425,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
 
       var streamUrl = videoUrl;
-      if (videoType == 'mp4' && HlsProxy.instance.isRunning && !videoUrl.startsWith('http://127.0.0.1')) {
-        streamUrl = HlsProxy.instance.proxyVideo(videoUrl, referer: headers?['Referer']);
+      if (HlsProxy.instance.isRunning && !videoUrl.startsWith('http://127.0.0.1')) {
+        if (videoType == 'hls') {
+          streamUrl = HlsProxy.instance.proxyM3U8(videoUrl, referer: headers?['Referer']);
+        } else if (videoType == 'mp4') {
+          streamUrl = HlsProxy.instance.proxyVideo(videoUrl, referer: headers?['Referer']);
+        }
       }
 
       await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
@@ -1496,8 +1526,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
 
         var streamUrl = effectiveUrl;
-        if (videoType == 'mp4' && HlsProxy.instance.isRunning && !effectiveUrl.startsWith('http://127.0.0.1')) {
-          streamUrl = HlsProxy.instance.proxyVideo(effectiveUrl, referer: headers?['Referer']);
+        if (HlsProxy.instance.isRunning && !effectiveUrl.startsWith('http://127.0.0.1')) {
+          if (videoType == 'hls') {
+            streamUrl = HlsProxy.instance.proxyM3U8(effectiveUrl, referer: headers?['Referer']);
+          } else if (videoType == 'mp4') {
+            streamUrl = HlsProxy.instance.proxyVideo(effectiveUrl, referer: headers?['Referer']);
+          }
         }
 
         await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);

@@ -614,7 +614,9 @@ class ApiService {
   }
 
   /// Mide la velocidad real de descarga de un stream (TTFB + throughput) en
-  /// Mbps. Descarga hasta ~512KB con Range para no consumir datos de más.
+  /// Mbps. Para HLS (.m3u8), resuelve el primer segmento multimedia real (.ts, .m4s, .woff2)
+  /// y mide la entrega real de paquetes del CDN en lugar del archivo de texto del manifest.
+  /// Descarga hasta ~512KB con Range para no consumir datos de más.
   /// Devuelve 0 si no se pudo medir (el servidor está lento o cayó).
   static Future<double> measureStreamMbps(
     String url, {
@@ -624,12 +626,44 @@ class ApiService {
     final sw = Stopwatch()..start();
     var got = 0;
     try {
-      final req = http.Request('GET', Uri.parse(url));
+      var targetUrl = url;
+      final targetHeaders = headers;
+
+      // Si la URL es una lista HLS (.m3u8), no medimos el manifest de texto de ~2KB.
+      // Extraemos el primer segmento multimedia auténtico para medir la entrega real.
+      if (targetUrl.toLowerCase().contains('.m3u8')) {
+        try {
+          final client = HttpClient()
+            ..badCertificateCallback = ((_, __, ___) => true)
+            ..connectionTimeout = const Duration(seconds: 4);
+          final req = await client.getUrl(Uri.parse(targetUrl));
+          req.headers.set('User-Agent', _ua);
+          targetHeaders?.forEach((k, v) => req.headers.set(k, v));
+          final resp = await req.close().timeout(const Duration(seconds: 4));
+          if (resp.statusCode == 200) {
+            final playlist = await utf8.decodeStream(resp);
+            final base = Uri.parse(targetUrl);
+            for (final line in playlist.split('\n')) {
+              final t = line.trim();
+              if (t.isNotEmpty && !t.startsWith('#')) {
+                final resolved = base.resolve(t).toString();
+                if (!resolved.toLowerCase().contains('.m3u8')) {
+                  targetUrl = resolved;
+                  break;
+                }
+              }
+            }
+          }
+          client.close();
+        } catch (_) {}
+      }
+
+      final req = http.Request('GET', Uri.parse(targetUrl));
       req.headers.addAll({
-        'Range': 'bytes=0-524287', // 512KB max
+        'Range': 'bytes=0-524287', // 512KB max de contenido multimedia real
         'User-Agent': _ua,
         'Connection': 'close',
-        ...?headers,
+        ...?targetHeaders,
       });
       final resp = await _http.send(req).timeout(timeout);
       if (resp.statusCode != 206 && resp.statusCode != 200) return 0.0;
@@ -639,7 +673,7 @@ class ApiService {
       final ms = sw.elapsedMilliseconds;
       if (ms <= 0 || got <= 0) return 0.0;
       final mbps = (got * 8.0) / (ms / 1000.0) / 1_000_000.0;
-      debugPrint('Speed ${url.substring(0, url.length > 60 ? 60 : url.length)}… = ${mbps.toStringAsFixed(2)} Mbps (${got ~/ 1024}KB/${ms}ms)');
+      debugPrint('Real Media Speed ${targetUrl.substring(0, targetUrl.length > 60 ? 60 : targetUrl.length)}… = ${mbps.toStringAsFixed(2)} Mbps (${got ~/ 1024}KB/${ms}ms)');
       return mbps;
     } catch (e) {
       debugPrint('Speed measure failed: $e');
