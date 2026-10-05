@@ -298,8 +298,25 @@ class UpdateService {
           debugPrint('Update installer not found at $filePath');
           return false;
         }
-        debugPrint('Update: ejecutando instalador $filePath');
-        await Process.start(filePath, [], mode: ProcessStartMode.detached);
+        debugPrint('Update: ejecutando instalador con elevación administrativa: $filePath');
+        final escapedPath = filePath.replaceAll("'", "''");
+        try {
+          await Process.start(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-WindowStyle',
+              'Hidden',
+              '-Command',
+              "Start-Process -FilePath '$escapedPath' -Verb RunAs",
+            ],
+            mode: ProcessStartMode.detached,
+          );
+        } catch (pe) {
+          debugPrint('Update: fallback a Process.start directo ($pe)');
+          await Process.start(filePath, [], mode: ProcessStartMode.detached);
+        }
 
         // Detener reproducción y liberar texturas nativas / libmpv antes de cerrar
         try {

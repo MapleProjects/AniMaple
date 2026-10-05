@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.0.7
+
+### Novedades y mejoras
+- Optimización integral del motor de streaming para UPNShare, Voe, MP4Upload y Byse con prefetching predictivo en bucle invertido y reutilización de conexiones TLS persistentes.
+- Motor de aceleración concurrente por rebanadas de 2 MB para flujos MP4 directos superando los límites de ancho de banda por socket en servidores como MP4Upload.
+- Medición precisa de caudal y latencia multimedia descargando fragmentos binarios reales en lugar de manifiestos en caché.
+- Selección inteligente de servidores con umbrales mínimos de viabilidad por resolución para evitar almacenamiento en búfer.
+- Elevación administrativa garantizada mediante ShellExecute RunAs al actualizar desde la aplicación en Windows para evitar fallos de permisos UAC al ejecutar el instalador.
+- Tolerancia multicadena de redirecciones en el resolutor de Voe y sondeo en memoria sin bloqueo para Byse.
+
 ## v2.0.6
 
 ### Novedades y mejoras
