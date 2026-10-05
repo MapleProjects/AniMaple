@@ -25,7 +25,7 @@ OutFile "${INSTALLER_DIR}\animaple-v${VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\AniMaple"
 InstallDirRegKey HKCU "Software\AniMaple" "InstallPath"
 
-RequestExecutionLevel user
+RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 Icon "${INSTALLER_DIR}\app_icon.ico"
@@ -65,27 +65,35 @@ Var isUpdate
 ; Functions
 
 Function CloseApp
-    DetailPrint "Cerrando AniMaple si esta en ejecucion..."
-    Sleep 500
-    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
+    DetailPrint "Cerrando instancias previas de AniMaple..."
+    ; 1. Cerrar cualquier otro instalador previo colgado
+    System::Call 'kernel32::GetCurrentProcessId() i .r0'
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process | Where-Object { ($$_.ProcessName -match \"animaple.*setup\" -or $$_.MainWindowTitle -match \"Instalaci[oó]n de AniMaple\") -and $$_.Id -ne $0 } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+
+    ; 2. Terminar animaple.exe de forma completamente silenciosa
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
     Sleep 500
 
     IfFileExists "$INSTDIR\animaple.exe" 0 DoneCheck
     StrCpy $R0 0
 CheckLoop:
     ClearErrors
-    FileOpen $R1 "$INSTDIR\animaple.exe" "a"
-    IfErrors 0 FileUnlocked
-    ; Sigue bloqueado por el sistema operativo o proceso residual
-    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
-    Sleep 1000
+    Delete "$INSTDIR\animaple.exe"
+    IfFileExists "$INSTDIR\animaple.exe" 0 FileUnlocked
+    ; Sigue bloqueado: reintentar terminacion forzada
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
+    Sleep 500
     IntOp $R0 $R0 + 1
-    ${If} $R0 < 10
+    ${If} $R0 < 6
         Goto CheckLoop
     ${EndIf}
+    ; Si persiste bloqueo, renombrar el archivo para permitir instalar
+    Rename "$INSTDIR\animaple.exe" "$INSTDIR\animaple.exe.old.$R0"
+    Delete /REBOOTOK "$INSTDIR\animaple.exe.old.$R0"
     Goto DoneCheck
 FileUnlocked:
-    FileClose $R1
 DoneCheck:
 FunctionEnd
 
@@ -117,9 +125,6 @@ Section "AniMaple" SecMain
     DetailPrint "Copiando archivos..."
     File /r "${BUILD_DIR}\*.*"
     
-    DetailPrint "Ajustando atributos..."
-    ExecWait 'attrib -R "$INSTDIR\*.*" /S /D'
-    
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     
     DetailPrint "Creando accesos directos..."
@@ -143,10 +148,8 @@ Section "AniMaple" SecMain
     IntFmt $0 "0x%08X" $0
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AniMaple" "EstimatedSize" "$0"
     
-    ; Clear Windows icon cache so new icon shows immediately
-    DetailPrint "Actualizando cache de iconos..."
-    ExecWait 'ie4uinit.exe -ClearIconCache'
-    ExecWait 'ie4uinit.exe -show'
+    ; Notificar al shell de Windows de cambios de iconos de forma instantanea sin consola
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
     
     ; En modo silencioso, ejecutar AniMaple automaticamente
     IfSilent 0 NotSilent
@@ -159,26 +162,28 @@ SectionEnd
 ; Uninstall
 
 Function un.CloseApp
-    DetailPrint "Cerrando AniMaple si esta en ejecucion..."
-    Sleep 500
-    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
+    DetailPrint "Cerrando instancias previas de AniMaple..."
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
     Sleep 500
 
     IfFileExists "$INSTDIR\animaple.exe" 0 DoneUnCheck
     StrCpy $R0 0
 UnCheckLoop:
     ClearErrors
-    FileOpen $R1 "$INSTDIR\animaple.exe" "a"
-    IfErrors 0 FileUnUnlocked
-    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /F /T /IM animaple.exe'
-    Sleep 1000
+    Delete "$INSTDIR\animaple.exe"
+    IfFileExists "$INSTDIR\animaple.exe" 0 FileUnUnlocked
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
+    Sleep 500
     IntOp $R0 $R0 + 1
-    ${If} $R0 < 10
+    ${If} $R0 < 6
         Goto UnCheckLoop
     ${EndIf}
+    Rename "$INSTDIR\animaple.exe" "$INSTDIR\animaple.exe.old"
+    Delete /REBOOTOK "$INSTDIR\animaple.exe.old"
     Goto DoneUnCheck
 FileUnUnlocked:
-    FileClose $R1
 DoneUnCheck:
 FunctionEnd
 
