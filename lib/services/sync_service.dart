@@ -225,8 +225,14 @@ class SyncService {
           lastError = 'No se pudo obtener el token de acceso de Google Drive.';
           return false;
         }
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(
+              _rememberedAccountKey, accountEmail ?? 'signed-in');
+        } catch (_) {}
         startAutoSync();
         _notifySessionChanged();
+        await sync(forcePush: true);
         debugPrint('Sync: signed in (desktop) as $accountEmail');
         return true;
       }
@@ -501,8 +507,11 @@ class SyncService {
       // Marcar como vista aunque el merge no cambiara nada (mismo contenido).
       _lastRemoteVersion = v;
     } catch (e) {
-      // Sin red / auth caducado: se reintentará en el siguiente ciclo.
-      if (_isAuthError(e)) _authHeaders = null;
+      if (e is InsufficientScopesException) {
+        _handleInsufficientScopes();
+      } else if (_isAuthError(e)) {
+        _authHeaders = null;
+      }
       debugPrint('Sync: poll skip: $e');
     }
   }
@@ -589,8 +598,12 @@ class SyncService {
       debugPrint('Sync: push OK, ${utf8.encode(body).length} bytes');
       return true;
     } catch (e) {
-      _authHeaders = null; // forzar re-autorización la próxima
-      lastError = 'Error al subir datos a Drive: $e';
+      if (e is InsufficientScopesException) {
+        _handleInsufficientScopes();
+      } else {
+        _authHeaders = null; // forzar re-autorización la próxima
+        lastError = 'Error al subir datos a Drive: $e';
+      }
       debugPrint('Sync push error: $e');
       return false;
     }
@@ -650,8 +663,12 @@ class SyncService {
       lastSyncedAt = DateTime.now().toUtc().toIso8601String();
       return changed;
     } catch (e) {
-      _authHeaders = null;
-      lastError = 'Error al bajar datos de Drive: $e';
+      if (e is InsufficientScopesException) {
+        _handleInsufficientScopes();
+      } else {
+        _authHeaders = null;
+        lastError = 'Error al bajar datos de Drive: $e';
+      }
       debugPrint('Sync pull error: $e');
       return false;
     }
@@ -878,6 +895,10 @@ class SyncService {
       final id = res?['id'] as String?;
       if (id != null) _fileId = id;
       return id;
+    } on InsufficientScopesException catch (e) {
+      debugPrint('Sync: permisos insuficientes para crear archivo: $e');
+      _handleInsufficientScopes();
+      return null;
     } catch (e) {
       debugPrint('Sync: error al crear archivo en Drive: $e');
       return null;
@@ -901,6 +922,10 @@ class SyncService {
           '/files?q=$q&fields=files(id,name,size,modifiedTime)',
         );
         files = (res?['files'] as List? ?? []).cast<Map>().toList();
+      } on InsufficientScopesException catch (e) {
+        debugPrint('Sync: permisos insuficientes para buscar en Drive: $e');
+        _handleInsufficientScopes();
+        return null;
       } catch (e) {
         debugPrint('Sync: Drive search skip: $e');
       }
@@ -997,9 +1022,28 @@ class SyncService {
 
     debugPrint('Sync: $method $path → ${streamed.statusCode}');
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      if (streamed.statusCode == 403 && res.contains('insufficientScopes')) {
+        throw InsufficientScopesException('Drive API insufficientScopes: $res');
+      }
       throw Exception('Drive API $method $path → ${streamed.statusCode}: $res');
     }
     if (res.isEmpty) return null;
     return jsonDecode(res);
   }
+
+  static void _handleInsufficientScopes() {
+    _authHeaders = null;
+    lastError = 'Tu sesión requiere volver a vincularse para sincronizar con Google Drive.';
+    if (!googleSignInSupported) {
+      DesktopGoogleAuth.signOut();
+    }
+    stateVersion.value++;
+  }
+}
+
+class InsufficientScopesException implements Exception {
+  final String message;
+  InsufficientScopesException(this.message);
+  @override
+  String toString() => message;
 }

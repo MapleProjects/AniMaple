@@ -42,6 +42,7 @@ class DesktopGoogleAuth {
   static const _pkName = 'desktop_oauth_name';
   static const _pkPhoto = 'desktop_oauth_photo';
   static const _pkIsTvClient = 'desktop_oauth_is_tv_client';
+  static const _pkScope = 'desktop_oauth_scope';
 
   static String? _accessToken;
   static String? _refreshToken;
@@ -50,9 +51,12 @@ class DesktopGoogleAuth {
   static String? _name;
   static String? _photoUrl;
   static bool _isTvClient = false;
+  static String? _grantedScope;
 
   // Getters para la UI (espejo de SyncService).
   static bool get isSignedIn => _accessToken != null;
+  static bool get hasDriveFileScope =>
+      _grantedScope != null && _grantedScope!.contains('drive.file');
   static String? get accountEmail => _email;
   static String? get accountDisplayName => _name;
   static String? get accountPhotoUrl => _photoUrl;
@@ -80,12 +84,18 @@ class DesktopGoogleAuth {
     _name = p.getString(_pkName);
     _photoUrl = p.getString(_pkPhoto);
     _isTvClient = p.getBool(_pkIsTvClient) ?? false;
+    _grantedScope = p.getString(_pkScope);
   }
 
   /// Restaura una sesión persistida. Devuelve true si hay token (o lo
   /// refrescó exitosamente). No muestra UI.
   static Future<bool> tryRestore() async {
     await load();
+    if (_grantedScope != null && !_grantedScope!.contains('drive.file')) {
+      debugPrint('DesktopAuth: sesión existente carece de drive.file scope → se requiere re-login');
+      await signOut();
+      return false;
+    }
     if (_accessToken != null) {
       if (_expiresAt != null &&
           _expiresAt! - 60000 < DateTime.now().millisecondsSinceEpoch) {
@@ -646,6 +656,12 @@ p{color:#6d6488;margin:0}
     if (exp != null) {
       _expiresAt = DateTime.now().millisecondsSinceEpoch + exp * 1000;
     }
+    final sc = data['scope'] as String?;
+    if (sc != null && sc.isNotEmpty) {
+      _grantedScope = sc;
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_pkScope, sc);
+    }
     final idToken = data['id_token'] as String?;
     if (idToken != null && idToken.isNotEmpty) {
       try {
@@ -718,6 +734,7 @@ p{color:#6d6488;margin:0}
     await p.remove(_pkName);
     await p.remove(_pkPhoto);
     await p.remove(_pkIsTvClient);
+    await p.remove(_pkScope);
     _accessToken = null;
     _refreshToken = null;
     _expiresAt = null;
@@ -725,6 +742,7 @@ p{color:#6d6488;margin:0}
     _name = null;
     _photoUrl = null;
     _isTvClient = false;
+    _grantedScope = null;
   }
 
   static String _base64UrlNoPad(List<int> bytes) =>

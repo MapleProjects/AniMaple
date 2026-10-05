@@ -47,18 +47,29 @@ tar --exclude='.git' \
 echo "Código fuente sincronizado exitosamente."
 
 # 4. Compilar proyecto en Windows con Flutter y MSVC
-echo "Ejecutando flutter pub get y flutter build windows --release..."
-ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "
-cd C:\Users\Maple\AniMaple
-C:\flutter\bin\flutter.bat pub get
-C:\flutter\bin\flutter.bat build windows --release
-"
+echo "Limpiando binarios previos y ejecutando flutter pub get + flutter build windows --release..."
+ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
+$ErrorActionPreference = "Stop"
+if (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release") {
+    Remove-Item "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release" -Recurse -Force
+}
+Set-Location "C:\Users\Maple\AniMaple"
+& "C:\flutter\bin\flutter.bat" pub get
+if ($LASTEXITCODE -ne 0) { Write-Error "flutter pub get fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
+& "C:\flutter\bin\flutter.bat" build windows --release
+if ($LASTEXITCODE -ne 0) { Write-Error "flutter build windows fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
+if (-not (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\animaple.exe")) {
+    Write-Error "ERROR: animaple.exe no fue generado tras la compilacion"; exit 1
+}
+'
 
 # 5. Generar instalador con NSIS y paquete ZIP portátil
 echo "Generando instalador NSIS y comprimido portátil..."
 ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" '
+$ErrorActionPreference = "Stop"
 Set-Location "C:\Users\Maple\AniMaple\tools\installer"
 & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION="'"$VERSION"'" /DBUILD_DIR="C:\Users\Maple\AniMaple\build\windows\x64\runner\Release" /DINSTALLER_DIR="C:\Users\Maple\AniMaple\tools\installer" animaple.nsi
+if ($LASTEXITCODE -ne 0) { Write-Error "NSIS makensis fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
 Compress-Archive -Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\*" -DestinationPath "C:\Users\Maple\AniMaple\tools\installer\animaple-v'"$VERSION"'-windows.zip" -Force
 Copy-Item "C:\Users\Maple\AniMaple\tools\installer\animaple-v'"$VERSION"'-setup.exe" "C:\Users\Maple\Desktop\animaple-v'"$VERSION"'-setup.exe" -Force
 '

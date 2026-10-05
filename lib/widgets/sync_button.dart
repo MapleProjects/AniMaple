@@ -188,13 +188,35 @@ class _SyncButtonState extends State<SyncButton> {
             ListTile(
               leading: const Icon(Icons.sync, color: Color(0xFFa78bfa)),
               title: const Text(
-                'Sincronización automática',
+                'Sincronizar ahora',
                 style: TextStyle(fontSize: 14, color: Color(0xFFe8e4f0)),
               ),
               subtitle: const Text(
                 'Tus datos se sincronizan automáticamente entre todos tus dispositivos',
                 style: TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
               ),
+              onTap: () async {
+                Navigator.pop(sheetCtx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Sincronizando con Google Drive…'),
+                    backgroundColor: Color(0xFF8b5cf6),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+                await SyncService.sync(forcePush: true);
+                if (mounted) {
+                  _showErrorOr(() {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Sincronización completada.'),
+                        backgroundColor: Color(0xFF8b5cf6),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  });
+                }
+              },
             ),
             ListTile(
               leading: const Icon(Icons.logout, color: Color(0xFFf87171)),

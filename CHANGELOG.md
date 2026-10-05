@@ -1,5 +1,14 @@
 # AniMaple — Registro de cambios
 
+## v2.0.6
+
+### Novedades y mejoras
+- Corrección de la verificación de versión en Windows: detección precisa a partir del binario compilado para asegurar notificaciones fiables de nuevas actualizaciones.
+- Recompilación nativa completa del instalador de Windows garantizando el reemplazo efectivo de todos los archivos y ejecutables.
+- Sincronización automática de Google Drive en Windows y Linux con validación de permisos completos de lectura y escritura.
+- Detección reactiva de sesiones heredadas con ámbitos insuficientes y flujo guiado de renovación.
+- Sincronización inmediata al conectar la cuenta y nueva opción de sincronización manual en el menú de perfil.
+
 ## v2.0.5
 
 ### Novedades y mejoras

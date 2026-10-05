@@ -50,7 +50,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.5';
+  static const String appVersion = '2.0.6';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -67,7 +67,7 @@ class UpdateService {
 
   static bool _checked = false;
 
-  /// Lee la versión instalada desde el canal nativo (Android), registro (Windows) o fallback.
+  /// Lee la versión instalada desde el canal nativo (Android) o la constante compilada (Desktop).
   static Future<String?> _loadCurrentVersion() async {
     if (Platform.isAndroid) {
       try {
@@ -77,42 +77,10 @@ class UpdateService {
           return v;
         }
       } catch (_) {}
-    } else if (Platform.isWindows) {
-      try {
-        final res = await Process.run('reg', [
-          'query',
-          r'HKCU\Software\AniMaple',
-          '/v',
-          'Version',
-        ]);
-        if (res.exitCode == 0) {
-          final out = res.stdout.toString();
-          final match = RegExp(r'Version\s+REG_SZ\s+([0-9\.]+)').firstMatch(out);
-          if (match != null) {
-            final v = match.group(1)?.trim();
-            if (v != null && v.isNotEmpty) {
-              _currentVersion = v;
-              return v;
-            }
-          }
-        }
-      } catch (_) {}
-    } else if (Platform.isLinux) {
-      try {
-        final res = await Process.run('pacman', ['-Q', 'animaple-bin']);
-        if (res.exitCode == 0) {
-          final out = res.stdout.toString();
-          final match = RegExp(r'animaple-bin\s+([0-9\.]+)').firstMatch(out);
-          if (match != null) {
-            final v = match.group(1)?.trim();
-            if (v != null && v.isNotEmpty) {
-              _currentVersion = v;
-              return v;
-            }
-          }
-        }
-      } catch (_) {}
     }
+    // En Windows, Linux y macOS el ejecutable conoce su propia versión compilada.
+    // Nunca consultar el registro de Windows ni pacman para evitar estados
+    // falsamente actualizados si el instalador no reemplazó el binario.
     _currentVersion = appVersion;
     return _currentVersion;
   }
