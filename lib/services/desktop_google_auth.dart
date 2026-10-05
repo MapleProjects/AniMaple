@@ -292,50 +292,53 @@ class DesktopGoogleAuth {
                 borderRadius: BorderRadius.circular(20),
                 side: const BorderSide(color: Color(0xFF2d2244), width: 1.5),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-              content: SizedBox(
-                width: 620,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              content: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 580,
+                  maxHeight: MediaQuery.of(dialogCtx).size.height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 26),
                           ),
-                          child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 28),
-                        ),
-                        const SizedBox(width: 14),
-                        const Text(
-                          'Vincular con tu Cuenta de Google',
-                          style: TextStyle(
-                            color: Color(0xFFf3f0fa),
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Vincular con tu Cuenta de Google',
+                            style: TextStyle(
+                              color: Color(0xFFf3f0fa),
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Escanea el código QR con la cámara de tu celular o ingresa el código manualmente.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFFa29cb6), fontSize: 13),
-                    ),
-                    const SizedBox(height: 20),
-                    IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Escanea el código QR con tu celular para abrir el enlace con el código ya completado, o ingrésalo manualmente.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Color(0xFFa29cb6), fontSize: 12),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // 1. Código QR con user_code ya incluido
                           Expanded(
                             flex: 5,
                             child: Container(
-                              padding: const EdgeInsets.all(14),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF1c162e),
                                 borderRadius: BorderRadius.circular(14),
@@ -343,34 +346,33 @@ class DesktopGoogleAuth {
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Container(
-                                    padding: const EdgeInsets.all(8),
+                                    padding: const EdgeInsets.all(6),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
-                                      borderRadius: BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: QrImageView(
                                       data: qrUrl,
                                       version: QrVersions.auto,
-                                      size: 135.0,
+                                      size: 110.0,
                                       backgroundColor: Colors.white,
                                       padding: EdgeInsets.zero,
                                     ),
                                   ),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 8),
                                   const Text(
                                     'Escanear con celular',
                                     style: TextStyle(
                                       color: Color(0xFFa78bfa),
-                                      fontSize: 13,
+                                      fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                   const SizedBox(height: 2),
                                   const Text(
-                                    'Código listo para confirmar',
+                                    'Abre con código ya listo',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
                                   ),
@@ -378,43 +380,43 @@ class DesktopGoogleAuth {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 12),
                           // 2. Método Manual (código en pantalla)
                           Expanded(
                             flex: 6,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF1c162e),
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: const Color(0xFF382b54)),
                               ),
                               child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Text(
-                                    'O entra desde tu navegador a:',
+                                    'O entra desde navegador a:',
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 12),
+                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 4),
                                   Text(
                                     verificationUrl,
                                     style: const TextStyle(
                                       color: Color(0xFFa78bfa),
-                                      fontSize: 16,
+                                      fontSize: 15,
                                       fontWeight: FontWeight.bold,
                                       letterSpacing: 0.5,
                                     ),
                                   ),
-                                  const SizedBox(height: 14),
+                                  const SizedBox(height: 12),
                                   const Text(
-                                    'Escribe este código:',
-                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 12),
+                                    'Código de vinculación:',
+                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
                                   ),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFF281f3d),
                                       borderRadius: BorderRadius.circular(8),
@@ -428,9 +430,9 @@ class DesktopGoogleAuth {
                                       textAlign: TextAlign.center,
                                       style: const TextStyle(
                                         color: Color(0xFFffffff),
-                                        fontSize: 22,
+                                        fontSize: 20,
                                         fontWeight: FontWeight.w900,
-                                        letterSpacing: 2.5,
+                                        letterSpacing: 2.0,
                                       ),
                                     ),
                                   ),
@@ -440,45 +442,54 @@ class DesktopGoogleAuth {
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFFa78bfa),
-                          ),
+                      const SizedBox(height: 18),
+                      // Estado de espera en contenedor diferenciado
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF191328),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFF2d2244)),
                         ),
-                        SizedBox(width: 10),
-                        Text(
-                          'Esperando confirmación en tu teléfono…',
-                          style: TextStyle(color: Color(0xFFb8b2cb), fontSize: 13),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      autofocus: true,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF251d38),
-                        foregroundColor: const Color(0xFFe2def0),
-                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: const BorderSide(color: Color(0xFF3d2f5a)),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFa78bfa),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Esperando confirmación en tu teléfono…',
+                              style: TextStyle(color: Color(0xFFb8b2cb), fontSize: 12),
+                            ),
+                          ],
                         ),
                       ),
-                      onPressed: () {
-                        userCancelled = true;
-                        Navigator.of(dialogCtx).pop(false);
-                      },
-                      child: const Text('Cancelar', style: TextStyle(fontSize: 14)),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        autofocus: true,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF251d38),
+                          foregroundColor: const Color(0xFFe2def0),
+                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: const BorderSide(color: Color(0xFF3d2f5a)),
+                          ),
+                        ),
+                        onPressed: () {
+                          userCancelled = true;
+                          Navigator.of(dialogCtx).pop(false);
+                        },
+                        child: const Text('Cancelar', style: TextStyle(fontSize: 14)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

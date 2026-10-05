@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.0.5
+
+### Novedades y mejoras
+- Corrección de la superposición visual en el diálogo de inicio de sesión de Google en televisores y Android TV.
+- Optimización del código QR con apertura directa del portal de verificación y código prellenado.
+- Sincronización completa y bidireccional en la nube de Google Drive compartida entre Android TV, escritorio y móviles.
+- Migración automática de datos existentes al almacenamiento compartido de Google Drive.
+- Distribución vertical equilibrada y adaptable de la barra de navegación lateral para pantallas panorámicas y televisores.
+- Resaltado de foco de alto contraste para navegación fluida con control remoto en televisores.
+
 ## v2.0.4
 
 ### Novedades y mejoras

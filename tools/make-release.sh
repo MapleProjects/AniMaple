@@ -216,7 +216,7 @@ if [ "$PUBLISH" -eq 1 ]; then
     echo "=========================================="
     cd "$REPO_DIR"
 
-    git add pubspec.yaml lib/services/update_service.dart CHANGELOG.md tools/make-release.sh
+    git add -A
     git commit -m "release: v$TARGET_VERSION (build $TARGET_BUILD)" || true
     
     if git rev-parse "v$TARGET_VERSION" >/dev/null 2>&1; then

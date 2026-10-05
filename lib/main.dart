@@ -292,67 +292,46 @@ class _MainShellState extends State<MainShell> {
           return Scaffold(
             body: Row(
               children: [
-                NavigationRail(
-                  selectedIndex: _currentIndex,
-                  onDestinationSelected: _onTabChanged,
-                  backgroundColor: const Color(0xFF0e0b18),
-                  indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.25),
-                  selectedIconTheme: const IconThemeData(color: Color(0xFFa78bfa), size: 28),
-                  unselectedIconTheme: const IconThemeData(color: Color(0xFF6d6488), size: 24),
-                  selectedLabelTextStyle: const TextStyle(
-                    color: Color(0xFFa78bfa),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                  unselectedLabelTextStyle: const TextStyle(
-                    color: Color(0xFF6d6488),
-                    fontSize: 12,
-                  ),
-                  labelType: NavigationRailLabelType.all,
-                  leading: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: ShaderMask(
-                      shaderCallback: (bounds) => const LinearGradient(
-                        colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
-                      ).createShader(bounds),
-                      child: const Text(
-                        'AniMaple',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 18,
-                          color: Colors.white,
-                          letterSpacing: 0.5,
+                Container(
+                  width: 96,
+                  color: const Color(0xFF0e0b18),
+                  child: SafeArea(
+                    right: false,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 24, bottom: 16),
+                          child: ShaderMask(
+                            shaderCallback: (bounds) => const LinearGradient(
+                              colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
+                            ).createShader(bounds),
+                            child: const Text(
+                              'AniMaple',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 17,
+                                color: Colors.white,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              _buildRailItem(0, 'Inicio', Icons.home_outlined, Icons.home),
+                              _buildRailItem(1, 'Catálogo', Icons.search_outlined, Icons.search),
+                              _buildRailItem(2, 'Horario', Icons.calendar_today_outlined, Icons.calendar_today),
+                              _buildRailItem(3, 'Historial', Icons.history_outlined, Icons.history),
+                              _buildRailItem(4, 'Mi lista', Icons.favorite_outline, Icons.favorite),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                     ),
                   ),
-                  destinations: const [
-                    NavigationRailDestination(
-                      icon: Icon(Icons.home_outlined),
-                      selectedIcon: Icon(Icons.home),
-                      label: Text('Inicio'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.search_outlined),
-                      selectedIcon: Icon(Icons.search),
-                      label: Text('Catálogo'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.calendar_today_outlined),
-                      selectedIcon: Icon(Icons.calendar_today),
-                      label: Text('Horario'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.history_outlined),
-                      selectedIcon: Icon(Icons.history),
-                      label: Text('Historial'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.favorite_outline),
-                      selectedIcon: Icon(Icons.favorite),
-                      label: Text('Mi lista'),
-                    ),
-                  ],
                 ),
                 const VerticalDivider(thickness: 1, width: 1, color: Color(0xFF1e1832)),
                 Expanded(
@@ -421,6 +400,126 @@ class _MainShellState extends State<MainShell> {
           floatingActionButton: const DownloadsFab(),
         );
       },
+    );
+  }
+
+  Widget _buildRailItem(
+    int index,
+    String label,
+    IconData unselectedIcon,
+    IconData selectedIcon,
+  ) {
+    return _RailNavItem(
+      isSelected: _currentIndex == index,
+      label: label,
+      unselectedIcon: unselectedIcon,
+      selectedIcon: selectedIcon,
+      onTap: () => _onTabChanged(index),
+    );
+  }
+}
+
+class _RailNavItem extends StatefulWidget {
+  final bool isSelected;
+  final String label;
+  final IconData unselectedIcon;
+  final IconData selectedIcon;
+  final VoidCallback onTap;
+
+  const _RailNavItem({
+    required this.isSelected,
+    required this.label,
+    required this.unselectedIcon,
+    required this.selectedIcon,
+    required this.onTap,
+  });
+
+  @override
+  State<_RailNavItem> createState() => _RailNavItemState();
+}
+
+class _RailNavItemState extends State<_RailNavItem> {
+  bool _isFocused = false;
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.isSelected;
+    final highlight = _isFocused || _isHovered;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: FocusableActionDetector(
+        onShowFocusHighlight: (f) => setState(() => _isFocused = f),
+        onShowHoverHighlight: (h) => setState(() => _isHovered = h),
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) => widget.onTap(),
+          ),
+        },
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(16),
+          focusColor: Colors.transparent,
+          hoverColor: Colors.transparent,
+          splashColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+          highlightColor: Colors.transparent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            decoration: BoxDecoration(
+              color: active
+                  ? const Color(0xFF8b5cf6).withValues(alpha: 0.25)
+                  : (highlight
+                      ? const Color(0xFF8b5cf6).withValues(alpha: 0.12)
+                      : Colors.transparent),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isFocused
+                    ? const Color(0xFFa78bfa)
+                    : (active
+                        ? const Color(0xFF8b5cf6).withValues(alpha: 0.4)
+                        : Colors.transparent),
+                width: _isFocused ? 2 : 1,
+              ),
+              boxShadow: _isFocused
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      )
+                    ]
+                  : null,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  active ? widget.selectedIcon : widget.unselectedIcon,
+                  color: active || highlight
+                      ? const Color(0xFFa78bfa)
+                      : const Color(0xFF6d6488),
+                  size: 26,
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  widget.label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: active || highlight
+                        ? const Color(0xFFf3f0fa)
+                        : const Color(0xFF6d6488),
+                    fontSize: 12,
+                    fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

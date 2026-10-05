@@ -34,6 +34,8 @@ class SyncService {
   static const _fileName = 'animaple_sync.json';
   static const _scopeDriveAppdata =
       'https://www.googleapis.com/auth/drive.appdata';
+  static const _scopeDriveFile =
+      'https://www.googleapis.com/auth/drive.file';
   static const _driveApiBase = 'https://www.googleapis.com/drive/v3';
   // El endpoint de subida de contenido real es /upload/drive/v3 (no /drive/v3).
   // Con uploadType=media, Google SOLO lo acepta en la URL con /upload/; si se
@@ -96,7 +98,7 @@ class SyncService {
 
   static GoogleSignIn _getGoogleSignIn() {
     return _googleSignIn ??= GoogleSignIn(
-      scopes: const [_scopeDriveAppdata],
+      scopes: const [_scopeDriveAppdata, _scopeDriveFile],
       // En Android, clientId no está soportado y si se pasa sobreescribe serverClientId.
       // serverClientId DEBE ser el Web Application Client ID para que Google Play Services
       // pueda emitir tokens de Google Drive API.
@@ -207,6 +209,7 @@ class SyncService {
         } catch (_) {}
         startAutoSync();
         _notifySessionChanged();
+        await sync(forcePush: true);
         debugPrint('Sync: signed in via TV Device Flow as $accountEmail');
         return true;
       }
@@ -857,33 +860,12 @@ class SyncService {
     return at.isAfter(bt);
   }
 
-  /// Crea el archivo en appDataFolder (o en Drive si el scope es drive.file) si no existe. Devuelve su id.
+  /// Crea el archivo de sincronización en el Drive del usuario (accesible por TV, Desktop y Mobile).
   static Future<String?> _ensureFileId() async {
     if (_fileId != null) return _fileId;
     final existing = await _findFileId();
     if (existing != null) return existing;
 
-    // 1. Intentar crear en appDataFolder si el scope es drive.appdata
-    try {
-      final res = await _driveRequest(
-        'POST',
-        '/files',
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': _fileName,
-          'parents': ['appDataFolder'],
-        }),
-      );
-      final id = res?['id'] as String?;
-      if (id != null) {
-        _fileId = id;
-        return id;
-      }
-    } catch (e) {
-      debugPrint('Sync: appDataFolder create skip (posible scope drive.file): $e');
-    }
-
-    // 2. Fallback: crear directamente en Drive del usuario (scope drive.file en Android TV)
     try {
       final res = await _driveRequest(
         'POST',
@@ -903,39 +885,70 @@ class SyncService {
   }
 
   /// Busca el archivo de sincronización.
-  /// Primero consulta appDataFolder; si no existe o el scope es drive.file,
-  /// consulta en el Drive del usuario. Elimina duplicados si los hubiere.
+  /// Consulta primero en el Drive compartido del usuario (drive.file).
+  /// Si no existe y no es TV, migra desde appDataFolder a la raíz de Drive.
+  /// Elimina duplicados si los hubiere conservando el archivo con más datos.
   static Future<String?> _findFileId() async {
     if (!isSignedIn || _authHeaders == null) return null;
     try {
       final q = Uri.encodeComponent("name='$_fileName' and trashed=false");
       List<Map> files = [];
 
-      // 1. Buscar en appDataFolder (si el token tiene drive.appdata)
+      // 1. Buscar en el Drive del usuario (accesible con drive.file en TV, Desktop y Mobile)
       try {
         final res = await _driveRequest(
           'GET',
-          '/files?spaces=appDataFolder&q=$q&fields=files(id,name)',
+          '/files?q=$q&fields=files(id,name,size,modifiedTime)',
         );
         files = (res?['files'] as List? ?? []).cast<Map>().toList();
       } catch (e) {
-        debugPrint('Sync: appDataFolder search skip: $e');
+        debugPrint('Sync: Drive search skip: $e');
       }
 
-      // 2. Si no hay archivo en appDataFolder, buscar en Drive del usuario (drive.file)
-      if (files.isEmpty) {
+      // 2. Si no se encontró en Drive y el cliente tiene acceso a appDataFolder (no TV),
+      // buscar si existe una versión previa en appDataFolder y migrarla a Drive raíz.
+      if (files.isEmpty && !TvService.isTvMode) {
         try {
           final res = await _driveRequest(
             'GET',
-            '/files?q=$q&fields=files(id,name)',
+            '/files?spaces=appDataFolder&q=$q&fields=files(id,name,size)',
           );
-          files = (res?['files'] as List? ?? []).cast<Map>().toList();
+          final appDataFiles = (res?['files'] as List? ?? []).cast<Map>().toList();
+          if (appDataFiles.isNotEmpty) {
+            final appDataId = appDataFiles.first['id'] as String?;
+            if (appDataId != null) {
+              debugPrint('Sync: migrando archivo desde appDataFolder ($appDataId) a raíz de Drive...');
+              final oldContent = await _driveRequest('GET', '/files/$appDataId?alt=media');
+              if (oldContent != null) {
+                final createRes = await _driveRequest(
+                  'POST',
+                  '/files',
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'name': _fileName}),
+                );
+                final newId = createRes?['id'] as String?;
+                if (newId != null) {
+                  await _driveRequest(
+                    'PATCH',
+                    '/files/$newId?uploadType=media',
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode(oldContent),
+                  );
+                  debugPrint('Sync: migración completada exitosamente a raíz id=$newId');
+                  files = [{'id': newId, 'name': _fileName, 'size': utf8.encode(jsonEncode(oldContent)).length}];
+                }
+              }
+            }
+          }
         } catch (e) {
-          debugPrint('Sync: Drive search skip: $e');
+          debugPrint('Sync: appDataFolder migration check skip: $e');
         }
       }
 
       if (files.isEmpty) return null;
+
+      // Ordenar por tamaño descendente para priorizar el archivo con datos reales
+      files.sort((a, b) => (int.tryParse('${b['size'] ?? 0}') ?? 0).compareTo(int.tryParse('${a['size'] ?? 0}') ?? 0));
 
       final first = files.first['id'] as String?;
       // Eliminar duplicados (mismo nombre) para mantener una sola fuente.
