@@ -678,7 +678,24 @@ class ApiService {
     var got = 0;
     try {
       var targetUrl = url;
-      final targetHeaders = headers;
+      final effectiveHeaders = <String, String>{
+        'User-Agent': _ua,
+        'Connection': 'close',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        ...?headers,
+      };
+      if (effectiveHeaders.containsKey('Referer')) {
+        try {
+          final refUri = Uri.parse(effectiveHeaders['Referer']!);
+          effectiveHeaders.putIfAbsent('Origin', () => '${refUri.scheme}://${refUri.host}');
+          final targetHost = Uri.parse(targetUrl).host;
+          effectiveHeaders.putIfAbsent(
+            'Sec-Fetch-Site',
+            () => refUri.host == targetHost ? 'same-origin' : 'cross-site',
+          );
+        } catch (_) {}
+      }
 
       // Si la URL es una lista HLS (.m3u8), no medimos el manifest de texto de ~2KB.
       // Extraemos el primer segmento multimedia auténtico para medir la entrega real.
@@ -688,8 +705,7 @@ class ApiService {
             ..badCertificateCallback = ((_, __, ___) => true)
             ..connectionTimeout = const Duration(seconds: 4);
           final req = await client.getUrl(Uri.parse(targetUrl));
-          req.headers.set('User-Agent', _ua);
-          targetHeaders?.forEach((k, v) => req.headers.set(k, v));
+          effectiveHeaders.forEach((k, v) => req.headers.set(k, v));
           final resp = await req.close().timeout(const Duration(seconds: 4));
           if (resp.statusCode == 200) {
             final playlist = await utf8.decodeStream(resp);
@@ -709,12 +725,19 @@ class ApiService {
         } catch (_) {}
       }
 
+      // Actualizar Sec-Fetch-Site para el segmento si cambió el host
+      try {
+        if (effectiveHeaders.containsKey('Referer')) {
+          final refHost = Uri.parse(effectiveHeaders['Referer']!).host;
+          final segHost = Uri.parse(targetUrl).host;
+          effectiveHeaders['Sec-Fetch-Site'] = refHost == segHost ? 'same-origin' : 'cross-site';
+        }
+      } catch (_) {}
+
       final req = http.Request('GET', Uri.parse(targetUrl));
       req.headers.addAll({
         'Range': 'bytes=0-524287', // 512KB max de contenido multimedia real
-        'User-Agent': _ua,
-        'Connection': 'close',
-        ...?targetHeaders,
+        ...effectiveHeaders,
       });
       final resp = await _http.send(req).timeout(timeout);
       if (resp.statusCode != 206 && resp.statusCode != 200) return 0.0;
@@ -840,16 +863,19 @@ class ApiService {
       }
 
       // HLS (zilla-networks)
-      if (embedUrl.contains('zilla-networks.com/play/')) {
-        final id = embedUrl.split('/').last;
+      if (embedUrl.contains('zilla-networks.com')) {
+        final id = embedUrl.split('?').first.split('/').last;
         if (id.isNotEmpty) {
           // Append ?x.m3u8 so video_view's ExoPlayer regex detects HLS type.
-          // URL pattern: /m3u8/{id} lacks the dot that ExoPlayer needs (\.m3u8).
           return {
             'url': 'https://player.zilla-networks.com/m3u8/$id?x.m3u8',
             'type': 'hls',
             'headers': {
-              'Referer': 'https://player.zilla-networks.com/',
+              'Referer': 'https://player.zilla-networks.com/play/$id',
+              'Origin': 'https://player.zilla-networks.com',
+              'Sec-Fetch-Dest': 'empty',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Site': 'same-origin',
             },
           };
         }

@@ -1002,7 +1002,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ?.map((k, v) => MapEntry(k, v.toString()));
       final headers = customHeaders ??
           (videoType == 'hls'
-              ? <String, String>{'Referer': 'https://player.zilla-networks.com/'}
+              ? <String, String>{
+                  'Referer': s.url.contains('zilla') ? s.url : 'https://player.zilla-networks.com/',
+                  'Origin': 'https://player.zilla-networks.com',
+                  'Sec-Fetch-Dest': 'empty',
+                  'Sec-Fetch-Mode': 'cors',
+                  'Sec-Fetch-Site': 'same-origin',
+                }
               : videoType == 'mp4'
                   ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
                   : null);

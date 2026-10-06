@@ -112,32 +112,43 @@ class _CalendarPageState extends State<CalendarPage> {
           ? const Center(child: Text('Sin datos', style: TextStyle(color: Color(0xFF6d6488))))
           : Column(
               children: [
-                // Day tabs
-                SizedBox(
-                  height: 48,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    itemCount: _days.length,
-                    itemBuilder: (ctx, i) {
-                      final isActive = i == _selectedDay;
+                // Encabezado de días adaptable: distribuido uniformemente a lo ancho en pantallas
+                // panorámicas (TV, Windows, Linux, tablet) o con desplazamiento suave en móviles.
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final totalW = constraints.maxWidth;
+                    final canExpand = totalW >= (_days.length * 75);
+                    if (canExpand) {
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: ChoiceChip(
-                          label: Text(_days[i]),
-                          selected: isActive,
-                          onSelected: (_) => setState(() => _selectedDay = i),
-                          selectedColor: const Color(0xFF8b5cf6),
-                          backgroundColor: const Color(0xFF110e1a),
-                          labelStyle: TextStyle(
-                            color: isActive ? Colors.white : const Color(0xFFa99fc0),
-                            fontWeight: FontWeight.w600, fontSize: 13,
-                          ),
-                          side: const BorderSide(color: Color(0xFF1e1832)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        child: Row(
+                          children: [
+                            for (var i = 0; i < _days.length; i++)
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                                  child: _buildDayTab(i, isExpanded: true),
+                                ),
+                              ),
+                          ],
                         ),
                       );
-                    },
-                  ),
+                    }
+                    return SizedBox(
+                      height: 52,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        itemCount: _days.length,
+                        itemBuilder: (ctx, i) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _buildDayTab(i, isExpanded: false),
+                          );
+                        },
+                      ),
+                    );
+                  },
                 ),
                 // Anime grid for selected day (vertical cards like animeav1)
                 Expanded(
@@ -222,6 +233,52 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildDayTab(int i, {required bool isExpanded}) {
+    final isActive = i == _selectedDay;
+    final title = _days[i];
+    return TvFocusable(
+      onTap: () => setState(() => _selectedDay = i),
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        alignment: Alignment.center,
+        padding: EdgeInsets.symmetric(
+          horizontal: isExpanded ? 4 : 14,
+          vertical: 9,
+        ),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF8b5cf6) : const Color(0xFF141022),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isActive ? const Color(0xFFa78bfa) : const Color(0xFF261f3d),
+            width: 1,
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF8b5cf6).withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: isActive ? Colors.white : const Color(0xFFb3a8cf),
+            fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+            fontSize: 13,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
     );
   }
 }

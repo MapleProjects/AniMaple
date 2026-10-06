@@ -114,6 +114,11 @@ class HlsProxy {
       try {
         final u = Uri.parse(ref);
         req.headers.set('Origin', '${u.scheme}://${u.host}');
+        final targetHost = Uri.parse(targetUrl).host;
+        req.headers.set(
+          'Sec-Fetch-Site',
+          u.host == targetHost ? 'same-origin' : 'cross-site',
+        );
       } catch (_) {}
     }
   }

@@ -1,5 +1,12 @@
 # AniMaple — Registro de cambios
 
+## v2.0.8
+
+### Novedades y mejoras
+- Eliminación de la línea verde en la base del reproductor para Android TV mediante recorte dinámico de macrobloques YUV.
+- Detección y sondeo en tiempo real de flujos HLS con cabeceras de origen y contexto WAF.
+- Encabezado de días de emisión con distribución horizontal uniforme y navegación adaptada para control remoto en televisores y pantallas anchas.
+
 ## v2.0.7
 
 ### Novedades y mejoras

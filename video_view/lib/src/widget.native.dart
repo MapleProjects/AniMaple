@@ -4,6 +4,11 @@ import 'player.native.dart';
 import 'widget.dart';
 
 FittedBox showVideo(VideoController player, VideoView widget) {
+  final w = player.videoSize.value.width;
+  final h = player.videoSize.value.height;
+  final effectiveW = (w > 0 && h > 0) ? w : 1920.0;
+  final effectiveH = (w > 0 && h > 0) ? h : 1080.0;
+
   Widget video = Texture(
     textureId: (player as VideoControllerImplementation).id!,
   );
@@ -31,26 +36,41 @@ FittedBox showVideo(VideoController player, VideoView widget) {
       child: video,
     );
   }
+
+  // Ocultar la línea verde provocada por relleno de macrobloques de decodificadores
+  // hardware en Android TV (Amlogic/MediaTek) recortando los píxeles residuales del borde inferior.
+  Widget content = ClipRect(
+    child: SizedBox(
+      width: effectiveW,
+      height: effectiveH,
+      child: OverflowBox(
+        minWidth: effectiveW,
+        maxWidth: effectiveW,
+        minHeight: effectiveH + 6.0,
+        maxHeight: effectiveH + 6.0,
+        alignment: Alignment.topCenter,
+        child: video,
+      ),
+    ),
+  );
+
   if (player.subId != null && player.showSubtitle.value) {
-    video = Stack(
-      fit: .passthrough,
+    content = Stack(
+      fit: StackFit.passthrough,
       children: [
-        video,
+        content,
         Texture(textureId: player.subId!),
       ],
     );
   }
-  final w = player.videoSize.value.width;
-  final h = player.videoSize.value.height;
-  final effectiveW = (w > 0 && h > 0) ? w : 1920.0;
-  final effectiveH = (w > 0 && h > 0) ? h : 1080.0;
+
   return FittedBox(
     fit: widget.videoFit,
-    clipBehavior: .hardEdge,
+    clipBehavior: Clip.hardEdge,
     child: SizedBox(
       width: effectiveW,
       height: effectiveH,
-      child: video,
+      child: content,
     ),
   );
 }

@@ -167,6 +167,11 @@ class VideoController(
 						effectiveHeaders["Referer"] = "https://player.zilla-networks.com/"
 					}
 				}
+				if (!effectiveHeaders.containsKey("Origin")) {
+					if (url.contains("zilla")) {
+						effectiveHeaders["Origin"] = "https://player.zilla-networks.com"
+					}
+				}
 				if (!effectiveHeaders.containsKey("Sec-Fetch-Dest")) {
 					effectiveHeaders["Sec-Fetch-Dest"] = "empty"
 				}
