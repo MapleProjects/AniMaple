@@ -2,9 +2,17 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VM_NAME="Windows11"
-VM_IP="192.168.122.237"
-VM_USER="Maple"
+VM_NAME="${VM_NAME:-Windows11}"
+VM_IP="${VM_IP:-192.168.122.237}"
+VM_USER="${VM_USER:-Maple}"
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/Escritorio}"
+
+# Cargar secretos locales si existen (ignorado en git)
+if [ -f "$REPO_DIR/secrets.env" ]; then
+    # shellcheck source=/dev/null
+    source "$REPO_DIR/secrets.env"
+fi
+
 SSH_OPTS="-o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
 
 echo "=== AniMaple Windows Native Build ==="
@@ -81,8 +89,8 @@ mkdir -p "$DIST_DIR"
 echo "Copiando binarios finales a $DIST_DIR..."
 scp $SSH_OPTS "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-setup.exe" "$DIST_DIR/"
 scp $SSH_OPTS "$VM_USER@$VM_IP:C:/Users/Maple/AniMaple/tools/installer/animaple-v$VERSION-windows.zip" "$DIST_DIR/"
-cp -f "$DIST_DIR/animaple-v$VERSION-setup.exe" /home/maple/Escritorio/
+cp -f "$DIST_DIR/animaple-v$VERSION-setup.exe" "$OUTPUT_DIR/"
 
 echo "=== Compilación completada con éxito ==="
 ls -lh "$DIST_DIR"
-ls -lh "/home/maple/Escritorio/animaple-v$VERSION-setup.exe"
+ls -lh "$OUTPUT_DIR/animaple-v$VERSION-setup.exe"

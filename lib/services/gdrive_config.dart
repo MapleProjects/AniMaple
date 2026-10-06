@@ -1,3 +1,5 @@
+import 'dart:io';
+
 /// Configuración de Google Sign-In / Drive para AniMaple.
 class GDriveConfig {
   GDriveConfig._();
@@ -21,11 +23,14 @@ class GDriveConfig {
       ]);
 
   /// Client Secret tipo Web application para el flujo OAuth en Desktop.
-  static String get clientSecret => String.fromCharCodes(const [
-
-
-
-      ]);
+  /// En compilaciones públicas o desarrollo abierto se provee mediante:
+  ///   --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=...
+  /// o se lee de forma automática desde secrets.env local si existe.
+  static String get clientSecret {
+    const envVal = String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_SECRET');
+    if (envVal.isNotEmpty) return envVal;
+    return _readLocalSecret('GOOGLE_DESKTOP_CLIENT_SECRET');
+  }
 
   /// Client ID tipo TV (Limited Input Devices) para Device Authorization Grant (RFC 8628).
   static String get tvClientId => String.fromCharCodes(const [
@@ -37,10 +42,27 @@ class GDriveConfig {
       ]);
 
   /// Client Secret tipo TV (Limited Input Devices).
-  static String get tvClientSecret => String.fromCharCodes(const [
+  /// En compilaciones públicas o desarrollo abierto se provee mediante:
+  ///   --dart-define=GOOGLE_TV_CLIENT_SECRET=...
+  /// o se lee de forma automática desde secrets.env local si existe.
+  static String get tvClientSecret {
+    const envVal = String.fromEnvironment('GOOGLE_TV_CLIENT_SECRET');
+    if (envVal.isNotEmpty) return envVal;
+    return _readLocalSecret('GOOGLE_TV_CLIENT_SECRET');
+  }
 
-
-
-      ]);
+  static String _readLocalSecret(String key) {
+    try {
+      final file = File('secrets.env');
+      if (file.existsSync()) {
+        for (final line in file.readAsLinesSync()) {
+          final trimmed = line.trim();
+          if (trimmed.startsWith('$key=')) {
+            return trimmed.substring('$key='.length).trim();
+          }
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
 }
-

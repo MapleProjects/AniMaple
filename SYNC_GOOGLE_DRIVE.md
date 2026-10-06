@@ -55,8 +55,9 @@ El único detalle: el OAuth consent screen debe estar en **In production**
      → copiar el "Client ID" (termina en `.apps.googleusercontent.com`) a
      `lib/services/gdrive_config.dart` → `androidClientId`
    - **Web application** (o Desktop): crearlo con Authorized redirect URIs `http://127.0.0.1`
-     → copiar su Client ID y Client Secret a `lib/services/gdrive_config.dart`
-     (`webServerClientId` y `clientSecret`).
+     → copiar su Client ID a `lib/services/gdrive_config.dart` (`webServerClientId`)
+     y el Client Secret en el archivo local `secrets.env` (o inyectarlo con
+     `--dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=...`).
      En Android se usa para `serverClientId` y en Windows/Linux para el flujo
      OAuth PKCE + loopback redirect local.
 

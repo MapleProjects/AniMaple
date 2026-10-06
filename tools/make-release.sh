@@ -2,9 +2,24 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUR_DIR="/home/maple/AUR/animaple-bin"
-FLUTTER_BIN="/home/maple/flutter/bin/flutter"
-USB_DIR="/run/media/maple/M2-512GB"
+AUR_DIR="${AUR_DIR:-$HOME/AUR/animaple-bin}"
+FLUTTER_BIN="${FLUTTER_BIN:-flutter}"
+USB_DIR="${USB_DIR:-/run/media/$USER/M2-512GB}"
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/Escritorio}"
+
+# Cargar secretos locales si existen (ignorado en git)
+if [ -f "$REPO_DIR/secrets.env" ]; then
+    # shellcheck source=/dev/null
+    source "$REPO_DIR/secrets.env"
+fi
+
+DART_DEFINES=()
+if [ -n "${GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]; then
+    DART_DEFINES+=(--dart-define="GOOGLE_DESKTOP_CLIENT_SECRET=$GOOGLE_DESKTOP_CLIENT_SECRET")
+fi
+if [ -n "${GOOGLE_TV_CLIENT_SECRET:-}" ]; then
+    DART_DEFINES+=(--dart-define="GOOGLE_TV_CLIENT_SECRET=$GOOGLE_TV_CLIENT_SECRET")
+fi
 
 usage() {
     echo "Uso: $0 <nueva_version> [build_number] [opciones]"
@@ -138,7 +153,7 @@ fi
 # COMPILACIÓN DE PLATAFORMAS
 # ─────────────────────────────────────────────────────────────
 
-export PATH="/home/maple/flutter/bin:$PATH"
+export PATH="$HOME/flutter/bin:$PATH"
 
 # A. Android
 if [ "$SKIP_ANDROID" -eq 0 ]; then
@@ -147,11 +162,11 @@ if [ "$SKIP_ANDROID" -eq 0 ]; then
     echo " Compilando Android APK..."
     echo "=========================================="
     cd "$REPO_DIR"
-    flutter build apk --release
+    flutter build apk --release "${DART_DEFINES[@]}"
     
     APK_SRC="$REPO_DIR/build/app/outputs/flutter-apk/app-release.apk"
     if [ -f "$APK_SRC" ]; then
-        cp -f "$APK_SRC" /home/maple/Escritorio/app-release.apk
+        cp -f "$APK_SRC" "$OUTPUT_DIR/app-release.apk"
         if [ -d "$USB_DIR" ]; then
             echo "Copiando APK a USB $USB_DIR..."
             cp -f "$APK_SRC" "$USB_DIR/app-release.apk"
@@ -170,7 +185,7 @@ if [ "$SKIP_LINUX" -eq 0 ]; then
     echo " Compilando Linux (Bundle + Tarball + AUR)..."
     echo "=========================================="
     cd "$REPO_DIR"
-    flutter build linux --release
+    flutter build linux --release "${DART_DEFINES[@]}"
 
     DIST_LINUX="$REPO_DIR/build/linux-release"
     mkdir -p "$DIST_LINUX"
