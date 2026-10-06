@@ -5,11 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/download_service.dart';
 import 'downloads_manager_sheet.dart';
 
-/// Botón flotante global de descargas.
-///
-/// Muestra la imagen del anime descargándose dentro del anillo de progreso.
-/// Optimización: SOLO este widget se reconstruye con la cola; el progreso
-/// en vivo vive dentro del sheet del gestor.
+/// Botón flotante para consultar el progreso global de descargas.
 class DownloadsFab extends StatelessWidget {
   const DownloadsFab({super.key});
 
@@ -20,7 +16,6 @@ class DownloadsFab extends StatelessWidget {
       builder: (context, progress, _) {
         final queue = DownloadService.instance.queueSnapshot();
         if (queue.isEmpty) return const SizedBox.shrink();
-        // Progreso promedio para el anillo; cálculo barato.
         var sum = 0.0;
         for (final v in progress.values) {
           sum += v.clamp(0.0, 1.0);
@@ -36,7 +31,6 @@ class DownloadsFab extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Imagen del anime en curso, recortada en círculo.
               SizedBox(
                 width: 46,
                 height: 46,
@@ -52,7 +46,6 @@ class DownloadsFab extends StatelessWidget {
                       : const _FallbackIcon(),
                 ),
               ),
-              // Anillo de progreso por encima.
               SizedBox(
                 width: 54,
                 height: 54,

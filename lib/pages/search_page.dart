@@ -82,19 +82,10 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   bool _hasMore = true;
   int _page = 1;
 
-  // Identifica la última consulta/filtros enviados, para no refetchear
-  // cuando el estado no cambió de verdad (p.ej. limpiar el campo vacío).
   String _lastFetchedQuery = '';
   String? _lastFetchedStatus;
   Set<String> _lastFetchedGenres = {};
-
-  // Número de secuencia de petición: descarta respuestas obsoletas que
-  // lleguen fuera de orden (tecleo rápido) y evita que pisen resultados.
   int _requestSeq = 0;
-
-  // Se incrementa al aplicar resultados nuevos de un refresh; la key del
-  // fade de la grilla depende de este valor, así la animación ocurre
-  // exactamente cuando llegan los datos, no al teclear.
   int _refreshTick = 0;
 
   bool _filtersOrQueryChanged() {
@@ -147,8 +138,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      // Si el texto y los filtros no cambiaron de verdad, no recargar.
-      // Evita refetches al tocar/salir del campo sin modificar nada.
       if (!_filtersOrQueryChanged()) return;
       _fetchPage(refresh: true);
     });
@@ -171,8 +160,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
     final int seq = ++_requestSeq;
 
     if (refresh) {
-      // Conservar la grilla visible mientras llegan resultados nuevos.
-      // Solo la primera carga (sin items) usa el spinner de pantalla completa.
       setState(() {
         _page = 1;
         _hasMore = true;
@@ -202,7 +189,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
         );
       }
 
-      // Descarta respuestas fuera de orden: solo aplica la petición más reciente.
       if (!mounted || seq != _requestSeq) return;
 
       setState(() {
@@ -212,7 +198,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
           _lastFetchedStatus = _selectedStatus;
           _lastFetchedGenres = Set<String>.from(_selectedGenres);
           _page = 1;
-          _refreshTick++; // dispara el fade de la grilla con los datos nuevos
+          _refreshTick++;
         } else {
           _items.addAll(results);
         }
@@ -225,8 +211,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
       });
 
       if (refresh && _scrollController.hasClients) {
-        // Vuelve al tope con animación para que el cambio de resultados
-        // no parezca un salto seco.
         _scrollController.animateTo(
           0,
           duration: const Duration(milliseconds: 300),
@@ -327,7 +311,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                     Expanded(
                       child: ListView(
                         children: [
-                          // Status section
                           const Text(
                             'Estado',
                             style: TextStyle(
@@ -366,7 +349,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                           ),
                           const SizedBox(height: 20),
 
-                          // Genre section (Multiple selection)
                           Row(
                             children: [
                               const Text(
@@ -538,7 +520,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
         appBar: AppBar(
           title: const Text('Catálogo'),
         ),
-        // El teclado anima el body en vez de saltar el layout de golpe.
         resizeToAvoidBottomInset: false,
         body: AnimatedPadding(
           duration: const Duration(milliseconds: 200),
@@ -548,7 +529,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
           ),
           child: Column(
             children: [
-            // Search & filter bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
@@ -597,7 +577,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Filter button
                   InkWell(
                     onTap: _showFilterModal,
                     borderRadius: BorderRadius.circular(8),
@@ -653,7 +632,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
               ),
             ),
 
-            // Active filter chips row (when not in search mode)
             if (!showingSearch && _hasActiveFilters)
               Container(
                 height: 38,
@@ -716,7 +694,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                 ),
               ),
 
-            // Catalog / Search Grid
             Expanded(
               child: _loading && _items.isEmpty
                   ? const _CatalogShimmer()
@@ -730,8 +707,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                           ),
                         )
                       : TweenAnimationBuilder<double>(
-                          // Cada refresh con datos nuevos reemplaza la grilla
-                          // con un fade suave en lugar de un salto seco.
                           key: ValueKey(_refreshTick),
                           duration: const Duration(milliseconds: 250),
                           curve: Curves.easeOut,
@@ -740,8 +715,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                               Opacity(opacity: opacity, child: child),
                           child: Column(
                             children: [
-                              // Barra fina de progreso mientras se refresca
-                              // con la grilla anterior aún visible.
                               if (_refreshing)
                                 const LinearProgressIndicator(
                                   minHeight: 2,
@@ -804,7 +777,6 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   }
 }
 
-/// Placeholder shimmer para la primera carga del catálogo.
 class _CatalogShimmer extends StatelessWidget {
   const _CatalogShimmer();
 

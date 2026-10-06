@@ -27,18 +27,7 @@ class UpdateInfo {
   String get apkUrl => downloadUrl;
 }
 
-/// UpdateService — actualización automática desde GitHub Releases.
-///
-/// Flujo:
-/// 1. `checkForUpdate()` consulta la última release del repo y compara la
-///    versión semántica con la instalada (vía canal nativo en Android o versión del app).
-/// 2. Si hay versión nueva → `hasUpdate` = true. La app lo muestra con un
-///    diálogo Actualizar/Posponer al arrancar y con un botón-badge junto al
-///    avatar de cuenta.
-/// 3. `downloadAndInstall()` descarga el APK/.exe DENTRO de la app (con progreso,
-///    sin abrir el navegador) y lanza la instalación (FileProvider en Android,
-///    proceso desacoplado en Windows).
-/// 4. Los archivos temporales se limpian tras la instalación.
+/// Servicio de actualización automática desde GitHub Releases.
 class UpdateService {
   UpdateService._();
 
@@ -50,7 +39,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.8';
+  static const String appVersion = '2.0.9';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -402,10 +391,6 @@ class UpdateService {
       }
     } catch (_) {}
   }
-
-  // ─────────────────────────────────────────────────────────
-  //  UI
-  // ─────────────────────────────────────────────────────────
 
   /// Muestra el diálogo de actualización. Actualizar a la derecha, Posponer
   /// a la izquierda. Devuelve true si el usuario eligió actualizar.

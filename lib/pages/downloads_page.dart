@@ -8,12 +8,7 @@ import '../services/download_service.dart';
 import 'detail_page.dart';
 import 'episode_page.dart';
 
-/// Pestaña "Descargas" de Mi Lista.
-///
-/// Grid de contenedores por anime (portada local + título + N caps + tamaño).
-/// Al entrar se muestra la vista offline del anime: solo capítulos
-/// descargados, con marca de visto (desde el historial) y borrado individual.
-/// Funciona 100% sin conexión.
+/// Vista de animes descargados localmente.
 class DownloadsPage extends StatefulWidget {
   const DownloadsPage({super.key});
 
@@ -40,7 +35,6 @@ class DownloadsPageState extends State<DownloadsPage> {
     if (mounted) setState(() {});
   }
 
-  /// Llamado desde MainShell cuando el tab se vuelve visible.
   void refresh() {
     if (mounted) setState(() {});
   }
@@ -180,7 +174,6 @@ class DownloadsPageState extends State<DownloadsPage> {
                         errorBuilder: (_, __, ___) => _posterFallback())
                   else
                     _posterFallback(),
-                  // Badge de descarga
                   Positioned(
                     top: 6, left: 6,
                     child: Container(
@@ -193,7 +186,6 @@ class DownloadsPageState extends State<DownloadsPage> {
                           color: Colors.white, size: 14),
                     ),
                   ),
-                  // Borrar todo
                   Positioned(
                     top: 4, right: 4,
                     child: Material(
@@ -203,7 +195,7 @@ class DownloadsPageState extends State<DownloadsPage> {
                         onTap: () =>
                             _confirmDeleteAnime(slug, title as String, eps),
                         child: Container(
-                          padding: const EdgeInsets.all(4),
+                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.55),
                             shape: BoxShape.circle,
@@ -214,7 +206,6 @@ class DownloadsPageState extends State<DownloadsPage> {
                       ),
                     ),
                   ),
-                  // Progreso si hay cola activa para este anime
                   if (activeProgress != null)
                     Positioned(
                       bottom: 8, left: 8, right: 8,
@@ -271,9 +262,7 @@ class DownloadsPageState extends State<DownloadsPage> {
       );
 }
 
-/// Vista offline de UN anime descargado: portada, sinopsis y SOLO los
-/// capítulos guardados en disco. No toca red salvo que el usuario pida
-/// explícitamente abrir la página online.
+/// Vista local de un anime con capítulos descargados.
 class OfflineAnimePage extends StatefulWidget {
   final String slug;
   const OfflineAnimePage({super.key, required this.slug});
@@ -286,10 +275,6 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
   final DownloadService _dl = DownloadService.instance;
   Map<String, dynamic>? _meta;
   Set<int> _watched = {};
-
-  // Metadatos online (géneros, categoría, estado) para la cabecera completa.
-  // Solo se piden si hay conexión; sin red la vista funciona igual con lo
-  // guardado localmente (título, sinopsis, póster).
   AnimeDetail? _online;
 
   @override
@@ -305,9 +290,7 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
     try {
       final d = await ApiService.fetchAnimeDetail(widget.slug);
       if (mounted) setState(() => _online = d);
-    } catch (_) {
-      // Sin conexión: la cabecera queda con los datos locales.
-    }
+    } catch (_) {}
   }
 
   @override
@@ -427,7 +410,6 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                               fontSize: 12, color: Color(0xFF6d6488)),
                         ),
                         if (online == null) ...[
-                          // Solo cuando no hay conexión para traer etiquetas.
                           const SizedBox(height: 6),
                           const Text('Etiquetas al reconectar',
                               style: TextStyle(
@@ -497,7 +479,6 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
     );
   }
 
-  /// Chip idéntico al de detail_page (categoría, estado, géneros).
   static Widget _labelChip(String text, Color color) {
     if (text.isEmpty) return const SizedBox.shrink();
     return Container(
@@ -533,7 +514,6 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
     }
     return InkWell(
       onTap: () async {
-        // Reproducción offline: EpisodePage detecta el archivo local solo.
         ApiService.addHistory(
           (_meta?['anime_id'] as num?)?.toInt() ?? 0,
           widget.slug,

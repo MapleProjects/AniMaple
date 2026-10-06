@@ -119,7 +119,6 @@ class EpisodeCardGrid extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Thumbnail container
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -130,7 +129,6 @@ class EpisodeCardGrid extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Poster image
                   if (episode.thumbnail != null)
                     Image.network(
                       episode.thumbnail!,
@@ -140,7 +138,6 @@ class EpisodeCardGrid extends StatelessWidget {
                     )
                   else
                     const Center(child: Icon(Icons.play_circle_outline, color: Color(0xFF4a4260), size: 40)),
-                  // Favorite badge — top-left
                   if (isFollowed)
                     Positioned(
                       top: 6, left: 6,
@@ -153,7 +150,6 @@ class EpisodeCardGrid extends StatelessWidget {
                         child: const Icon(Icons.favorite, color: Colors.white, size: 14),
                       ),
                     ),
-                  // Episode badge — bottom-left
                   Positioned(
                     bottom: 8, left: 8,
                     child: Container(
@@ -165,7 +161,6 @@ class EpisodeCardGrid extends StatelessWidget {
                       child: Text('Episodio ${episode.episodeNumber}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                     ),
                   ),
-                  // Time badge — bottom-right
                   if (episode.timeAgo.isNotEmpty)
                     Positioned(
                       bottom: 8, right: 8,
@@ -183,7 +178,6 @@ class EpisodeCardGrid extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          // Title
           Text(
             episode.animeTitle,
             maxLines: 2,

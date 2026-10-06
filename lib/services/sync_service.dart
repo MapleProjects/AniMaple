@@ -12,22 +12,7 @@ import 'gdrive_config.dart';
 import 'desktop_google_auth.dart';
 import 'tv_service.dart';
 
-/// SyncService — sincroniza historial y favoritos contra el almacenamiento
-/// personal del usuario en Google Drive (appDataFolder).
-///
-/// La app usa la cuenta de Drive del propio usuario (BYO cloud):
-/// - Login con Google Sign-In (scope drive.appdata, non-sensitive)
-/// - Los datos viven en el appDataFolder privado de la app dentro de la
-///   cuenta del usuario. Google garantiza que solo la app puede accederlo.
-/// - Cero hosting propio. Cada usuario usa su propia nube.
-///
-/// Estrategia de merge: last-write-wins por registro con timestamp.
-/// Cada entrada (historial, favorito) lleva su timestamp, así nunca se
-/// pierde un cambio reciente entre dispositivos.
-///
-/// Basado en google_sign_in 7.x: singleton [GoogleSignIn.instance],
-/// [GoogleSignIn.initialize] una vez, y access token OAuth por
-/// [GoogleSignInAccount.authorizationClient].
+/// Sincronización de historial y favoritos mediante Google Drive.
 class SyncService {
   SyncService._();
 
@@ -37,20 +22,13 @@ class SyncService {
   static const _scopeDriveFile =
       'https://www.googleapis.com/auth/drive.file';
   static const _driveApiBase = 'https://www.googleapis.com/drive/v3';
-  // El endpoint de subida de contenido real es /upload/drive/v3 (no /drive/v3).
-  // Con uploadType=media, Google SOLO lo acepta en la URL con /upload/; si se
-  // llama al endpoint normal interpreta el body como metadata del recurso y
-  // rechaza los campos del archivo con 403 fieldNotWritable.
   static const _driveUploadBase = 'https://www.googleapis.com/upload/drive/v3';
 
   static GoogleSignInAccount? _account;
   static Map<String, String>? _authHeaders;
-  static String? _fileId; // id del archivo en Drive (se cachea)
-  static int? _lastRemoteVersion; // última versión remota vista
+  static String? _fileId;
+  static int? _lastRemoteVersion;
   static bool _busy = false;
-  // Hay cambios locales (borrados, historial, seguidos) que aún no se
-  // publicaron con éxito. El poll periódico lo reintenta hasta lograrlo,
-  // así una falla de red/sesión no deja un cambio local olvidado.
   static bool _localDirty = false;
   static Timer? _debounce;
   static Timer? _autoSyncTimer;
@@ -694,17 +672,7 @@ class SyncService {
     }
   }
 
-  /// Merge last-write-wins por registro + tombstones de borrado.
-  ///
-  /// Los tombstones garantizan que eliminar en un dispositivo se propague:
-  /// si la clave está en deleted_* y su deleted_at es más reciente que el
-  /// dato vivo, la entrada se descarta aunque aparezca en el remoto.
-  /// Una entrada viva con timestamp más nuevo que el tombstone revoca el
-  /// borrado (re-marcar/re-seguir vuelve a traer el dato).
-  ///
-  /// El orden final es determinista (timestamp UTC desc + id/épisode de
-  /// desempate) para que todos los dispositivos converjan a la misma lista,
-  /// incluso con datos antiguos cuyo timestamp venía sin normalizar.
+  /// Combina estado remoto y local aplicando resolución por marca temporal y tombstones.
   static Future<bool> _mergeIntoLocal(
     List<HistoryEntry> remoteHistory,
     List<FollowedAnime> remoteFollowed,
@@ -716,7 +684,6 @@ class SyncService {
     final localDeletedHistory = await ApiService.fetchDeletedHistory();
     final localDeletedFollowed = await ApiService.fetchDeletedFollowed();
 
-    // ── Merge tombstones: last-write-wins por clave ──
     final deletedHistory = _mergeTombstones(
       localDeletedHistory,
       remoteDeletedHistory,
@@ -726,7 +693,6 @@ class SyncService {
       remoteDeletedFollowed,
     );
 
-    // ── Merge historial (dedup por slug#episodio) ──
     final mergedHistory = <String, HistoryEntry>{};
     for (final h in [...localHistory, ...remoteHistory]) {
       final key = _historyKey(h);
@@ -737,9 +703,6 @@ class SyncService {
         mergedHistory[key] = h;
       }
     }
-    // Aplicar tombstones: descartar capítulos borrados más recientemente.
-    // Un dato re-marcado (watched_at > tombstone) sobrevive automáticamente:
-    // _isTombstoned lo mantiene y el tombstone queda inerte en el mapa.
     mergedHistory.removeWhere(
       (key, h) => _isTombstoned(deletedHistory[key], h.watchedAt),
     );
@@ -749,7 +712,6 @@ class SyncService {
       sortedHistory.removeRange(200, sortedHistory.length);
     }
 
-    // ── Merge favoritos (dedup por anime_id) ──
     final mergedFollowed = <int, FollowedAnime>{};
     for (final f in [...localFollowed, ...remoteFollowed]) {
       final existing = mergedFollowed[f.animeId];
@@ -765,7 +727,6 @@ class SyncService {
     final sortedFollowed = mergedFollowed.values.toList()
       ..sort((a, b) => _compareFollowedDesc(a, b));
 
-    // ── Ver si cambió (por contenido y orden reales) ──
     final sameHistory = _sameHistory(localHistory, sortedHistory);
     final sameFollowed = _sameFollowed(localFollowed, sortedFollowed);
     final sameTombstones =

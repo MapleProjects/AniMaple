@@ -308,8 +308,6 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         return out
     }
 
-    // ── Resolutores devalue (espejo de api_service.dart) ──
-
     private fun optInt(v: Any?): Int {
         return when (v) {
             is Number -> v.toInt()
@@ -318,15 +316,7 @@ class EpisodeCheckWorker(context: Context, params: WorkerParameters) :
         }
     }
 
-    /**
-     * Resolución devalue de 1 salto para campos numéricos que son ÍNDICES
-     * hacia el valor real (number, id). Espejo de _resolveVal del Dart.
-     *
-     * CRÍTICO: en __data.json de SvelteKit el valor crudo de "number" no es
-     * el número de episodio, es un índice dentro de `data` (p. ej. `166` →
-     * data[166] = `5`). Leer el índice crudo producía avisos "Episodio 184"
-     * cuando el episodio real era el 5. Un solo salto resuelve el valor real.
-     */
+    /** Resuelve enteros indexados provenientes de estructuras devalue. */
     private fun resolveIndexedInt(data: JSONArray, obj: JSONObject, key: String): Int {
         val v = obj.opt(key) ?: return 0
         if (v is String) return v.toIntOrNull() ?: 0

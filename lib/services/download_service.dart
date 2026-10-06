@@ -142,7 +142,6 @@ class DownloadService {
     }
   }
 
-  // ── Estado reactivo para la UI ──────────────────────────────────────────
   /// Eventos de cambio: tras completar/borrar/encolar cualquier episodio.
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
@@ -173,10 +172,6 @@ class DownloadService {
 
   _Job? _current;
   Timer? _stallTimer;
-
-  // ════════════════════════════════════════════════════════════════════
-  // Inicialización y almacenamiento
-  // ════════════════════════════════════════════════════════════════════
 
   Future<Directory> _ensureRoot() async {
     if (_root != null) return _root!;
@@ -255,10 +250,6 @@ class DownloadService {
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // Índice
-  // ════════════════════════════════════════════════════════════════════
-
   Future<void> _loadIndex(Directory root) async {
     final f = File('${root.path}/$_indexFile');
     if (!await f.exists()) {
@@ -326,10 +317,6 @@ class DownloadService {
       return null;
     }
   }
-
-  // ════════════════════════════════════════════════════════════════════
-  // Consultas públicas (sincrónicas, basadas en el índice)
-  // ════════════════════════════════════════════════════════════════════
 
   /// Slugs con al menos un episodio completo descargado.
   Set<String> downloadedSlugs() => Set<String>.from(_index.keys);
@@ -433,8 +420,6 @@ class DownloadService {
     return _posterOverrides[slug];
   }
 
-  // ── Helpers de lectura para la UI (sincrónicos, basados en índice/disco) ──
-
   /// Entrada de índice del anime: {title, poster, total_bytes, eps:[...]}.
   Map<String, dynamic>? indexEntryFor(String slug) => _index[slug];
 
@@ -462,10 +447,6 @@ class DownloadService {
     if (b > 0) return '${(b / 1024).round()} KB en disco';
     return '0 B en disco';
   }
-
-  // ════════════════════════════════════════════════════════════════════
-  // API pública: encolar / cancelar / borrar
-  // ════════════════════════════════════════════════════════════════════
 
   /// Reencola episodios fallidos (botón reintentar del gestor). Usa los
   /// metadatos ya guardados en disco; no re-descarga el póster.
@@ -679,10 +660,6 @@ class DownloadService {
   }
 
   void _notify() => version.value++;
-
-  // ════════════════════════════════════════════════════════════════════
-  // Cola
-  // ════════════════════════════════════════════════════════════════════
 
   void _pump() {
     if (_current != null) return;
@@ -1201,8 +1178,6 @@ class DownloadService {
     }
   }
 
-  // ── Descarga directa (MP4 progresivo, mp4upload) ──────────────────────
-
   Future<void> _downloadDirect(
     String url,
     File target,
@@ -1268,11 +1243,6 @@ class DownloadService {
       }
     });
   }
-
-  // ── Descarga HLS (zilla-networks): playlist + segmentos fMP4 ──────────
-  // El episodio se guarda como playlist M3U8 LOCAL + archivos de segmento
-  // en disco (no concatenados). ExoPlayer lee los EXTINF del playlist y
-  // conoce la duración total y los puntos de seek desde el inicio.
 
   Future<void> _downloadHls(
     String masterUrl,

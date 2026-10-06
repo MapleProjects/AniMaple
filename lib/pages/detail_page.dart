@@ -28,10 +28,6 @@ class _DetailPageState extends State<DetailPage> {
   void initState() {
     super.initState();
     _load();
-    // Redibujar al cambiar el estado de descargas (badges de la grilla).
-    // SOLO version: cambios estructurales (encolar, terminar, borrar).
-    // El progreso continuo NO reconstruye esta página (ahorro en gama baja);
-    // el porcentaje vivo vive en el FAB y en el gestor.
     _dl.version.addListener(_onDownloadsChanged);
   }
 
@@ -82,8 +78,6 @@ class _DetailPageState extends State<DetailPage> {
     } catch (e, st) {
       debugPrint('DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e');
       debugPrint('DETAIL STACKTRACE: $st');
-      // Offline esperado: sin hoja de error, la app funciona sin conexión y
-      // reintenta sola. Solo errores reales (no de red) muestran el reporte.
       if (attempt == 0 &&
           mounted &&
           !isConnectivityError(e)) {
@@ -92,7 +86,6 @@ class _DetailPageState extends State<DetailPage> {
       await Future.delayed(const Duration(seconds: 3));
     }
     }
-    // All retries failed — show error
     if (mounted) setState(() { _loading = false; });
   }
 
@@ -136,7 +129,6 @@ class _DetailPageState extends State<DetailPage> {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          // Hero with backdrop
           SliverAppBar(
             expandedHeight: 300,
             pinned: true,
@@ -163,7 +155,6 @@ class _DetailPageState extends State<DetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title + poster row
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -194,7 +185,6 @@ class _DetailPageState extends State<DetailPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Action buttons
                   Row(children: [
                     Expanded(
                       child: Builder(
@@ -237,7 +227,6 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ]),
                   const SizedBox(height: 12),
-                  // Download row
                   Row(children: [
                     Expanded(
                       child: OutlinedButton.icon(
@@ -257,20 +246,16 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   ]),
                   const SizedBox(height: 16),
-                  // Genres
                   if (anime.genres.isNotEmpty) Wrap(spacing: 6, runSpacing: 4, children: anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))).toList()),
                   const SizedBox(height: 16),
-                  // Synopsis
                   Text(anime.synopsis, style: const TextStyle(fontSize: 14, color: Color(0xFFa99fc0), height: 1.5)),
                   const SizedBox(height: 24),
-                  // Episodes
                   Text('Episodios (${anime.episodesCount})', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFe8e4f0))),
                   const SizedBox(height: 12),
                 ],
               ),
             ),
           ),
-          // Episode grid
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: SliverGrid(

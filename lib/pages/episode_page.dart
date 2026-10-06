@@ -23,9 +23,7 @@ class EpisodePage extends StatefulWidget {
   final int episodeNumber;
   final String animeTitle;
 
-  /// true cuando se abre desde la biblioteca de descargas: la grilla muestra
-  /// SOLO los capítulos descargados y Anterior/Siguiente navegan dentro de
-  /// ese conjunto (el salto automático respeta el mismo filtro).
+  /// Filtra la grilla para mostrar únicamente capítulos disponibles localmente.
   final bool offlineLibrary;
 
   const EpisodePage({
@@ -78,11 +76,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   AnimeDetail? _animeDetail;
   bool _loading = true;
 
-  // ── Modo offline ──
-  // Ruta del archivo local si el episodio está descargado. En modo offline no
-  // se llama a la API: el detalle del episodio se sintetiza y la reproducción
-  // abre el archivo directo (video_view resuelve file:// internamente).
-  // addHistory se registra igual para sincronizar al volver la conexión.
   // ignore: unused_field
   String? _offlinePath;
 
@@ -92,7 +85,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   bool _isFullscreen = false;
   bool _autoPlayedNext = false;
 
-  // Video controls
   bool _controlsVisible = true;
   bool _isDragging = false;
   double? _dragValue;
@@ -103,7 +95,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   double? _seekDelta;
   bool _seekAnimating = false;
 
-  // Double-tap seek accumulation and continuous remote seek
   int _seekAccumulatorMs = 0;
   DateTime? _lastSeekTapTime;
   int _seekBasePosition = 0;
@@ -112,62 +103,40 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Timer? _seekDebounceTimer;
   int? _targetSeekPositionMs;
 
-  // PiP
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
   bool _isPipMode = false;
 
-  // Watched episodes indicator
   Set<int> _watchedEpisodes = {};
 
-  // Media notification
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
 
-  // End-of-episode countdown
   bool _showCountdown = false;
   int _countdownSeconds = 5;
   Timer? _countdownTimer;
 
-  // Position update timer
   Timer? _positionTimer;
 
-  // ── Reconexión + preservación de progreso ──
   int _lastPositionMs = 0;
 
-  // Último source abierto, para reintentar la reconexión indefinidamente.
   String? _lastVideoUrl;
   Map<String, String>? _lastVideoHeaders;
 
-  // true mientras se está reintentando reconectar tras un error de red.
   bool _reconnecting = false;
   Timer? _reconnectTimer;
 
-  // true mientras se precalienta el origin del video (mp4upload lento).
   bool _prewarming = false;
 
-  // ── Overlay de seleccion de servidor (animacion en vivo) ──
-  // true mientras el sondeo de servidores corre.
   bool _probing = false;
-  // Fila por servidor: nombre -> velocidad medida (Mbps) o ausente si sondea.
   final Map<String, double> _probeSpeeds = {};
-  // Servidor elegido tras el sondeo (etiqueta para la animacion final).
   String? _probeChosen;
-  // Cold start: evita mostrar el overlay al reabrir sin cambiar de fuente.
   bool _probeOverlayDismissed = false;
 
-  // Posición a restaurar (ms) al volver a playing. -1 = sin pendiente.
   int _pendingSeek = -1;
 
-  // Servidores que fallaron al arrancar en este episodio (para failover
-  // automático cuando el servidor activo está caído, p.ej. 522 de Zilla).
   final Set<String> _failedServers = {};
 
-  // true cuando el source actual alcanzó el estado playing alguna vez.
-  // Distingue "el servidor nunca arrancó" (failover) de "se cortó a mitad"
-  // (reconexión del mismo source preservando progreso).
   bool _sourceStarted = false;
 
-
-  // Mutable episode number — allows in-place episode switching
   late int _currentEp;
 
   late final AppPlayer _player;
@@ -221,15 +190,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _togglePlayPause();
           break;
         case 'mediaTogglePlayPause':
-          // User tapped play/pause in media notification
           _togglePlayPause();
           break;
         case 'mediaStop':
-          // User tapped stop in media notification
           _closePlayback();
           break;
         case 'onUserLeaveHint':
-          // Native handles auto-PiP entry — nothing to do here
           break;
       }
     });
@@ -239,15 +205,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _mediaChannel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'mediaPlay':
-          // Comando EXPLÍCITO: no togglear. Si ya está reproduciendo, no hace
-          // nada (evita que un reenvío doble del sistema invierta el estado).
           if (!_player.isPlaying.value) _togglePlayPause();
           break;
         case 'mediaPause':
           if (_player.isPlaying.value) _togglePlayPause();
           break;
         case 'mediaSeekTo':
-          // Usuario arrastró la barra en la notificación media.
           final ms = (call.arguments as num?)?.toInt() ?? 0;
           _player.seekTo(ms);
           break;
@@ -258,8 +221,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
     });
   }
-
-  // ── Controles de teclado y control remoto D-Pad / TV ──
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     final isDown = event is KeyDownEvent;
@@ -272,7 +233,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         key == LogicalKeyboardKey.mediaRewind ||
         key == LogicalKeyboardKey.mediaFastForward;
 
-    // Solo permitir repetición continua en las teclas de adelantar y retroceder
     if (isRepeat && !isSeekKey) {
       return KeyEventResult.ignored;
     }
@@ -666,7 +626,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           }
         } catch (_) {}
       }
-      // NUNCA usar Size.infinite (genera overflow a INT_MIN en C++ y bloquea maximizar/redimensionar)
+      // Evita desbordamiento en enteros de C++ al redimensionar.
       await windowManager.setMaximumSize(const Size(19200, 10800));
       await windowManager.setMinimumSize(const Size(800, 500));
       await windowManager.setAspectRatio(0);
@@ -719,49 +679,37 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final playing = _player.isPlaying.value;
     if (playing) {
       _sourceStarted = true;
-      // El anime arranco: retirar el overlay de seleccion/conexion.
       if (_probeOverlayDismissed == false) {
         if (mounted) setState(() => _probeOverlayDismissed = true);
       }
       WakelockPlus.enable();
       _startPositionTimer();
-      // Auto-hide controls when video starts playing
       _startHideTimer();
 
-      // Restaurar la posición pendiente cuando el video vuelve a estar
-      // reproduciéndose (tras reconexión o cambio de servidor/idioma).
       if (_pendingSeek > 0 && _pendingSeek != _player.positionMs.value) {
         final target = _pendingSeek;
-        _pendingSeek = -1; // consumir antes del seek (evitar loops)
+        _pendingSeek = -1;
         _player.seekTo(target);
       } else if (_pendingSeek == 0) {
         _pendingSeek = -1;
       }
 
-      // Si estábamos reconectando y ya estamos reproduciendo… todo
-      // correcto; el timer de reconexión se cancela aquí.
       _stopReconnectIfPlaying();
     } else {
       WakelockPlus.disable();
       _positionTimer?.cancel();
     }
-    // Sincronizar SIEMPRE el estado real del reproductor con el nativo. Sin
-    // esto, con autoplay _userStartedPlayback queda false y el nativo nunca
-    // sabe que está reproduciendo → onUserLeaveHint no entra en PiP hasta que
-    // el usuario toca play manual una vez.
     _syncPipState(playing);
-    // Update media notification with current state
     _updateMediaSession(playing);
     if (mounted) setState(() {});
   }
 
-  /// Cancela el reintento de reconexión si el video ya está reproduciéndose.
   void _stopReconnectIfPlaying() {
     if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _reconnecting = false;
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
-      _videoErrorShown = false; // permitir reportar un error futuro
+      _videoErrorShown = false;
       if (mounted) setState(() {});
     }
   }
@@ -795,9 +743,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   bool _mediaLogChecked = false;
 
-  /// Consulta el log nativo del servicio UN tiempo después del arranque
-  /// (el intent se procesa asíncrono; consultar al instante lee el estado
-  /// anterior). Si el servicio reporta fallo, lo muestra en pantalla.
   Future<void> _checkMediaLogOnce() async {
     if (_mediaLogChecked) return;
     _mediaLogChecked = true;
@@ -824,7 +769,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onFinished() {
     final pos = _player.positionMs.value;
     final dur = _player.durationMs.value;
-    // Don't treat seek stalls, buffer underruns, or premature network EOF as completion
     if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
       debugPrint('EpisodePage: Ignored premature onFinished at $pos ms / $dur ms');
       _player.play();
@@ -870,30 +814,21 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final err = _player.error.value;
     if (err != null && err.isNotEmpty) {
       debugPrint('VIDEO ERROR: $err');
-      // Si el reproductor está activamente reproduciendo, ignorar fallos secundarios de decoder/logs
       if (_player.isPlaying.value) {
         debugPrint('Ignoring non-fatal error while actively playing: $err');
         return;
       }
       final hadSource = _lastVideoUrl != null && _lastVideoUrl!.isNotEmpty;
 
-      // El source NUNCA llegó a reproducirse: el servidor activo está caído
-      // (p.ej. Zilla devolviendo 522) — conmutar automáticamente al siguiente
-      // espejo disponible de la misma variante en vez de reconectar contra un
-      // servidor muerto.
       if (hadSource && !_sourceStarted && !_reconnecting) {
         if (_failoverToNextServer()) return;
       }
 
-      // Pérdida de conexión durante la reproducción → reconexión automática
-      // indefinida (cada 8s) hasta que el video vuelva, restaurando el
-      // progreso visto. Solo si el source ya reproducía antes del corte.
       if (hadSource && _sourceStarted && !_reconnecting) {
         _startReconnect();
         return;
       }
 
-      // Error sin source previo (o sin más espejos): mostrarlo una sola vez.
       if (mounted && !_videoErrorShown) {
         _videoErrorShown = true;
         showErrorSheet(
@@ -906,9 +841,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
-  /// Salta al siguiente servidor de la variante activa en orden automático,
-  /// marcando el actual como fallido. Al no quedar más espejos devuelve false
-  /// para que el error se muestre al usuario.
   bool _failoverToNextServer() {
     if (_activeServer != null) _failedServers.add(_activeServer!);
     final ep = _episode;
@@ -933,14 +865,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     return true;
   }
 
-  /// Reintenta abrir el último source cada segundo, indefinidamente, hasta
-  /// que la conexión vuelva y el video se reproduzca de nuevo. Al lograrlo,
-  /// [isPlaying] cambia a playing y [seekTo] restaura la posición.
   void _startReconnect() {
     if (_reconnecting) return;
     _reconnecting = true;
     _videoErrorShown = false;
-    // Guardar el progreso justo antes de caer, por si el timer no lo capturó.
     final pos = _player.positionMs.value;
     if (pos > 0) _lastPositionMs = pos;
     if (mounted) setState(() {});
@@ -951,7 +879,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _reconnectTimer?.cancel();
         return;
       }
-      // Si el player ya volvió a reproducir, no reintentar más.
       if (_player.isPlaying.value) {
         _stopReconnectIfPlaying();
         return;
@@ -964,7 +891,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
       debugPrint('Reconnect intent: $url (resume ${_lastPositionMs}ms)');
       try {
-        _pendingSeek = _lastPositionMs; // restaurar al volver a playing
+        _pendingSeek = _lastPositionMs;
         _player.open(url, headers: _lastVideoHeaders, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
         _player.play();
       } catch (e) {
@@ -973,7 +900,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     });
   }
 
-  /// Cancela la reconexión (se llama cuando el video ya se reprodució).
   void _stopReconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -982,8 +908,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() {});
   }
 
-  /// Prueba un servidor individual de forma asíncrona, midiendo su latencia
-  /// y evaluando la resolución máxima disponible (ej: 1080p en HLS).
+  /// Evalúa un servidor individual midiendo tiempo de respuesta y resolución disponible.
   Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
     final sw = Stopwatch()..start();
     try {
@@ -1099,7 +1024,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     for (final s in others) {
       if (!ordered.contains(s)) ordered.add(s);
     }
-    // Dedupe final por identidad.
     final seen = <String>{};
     return ordered.where((s) => seen.add('${s.server}:${s.url}')).toList();
   }
@@ -1167,8 +1091,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _load() async {
-    // ── 0. Detalle offline del anime (sin API): reconstruido de meta.json.
-    // Da sinopsis, etiquetas y grilla de capítulos en modo sin conexión.
     if (_animeDetail == null) {
       try {
         final local = await DownloadService.instance.animeDetailFor(widget.animeSlug);
@@ -1176,7 +1098,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       } catch (_) {}
     }
 
-    // ── 1. Offline-first: ¿existe descarga local de este episodio? ──
     final localPath = await DownloadService.instance
         .videoPath(widget.animeSlug, _currentEp);
     if (localPath != null) {
@@ -1209,19 +1130,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             .toSet();
         _watchedEpisodes.add(_currentEp);
       } catch (_) {}
-      // Ruta absoluta sin esquema: video_view la convierte a file:// en
-      // Android (open: `!source.contains("://")` → "file://$source") y usa
-      // media_kit/libmpv directamente en desktop.
       unawaited(_player.open(localPath));
       return;
     }
 
-    // ── 2. Streaming normal (online) ──
     const maxRetries = 15;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
         final ep = await ApiService.fetchEpisodeDetail(widget.animeSlug, _currentEp);
-        // Only fetch anime detail on first load (not on episode switch)
         AnimeDetail? detail = _animeDetail;
         if (detail == null) {
           try { detail = await ApiService.fetchAnimeDetail(widget.animeSlug); } catch (_) {}
@@ -1235,28 +1151,24 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             _activeVariant = ep.variants.contains('DUB') ? 'DUB' : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
           });
         }
-        // Register in history
         ApiService.addHistory(
           detail?.id ?? 0,
           widget.animeSlug,
           detail?.title ?? widget.animeTitle,
           ep.number,
         );
-        // Load watched episodes for indicator
         try {
           final history = await ApiService.fetchHistory();
           _watchedEpisodes = history
               .where((h) => h.animeSlug == widget.animeSlug)
               .map((h) => h.episodeNumber)
               .toSet();
-          _watchedEpisodes.add(ep.number); // Current episode is also "watched"
+          _watchedEpisodes.add(ep.number);
         } catch (_) {}
         _autoPlay();
         return;
       } catch (e, st) {
         debugPrint('EPISODE LOAD RETRY: $e');
-        // Offline esperado al cargar el episodio: sin hoja de error, reintenta
-        // solo. Solo errores reales (no de red) muestran el reporte.
         if (attempt == 0 &&
             mounted &&
             !isConnectivityError(e)) {
@@ -1265,7 +1177,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         await Future.delayed(const Duration(seconds: 3));
       }
     }
-    // All retries failed — show error state
     if (mounted) setState(() { _loading = false; });
   }
 
@@ -1277,8 +1188,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _autoPlayResolved(EpisodeDetail ep) async {
-    // Probar todos los servidores candidatos simultáneamente en cada capítulo para
-    // elegir el que responda más rápido con la mejor calidad disponible.
     final candidates = ep.embeds
         .where((s) =>
             s.variant == _activeVariant &&
@@ -1287,8 +1196,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         .toList();
     if (candidates.isEmpty) return;
 
-    // Overlay en vivo: mostrar la animacion de sondeo y colorear cada
-    // servidor conforme termina de medirse.
     if (mounted) {
       setState(() {
         _probing = true;
@@ -1296,7 +1203,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _probeChosen = null;
         _probeOverlayDismissed = false;
         for (final s in candidates) {
-          _probeSpeeds[s.server] = double.nan; // sondeando
+          _probeSpeeds[s.server] = double.nan;
         }
       });
     }
@@ -1313,18 +1220,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final valid = results.whereType<_ServerQualityCandidate>().toList();
 
     if (valid.isNotEmpty) {
-      // Priorizar siempre la mayor resolución disponible (1080p > 720p > 480p > 360p).
-      // Con la caché en disco y precarga continua, conexiones limitadas reproducen fluidamente 1080p.
+      // Prioriza mayor resolución viable seguida de mayor ancho de banda y menor latencia.
       valid.sort((a, b) {
-        // Servidor con fallo absoluto o latencia inmanejable queda al final
         final aliveA = (a.measuredMbps > 0.0 && a.responseTimeMs < 10000) ? 1 : 0;
         final aliveB = (b.measuredMbps > 0.0 && b.responseTimeMs < 10000) ? 1 : 0;
         if (aliveA != aliveB) return aliveB.compareTo(aliveA);
 
-        // Umbral de viabilidad para reproducción fluida sin cortes/buffering:
-        // 1080p requiere al menos 3.0 Mbps estables
-        // 720p requiere al menos 1.8 Mbps estables
-        // <= 480p requiere al menos 0.8 Mbps
         double minBw(int h) {
           if (h >= 1080) return 3.0;
           if (h >= 720) return 1.8;
@@ -1334,34 +1235,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         final viableA = a.measuredMbps >= minBw(a.height) ? 1 : 0;
         final viableB = b.measuredMbps >= minBw(b.height) ? 1 : 0;
 
-        // Si uno es viable para su resolución y el otro no entrega suficiente ancho de banda,
-        // priorizar el servidor viable para evitar congelamiento de reproducción.
         if (viableA != viableB) return viableB.compareTo(viableA);
 
-        // A igualdad de viabilidad:
-        // 1. Si ambos son viables y tienen diferente resolución, mayor resolución primero
         if (viableA == 1 && a.height != b.height) {
           return b.height.compareTo(a.height);
         }
 
-        // 2. Si hay una diferencia significativa de velocidad real (>= 1.5 Mbps),
-        // preferir el que entregue notablemente mayor ancho de banda
         final speedDiff = b.measuredMbps - a.measuredMbps;
         if (speedDiff.abs() >= 1.5) {
           return b.measuredMbps.compareTo(a.measuredMbps);
         }
 
-        // 3. Resolución disponible
         if (a.height != b.height) {
           return b.height.compareTo(a.height);
         }
 
-        // 4. Ancho de banda medido
         if (a.measuredMbps != b.measuredMbps) {
           return b.measuredMbps.compareTo(a.measuredMbps);
         }
 
-        // 5. Menor latencia de respuesta
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
@@ -1373,13 +1265,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _probing = false;
         });
       }
-      // El overlay NO desaparece aqui: permanece mostrando "conectando"
-      // hasta que _onStateChanged detecte que el video realmente reprodujo.
       await _playCandidateDirect(best);
       return;
     }
 
-    // Fallback a lista secuencial si las pruebas no respondieron
     if (mounted) {
       setState(() {
         _probing = false;
@@ -1556,9 +1445,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (detail == null) return;
     if (widget.offlineLibrary &&
         !DownloadService.instance.isDownloaded(widget.animeSlug, newEp)) {
-      return; // Modo biblioteca: navegar solo entre capítulos descargados.
+      return;
     }
-    // Soporta animes con episodio 0 (ovas/prólogos/especiales) o numeración no continua
     if (!detail.episodes.any((e) => e.number == newEp)) return;
     if (newEp == _currentEp) return;
 
@@ -1570,7 +1458,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       setState(() {
         _currentEp = newEp;
         _loading = true;
-        // Reset del estado offline: el nuevo capítulo se resuelve en _load().
         _offlinePath = null;
         _showCountdown = false;
         _autoPlayedNext = false;
@@ -1581,8 +1468,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _currentVideoType = null;
       });
     }
-    // Cancelar reconexión y reiniciar la posición: es otro capítulo, no
-    // debe heredar el progreso del anterior.
     _countdownTimer?.cancel();
     _reconnectTimer?.cancel();
     _reconnecting = false;
@@ -1771,19 +1656,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     var lastMediaSync = DateTime.now();
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      // Cargar el progreso visto para restaurarlo (reconexión / cambio de
-      // servidor / cambio de idioma). Solo se guarda en reproducción.
       if (_player.isPlaying.value) {
         _lastPositionMs = _player.positionMs.value;
       }
-      // Sincronizar la notificación media (barra de progreso) ~1 vez por
-      // segundo mientras se reproduce, para que la timeline avance.
       final now = DateTime.now();
       if (now.difference(lastMediaSync).inMilliseconds >= 1000) {
         lastMediaSync = now;
         _updateMediaSession(_player.isPlaying.value);
       }
-      // Clear _dragValue when player position catches up after seek
       if (_dragValue != null && !_isDragging) {
         final pos = _player.positionMs.value;
         if ((pos - _dragValue!).abs() < 1500) {
@@ -1834,11 +1714,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final now = DateTime.now();
     final dur = _player.durationMs.value;
 
-    // Accumulate seeks within the time window
     if (_lastSeekTapTime != null && now.difference(_lastSeekTapTime!) < _seekAccumulationWindow) {
       _seekAccumulatorMs += deltaMs;
     } else {
-      // New sequence — reset accumulator
       _seekBasePosition = _player.positionMs.value;
       _seekAccumulatorMs = deltaMs;
     }
@@ -1852,10 +1730,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _seekAnimating = true;
     setState(() {});
 
-    // Restart fade animation on each tap
     _seekFadeAnim!.forward(from: 0);
 
-    // Debounce del seek real en el reproductor para no saturar la red al mantener presionado
     _seekDebounceTimer?.cancel();
     _seekDebounceTimer = Timer(const Duration(milliseconds: 320), () {
       if (!mounted) return;
@@ -1866,7 +1742,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
     });
 
-    // Cancel previous reset timer, start new one
     _seekResetTimer?.cancel();
     _seekResetTimer = Timer(const Duration(milliseconds: 900), () {
       if (!mounted) return;
@@ -1884,11 +1759,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _showControlsTemporarily();
   }
 
-  // ── Video player with overlay controls ──
-
-  /// Overlay elegante de seleccion de servidor: animacion de sondeo con
-  /// barras por servidor que muestran la velocidad medida en vivo, y al
-  /// terminar una tarjeta de confirmacion con el servidor elegido y calidad.
   Widget _buildProbeOverlay() {
     final chosen = _probeChosen;
     final anyStarted = _probeSpeeds.isNotEmpty;
@@ -1939,24 +1809,19 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final playerWidget = Stack(
       alignment: Alignment.center,
       children: [
-        // Video surface
         if (isEmbed && _lastVideoUrl != null)
           WebviewPlayer(url: _lastVideoUrl!, referer: 'https://animeav1.com/')
         else
           _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
 
-        // Overlay de seleccion de servidor (sondeo en vivo + confirmacion)
         if (!_probeOverlayDismissed && (_probing || _probeChosen != null || !_sourceStarted || _prewarming || _loading))
           _buildProbeOverlay(),
 
-        // ── Everything below is hidden in PiP mode or in web embed player mode ──
         if (!_isPipMode && !isEmbed) ...[
 
-        // Rueda de carga del reproductor: solo en reconexiones tras haber iniciado el capitulo
         if (_sourceStarted && _reconnecting && !isPlaying)
           const CircularProgressIndicator(color: Color(0xFFd8b4fe), strokeWidth: 2.5),
 
-        // Reconexión automática (pérdida de internet): aviso al usuario con diseño elegante
         if (_reconnecting && !isPlaying)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 22),
@@ -1994,7 +1859,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // Big center play/pause (when paused)
         if (!isPlaying && !_player.isLoading.value && _sourceStarted)
           GestureDetector(
             onTap: _togglePlayPause,
@@ -2008,7 +1872,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // Double-tap seek indicator — right side for forward, left for rewind
         if (_seekAnimating && _seekDelta != null)
           Positioned(
             top: 0,
@@ -2043,7 +1906,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // End-of-episode countdown overlay
         if (_showCountdown)
           Container(
             color: Colors.black.withValues(alpha: 0.85),
@@ -2056,7 +1918,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                     style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 14),
                   ),
                   const SizedBox(height: 8),
-                  // Countdown circle
                   SizedBox(
                     width: 80, height: 80,
                     child: Stack(
@@ -2087,7 +1948,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Cancel button (left)
                       GestureDetector(
                         onTap: _cancelCountdown,
                         child: Container(
@@ -2100,7 +1960,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                         ),
                       ),
                       const SizedBox(width: 16),
-                      // Skip button (right)
                       GestureDetector(
                         onTap: _skipCountdown,
                         child: Container(
@@ -2119,13 +1978,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // Tap zones for play/pause + double-tap seek (disabled during countdown)
         Positioned.fill(
           child: IgnorePointer(
             ignoring: _showCountdown,
             child: Row(
             children: [
-              // Left third: double-tap rewind
               Expanded(
                 flex: 33,
                 child: GestureDetector(
@@ -2135,7 +1992,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   child: Container(color: Colors.transparent),
                 ),
               ),
-              // Center third: single tap = play/pause (always)
               Expanded(
                 flex: 34,
                 child: GestureDetector(
@@ -2145,7 +2001,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   child: Container(color: Colors.transparent),
                 ),
               ),
-              // Right third: double-tap forward
               Expanded(
                 flex: 33,
                 child: GestureDetector(
@@ -2160,10 +2015,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ),
         ),
 
-        // PiP mode is handled natively by Android — no Flutter overlay
         ], // end if (!_isPipMode)
 
-        // Desktop PiP interactive overlay (hover controls, dragging, restore, resize)
         if (_isPipMode && _isDesktop)
           Positioned.fill(
             child: DragToResizeArea(
@@ -2184,7 +2037,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                       ),
                       child: Stack(
                         children: [
-                          // Top action bar
                           Positioned(
                             top: 4,
                             right: 4,
@@ -2194,7 +2046,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               onPressed: _exitPipDesktop,
                             ),
                           ),
-                          // Center Play/Pause button
                           Center(
                             child: IconButton(
                               iconSize: 44,
@@ -2205,7 +2056,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               onPressed: _togglePlayPause,
                             ),
                           ),
-                          // Bottom progress indicator
                           Positioned(
                             bottom: 0,
                             left: 0,
@@ -2233,7 +2083,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ),
           ),
 
-        // Bottom controls bar with drag bubble
         if (!_isPipMode && !isEmbed)
         IgnorePointer(
           ignoring: !_controlsVisible,
@@ -2245,14 +2094,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 final pos = _player.positionMs.value;
                 final dv = _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
                 final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
-                // Position bubble above thumb. Account for slider padding (16px each side).
                 final sliderWidth = constraints.maxWidth - 32;
                 final thumbX = 16 + (frac * sliderWidth);
                 final bubbleLeft = thumbX.clamp(30.0, constraints.maxWidth - 30.0);
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    // Bubble tooltip (above the controls)
                     if (_isDragging && _dragValue != null)
                       Positioned(
                         bottom: 110,
@@ -2283,7 +2130,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                           ],
                         ),
                       ),
-                    // Controls bar
                     Positioned(
                       left: 0, right: 0, bottom: 0,
                       child: Container(
@@ -2300,7 +2146,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Custom seek bar — raw pointer events for reliable drag
                               if (dur > 0)
                                 SizedBox(
                                   height: 60,
@@ -2360,7 +2205,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                           child: Stack(
                                             fit: StackFit.expand,
                                             children: [
-                                              // Track bg
                                               Positioned(
                                                 top: topY, left: 0, right: 0,
                                                 child: Container(
@@ -2371,7 +2215,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                                   ),
                                                 ),
                                               ),
-                                              // Active track
                                               Positioned(
                                                 top: topY, left: 0,
                                                 width: (trackW - 20).clamp(0.0, double.infinity) * frac,
@@ -2392,7 +2235,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                                   ),
                                                 ),
                                               ),
-                                              // Thumb
                                               Positioned(
                                                 left: ((trackW - 20).clamp(0.0, double.infinity) * frac) -
                                                     (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 10 : 7),
@@ -2425,7 +2267,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                     },
                                   ),
                                 ),
-                              // Compact row: play/pause · time · pip · fullscreen
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 2),
                                 child: Row(
@@ -2518,8 +2359,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     return playerWidget;
   }
 
-  /// Format seek delta for display: each tap = 9900ms real, shows as exactly 10s.
-  /// 9900→10s, 19800→20s, 59400→1:00, 69300→1:10
   static String _formatSeekDelta(num deltaMs) {
     final taps = (deltaMs.abs() / 9900).round(); // exact tap count
     final displaySeconds = taps * 10; // each tap = 10s visually
@@ -2664,8 +2503,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                         fontWeight: FontWeight.bold,
                         color: Color(0xFFe8e4f0))),
               ),
-              // Botón "Descargar": abre el selector de capítulos con el
-              // capítulo actual ya marcado (mismo menú del detail page).
               ValueListenableBuilder<Map<String, double>>(
                 valueListenable: DownloadService.instance.progress,
                 builder: (context, progress, _) {
@@ -2675,12 +2512,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   final isDownloaded = dl.isDownloaded(slug, n);
                   final isQueued = dl.isQueued(slug, n);
 
-                  // Sin detalle del anime no se puede abrir el selector.
                   if (_animeDetail == null) {
                     return const SizedBox.shrink();
                   }
 
-                  // Descargado o en cola: solo estado, sin acción de descarga.
                   if (isDownloaded || isQueued) {
                     return Icon(
                       isDownloaded
@@ -2788,7 +2623,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 }
 
-/// Small downward arrow for the seek bubble tooltip
 class _BubbleArrowPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -2807,7 +2641,6 @@ class _BubbleArrowPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Componente glassmorphism con estética oscura púrpura nativa de AniMaple.
 class _GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -2863,7 +2696,6 @@ class _GlassCard extends StatelessWidget {
   }
 }
 
-/// Panel de sondeo en vivo con diseño nativo de AniMaple en tarjetas separadas.
 class _ProbeScanPanel extends StatefulWidget {
   final Map<String, double> speeds;
   final bool started;
@@ -2882,7 +2714,6 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Cabecera estilizada con la identidad púrpura de AniMaple
           _GlassCard(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             borderRadius: 10,
@@ -2958,8 +2789,8 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
             : ok
                 ? const Color(0xFF22c55e)
                 : meh
-                    ? const Color(0xFFf59e0b)
-                    : const Color(0xFFef4444);
+                ? const Color(0xFFf59e0b)
+                : const Color(0xFFef4444);
 
     return _GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2991,35 +2822,34 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: accent.withValues(alpha: 0.28), width: 0.8),
-            ),
-            child: Text(
-              probing
-                  ? 'Midiendo…'
-                  : isEmbed
-                      ? 'Web embed'
-                      : '${mbps.toStringAsFixed(1)} Mbps',
-              style: TextStyle(
-                color: accent,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.1,
-              ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: accent.withValues(alpha: 0.28), width: 0.8),
+          ),
+          child: Text(
+            probing
+                ? 'Midiendo…'
+                : isEmbed
+                    ? 'Web embed'
+                    : '${mbps.toStringAsFixed(1)} Mbps',
+            style: TextStyle(
+              color: accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.1,
             ),
           ),
-        ],
-      ),
-    );
+        ),
+      ],
+    ),
+  );
   }
 }
 
-/// Tarjeta final de servidor elegido con diseño nativo y unificado de AniMaple.
 class _ProbeChosenCard extends StatefulWidget {
   final String server;
   final bool prewarming;

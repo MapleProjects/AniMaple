@@ -62,8 +62,6 @@ class _HomePageState extends State<HomePage> {
         return;
       } catch (e, st) {
         debugPrint('HOME RETRY: $e');
-        // Offline esperado: sin hoja de error (la app funciona sin conexión
-        // y reintenta sola); solo errores reales muestran el reporte.
         if (attempt == 0 && mounted && !isConnectivityError(e)) {
           showErrorSheet(context, e, st);
         }
@@ -123,7 +121,6 @@ class _HomePageState extends State<HomePage> {
               onRefresh: _load,
               child: CustomScrollView(
                 slivers: [
-                  // Hero banner
                   if (_episodes.isNotEmpty)
                     SliverToBoxAdapter(
                       child: _HeroBanner(
@@ -131,7 +128,6 @@ class _HomePageState extends State<HomePage> {
                         isFollowed: _followedSlugs.contains(_episodes.first.animeSlug),
                       ),
                     ),
-                  // Section header
                   const SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
@@ -160,7 +156,6 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  // Episode grid — landscape 16:9 cards like animeav1
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     sliver: SliverGrid(
@@ -179,7 +174,6 @@ class _HomePageState extends State<HomePage> {
                             isFollowed: isFollowed,
                             onTap: () {
                               if (isFollowed) {
-                                // Si está en la lista de favoritos, va directo al capítulo de emisión
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -191,7 +185,6 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                 );
                               } else {
-                                // Si no está en favoritos, abre la interfaz de detalle con descripción
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(

@@ -54,7 +54,6 @@ class _CalendarPageState extends State<CalendarPage> {
       final grouped = <String, List<AnimeBasic>>{};
       for (final a in sched) {
         String day = 'Proximamente';
-        // Use latestEpisodeCreatedAt for the actual airing day, fallback to startDate
         final timeStr = a.latestEpisodeCreatedAt ?? a.startDate ?? '';
         if (timeStr.isNotEmpty) {
           try {
@@ -73,7 +72,6 @@ class _CalendarPageState extends State<CalendarPage> {
         grouped.putIfAbsent(day, () => []).add(a);
       }
 
-      // Sort each day's list by latestEpisodeCreatedAt (newest first)
       for (final entry in grouped.entries) {
         entry.value.sort((a, b) {
           final ca = a.latestEpisodeCreatedAt ?? '';
@@ -112,8 +110,6 @@ class _CalendarPageState extends State<CalendarPage> {
           ? const Center(child: Text('Sin datos', style: TextStyle(color: Color(0xFF6d6488))))
           : Column(
               children: [
-                // Encabezado de días adaptable: distribuido uniformemente a lo ancho en pantallas
-                // panorámicas (TV, Windows, Linux, tablet) o con desplazamiento suave en móviles.
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final totalW = constraints.maxWidth;
@@ -150,7 +146,6 @@ class _CalendarPageState extends State<CalendarPage> {
                     );
                   },
                 ),
-                // Anime grid for selected day (vertical cards like animeav1)
                 Expanded(
                   child: Builder(
                     builder: (ctx) {
@@ -190,7 +185,6 @@ class _CalendarPageState extends State<CalendarPage> {
                                           ? Image.network(a.poster!, fit: BoxFit.cover, width: double.infinity,
                                               errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)))
                                           : const Center(child: Icon(Icons.image, color: Color(0xFF4a4260), size: 40)),
-                                        // Episode number badge
                                         if (a.latestEpisodeNumber != null)
                                           Positioned(
                                             top: 6, left: 6,
@@ -203,7 +197,6 @@ class _CalendarPageState extends State<CalendarPage> {
                                               child: Text('Ep ${a.latestEpisodeNumber}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
                                             ),
                                           ),
-                                        // Favorite heart badge
                                         if (isFollowed)
                                           Positioned(
                                             top: 6, right: 6,

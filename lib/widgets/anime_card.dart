@@ -29,7 +29,6 @@ class AnimeCard extends StatelessWidget {
                     imageUrl: anime.poster!,
                     fit: BoxFit.cover,
                     width: double.infinity,
-                    // Fade suave al cargar: evita que las portadas "popen".
                     fadeInDuration: const Duration(milliseconds: 250),
                     fadeInCurve: Curves.easeOut,
                     placeholder: (_, __) => const SizedBox.shrink(),

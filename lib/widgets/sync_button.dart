@@ -3,10 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
 
-/// Avatar de perfil en el AppBar.
-/// - Sin sesión: avatar genérico → toca para iniciar sesión con Google.
-/// - Con sesión: foto de perfil de Google + menú con "Cerrar sesión".
-/// La sincronización ya es automática (polling 10s); el toque no hace pull.
+/// Botón y estado de cuenta de sincronización en AppBar.
 class SyncButton extends StatefulWidget {
   const SyncButton({super.key});
 
@@ -20,10 +17,7 @@ class _SyncButtonState extends State<SyncButton> {
   String? _name;
   String? _photoUrl;
 
-  /// Cuenta recordada de una sesión anterior (persistente). Mientras la
-  /// sesión real no se restaure (p.ej. arranque sin Internet), el avatar
-  /// aparece "con sesión": al tocar, en vez del login, reintenta la
-  /// restauración silenciosa — igual que Windows, que carga directo.
+  // Estado de sesión persistida para reconexión automática sin conexión inicial.
   bool _remembered = false;
 
   @override
@@ -74,11 +68,9 @@ class _SyncButtonState extends State<SyncButton> {
 
   Future<void> _handleTap() async {
     if (!_signedIn && !_remembered) {
-      // Iniciar sesión y arrancar la sincronización automática.
       final ok = await SyncService.signIn(context: context);
       if (!mounted) return;
       if (ok) {
-        // Sube el historial local existente y trae el remoto (una sola sync).
         await SyncService.sync(forcePush: true);
         _refreshFromService();
         _showErrorOr(() {
@@ -97,8 +89,6 @@ class _SyncButtonState extends State<SyncButton> {
     }
 
     if (!_signedIn && _remembered) {
-      // Cuenta recordada aún no restaurada (sin red al abrir, etc.):
-      // reintentar la restauración silenciosa, sin pedir login de nuevo.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Reconectando con tu cuenta…'),
@@ -112,7 +102,6 @@ class _SyncButtonState extends State<SyncButton> {
       return;
     }
 
-    // Con sesión: menú de cuenta → cerrar sesión.
     _showAccountMenu();
   }
 

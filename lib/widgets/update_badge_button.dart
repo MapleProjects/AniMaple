@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/update_service.dart';
 
-/// Botón-badge que aparece junto al avatar de cuenta cuando hay una
-/// actualización disponible. Al tocarlo muestra el mismo diálogo de
-/// Actualizar/Posponer que al arranque, para que el usuario no olvide
-/// actualizar si pospuso la ventana inicial.
+/// Botón con indicador visual de actualización pendiente.
 class UpdateBadgeButton extends StatelessWidget {
   const UpdateBadgeButton({super.key});
 

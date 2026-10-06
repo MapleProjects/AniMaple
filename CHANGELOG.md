@@ -1,5 +1,12 @@
 # AniMaple — Registro de cambios
 
+## v2.0.9
+
+### Novedades y mejoras
+- Limpieza y saneamiento general de código fuente y documentación técnica.
+- Optimización de comentarios internos y simplificación de estructuras descriptivas.
+- Actualización de documentación de arquitectura abierta para la comunidad.
+
 ## v2.0.8
 
 ### Novedades y mejoras

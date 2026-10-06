@@ -89,8 +89,6 @@ class PlaybackService : Service() {
         super.onDestroy()
     }
 
-    // ── Estado ──
-
     private fun applyState(intent: Intent) {
         lastTitle = intent.getStringExtra(EXTRA_TITLE) ?: ""
         lastEpisode = intent.getIntExtra(EXTRA_EPISODE, 0)
@@ -108,17 +106,10 @@ class PlaybackService : Service() {
     private fun setupSession() {
         mediaSession?.release()
         mediaSession = MediaSession(this, "AniMapleMediaSession").apply {
-            // Flags REQUERIDAS para que el sistema trate la sesión como media
-            // transport: sin FLAG_HANDLES_TRANSPORT_CONTROLS Android no dibuja
-            // la barra de progreso ni aplica la exención de POST_NOTIFICATIONS
-            // (la notificación puede terminar bloqueada por el permiso y no
-            // verse en el shade).
             setFlags(
                 MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS or
                 MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
             )
-            // Session activity: al tocar la notificación reabre la app. Sin
-            // esta referencia el sistema puede no publicar la media notification.
             sessionActivityIntent = PendingIntent.getActivity(
                 this@PlaybackService, 0,
                 packageManager.getLaunchIntentForPackage(packageName),
@@ -126,9 +117,6 @@ class PlaybackService : Service() {
             )
             setSessionActivity(sessionActivityIntent)
             setCallback(object : MediaSession.Callback() {
-                // Comandos EXPLÍCITOS (no toggle): si el sistema reenvía dos
-                // veces play/pause, cada orden es idempotente en Dart y no se
-                // invierte el estado.
                 override fun onPlay() = sendToDart("mediaPlay")
                 override fun onPause() = sendToDart("mediaPause")
                 override fun onStop() {
@@ -152,8 +140,6 @@ class PlaybackService : Service() {
         }
     }
 
-    // ── Notificación ──
-
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -169,32 +155,17 @@ class PlaybackService : Service() {
         }
     }
 
-    /** Estado de la sesión publicado por última vez (para saber cuándo hay
-     *  que re-publicar la notificación: cambio de título/episodio/state). */
     private var lastNotifiedTitle = ""
     private var lastNotifiedEpisode = -1
     private var lastNotifiedPlaying: Boolean? = null
 
-    /** Publica la notificación completa (solo cuando hay cambios grandes).
-     *  El resto del tiempo se usa [syncSession] para mover la barra sin
-     *  tocar notify(): re-publicar cada segundo hace que OneUI re-anime la
-     *  tarjeta entera. */
+    /** Publica o actualiza la notificación de controles de reproducción. */
     private fun publishNotification() {
         val session = mediaSession ?: return
 
-        // SIEMPRE sincronizar la sesión antes de publicar: si el PlaybackState
-        // queda desactualizado, el sistema envía el comando contrario (onPause
-        // en vez de onPlay) y el botón no hace nada.
         syncSession()
 
         val contentIntent = sessionActivityIntent
-
-        // Sin addAction manuales: con MediaStyle.setMediaSession, el sistema
-        // dibuja y gestiona los controles play/pause vía el MediaSession.Callback.
-        // Añadir PendingIntent broadcast aquí duplica el toggle (el sistema lo
-        // reenvía por el callback Y por el action) y el estado queda invertido.
-        // notificationManager primero, startForeground después: el orden
-        // notify→startForeground es el patrón de androidx/media (issue #192).
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -204,9 +175,6 @@ class PlaybackService : Service() {
         val poster = posterBitmap
         if (poster != null) builder.setLargeIcon(poster)
 
-        // Android 12+: la notificación FGS media NO debe mostrarse con retraso
-        // ni en una "caja" temporal: FOREGROUND_SERVICE_IMMEDIATE la publica
-        // de inmediato en el shade como media notification permanente.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         }
@@ -232,8 +200,6 @@ class PlaybackService : Service() {
 
         Log.d(TAG, "publishNotification: $lastTitle ep=$lastEpisode playing=$lastPlaying pos=$lastPosition dur=$lastDuration poster=${poster != null} sessionActive=${session.isActive}")
         try {
-            // 1) Notificar primero (evita que el sistema descarte la media
-            //    notification); 2) promocionar el servicio a foreground.
             notificationManager?.notify(NOTIFICATION_ID, notification)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
@@ -247,14 +213,11 @@ class PlaybackService : Service() {
         } catch (e: Exception) {
             setLog("startForeground FAIL: ${e.message}")
             Log.e(TAG, "startForeground FAILED: ${e.message}", e)
-            // Fallback: si FGS no es posible, al menos publicar la notificación.
             notificationManager?.notify(NOTIFICATION_ID, notification)
         }
     }
 
-        /** Sincroniza el MediaSession con la realidad SIEMPRE: PlaybackState
-     *  (barra + estado play/pause) y metadata (título, portada, duración).
-     *  SystemUI anima la barra sola desde el PlaybackState. */
+    /** Sincroniza el estado de reproducción y metadatos con el MediaSession. */
     private fun syncSession() {
         val session = mediaSession ?: return
 
@@ -302,13 +265,10 @@ class PlaybackService : Service() {
         }.start()
     }
 
-    // ── API estática ──
-
     companion object {
         private const val TAG = "AniMaplePlayback"
         const val CHANNEL_ID = "animaple_media_playback"
         const val NOTIFICATION_ID = 1001
-        // Debe coincidir con el id con que MainActivity cachea el engine.
         private const val ENGINE_ID = "animaple_main_engine"
         const val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
 

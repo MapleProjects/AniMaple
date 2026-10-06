@@ -1,16 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-/// Reproductor vía WebView para servidores protegidos por Cloudflare
-/// (fingerprint TLS de navegador requerido — ExoPlayer/proxy Dart dan 403,
-/// pero el WebView es Chromium real y reproduce igual que tu navegador).
-///
-/// El player del servidor (ej. player.zilla-networks.com/play/{id}) se carga
-/// en un <iframe> dentro de una página local. Cloudflare trata las
-/// navegaciones top-level con challenge agresivo ("Attention Required" o
-/// player sin fuente → "content not found"), pero los iframes embebidos se
-/// sirven sin fricción — exactamente como funciona en la web de animeav1,
-/// donde el video corre dentro de un iframe.
+/// Reproductor web para fuentes que requieren entorno de navegador.
+/// Embebe el reproductor en un iframe local manteniendo la cabecera referer.
 class WebviewPlayer extends StatefulWidget {
   final String url;
   final String? referer;
@@ -60,9 +52,7 @@ class _WebviewPlayerState extends State<WebviewPlayer> {
     final playerUrl = widget.url;
     final base = widget.referer ?? 'https://animeav1.com/';
 
-    // Página local que embebe el player del servidor en un iframe (con
-    // allowfullscreen). El iframe mantiene el referer de animeav1 si abrimos
-    // con baseUrl, lo que evita el challenge top-level de Cloudflare.
+    // Embebe el reproductor en un iframe local para conservar cabeceras.
     final html = '''
 <!DOCTYPE html>
 <html>

@@ -3,21 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/anime.dart';
 import 'api_service.dart';
 
-/// NotificationService — coordina el lado nativo de notificaciones.
-///
-/// Responsabilidades:
-/// - Pedir el permiso POST_NOTIFICATIONS al ARRANQUE de la app (no al entrar
-///   a un capítulo, como estaba antes).
-/// - Mantener el "espejo" de seguidos en nativo: un JSON {slug: titulo} que
-///   el Worker de WorkManager lee periódicamente SIN depender de la sesión
-///   de Google ni de la red de sincronización.
-/// - Agendar la revisión periódica de nuevos capítulos (WorkManager nativo,
-///   sobrevive reinicio y app cerrada).
-///
-/// No usa flutter_local_notifications a propósito: ese plugin exigiría
-/// actualizar AGP/desugaring/Java y rompería el toolchain del proyecto.
-/// Todo el trabajo de notificación ocurre en Kotlin (Notifier.kt +
-/// EpisodeCheckWorker.kt), que ya usa las APIs de plataforma.
+/// Coordinador de notificaciones locales y verificación en segundo plano.
 class NotificationService {
   static const MethodChannel _channel =
       MethodChannel('com.mapleprojects.animaple/notifications');

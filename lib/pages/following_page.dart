@@ -14,8 +14,7 @@ class FollowingPage extends StatefulWidget {
   State<FollowingPage> createState() => FollowingPageState();
 }
 
-/// "Mi lista" con dos pestañas internas: Favoritos (seguimientos) y
-/// Descargas (contenido offline).
+/// Vista de lista con pestañas de seguimiento y descargas locales.
 class FollowingPageState extends State<FollowingPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
@@ -112,9 +111,7 @@ class FollowingPageState extends State<FollowingPage>
       body: TabBarView(
         controller: _tabCtrl,
         children: [
-          // ── Pestaña Favoritos (seguimientos) ──
           _buildFollowingGrid(),
-          // ── Pestaña Descargas (offline) ──
           const DownloadsPage(),
         ],
       ),
@@ -142,7 +139,6 @@ class FollowingPageState extends State<FollowingPage>
         itemCount: _following.length + _queuedCount(),
         itemBuilder: (ctx, i) {
           if (i >= _following.length) {
-            // Tarjetas de animes solo en cola de descarga.
             final slug = _queuedOnlySlugs()[i - _following.length];
             return _queuedCard(slug);
           }
@@ -167,7 +163,6 @@ class FollowingPageState extends State<FollowingPage>
                       children: [
                         Image.network(f.posterUrl, fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.favorite, color: Color(0xFFef4444), size: 40))),
-                        // Favorite badge
                         Positioned(
                           top: 6, left: 6,
                           child: Container(
@@ -179,7 +174,6 @@ class FollowingPageState extends State<FollowingPage>
                             child: const Icon(Icons.favorite, color: Colors.white, size: 14),
                           ),
                         ),
-                        // Delete button
                         Positioned(
                           top: 4, right: 4,
                           child: Material(
@@ -213,8 +207,7 @@ class FollowingPageState extends State<FollowingPage>
     );
   }
 
-  // Animes con descargas activas pero aún sin nada completo en disco:
-  // se muestran al final del grid de favoritos como "en cola".
+  // Animes con descargas en progreso sin archivos locales completados.
   DownloadService get _dl => DownloadService.instance;
 
   int _queuedCount() => _queuedOnlySlugs().length;

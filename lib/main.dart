@@ -73,36 +73,19 @@ void main() async {
     MediaKit.ensureInitialized();
   }
   ApiService.init();
-  // Iniciar proxy local HTTP de alto rendimiento para streaming concurrente
   unawaited(HlsProxy.instance.start());
-  // Descargas offline: cargar índice y limpiar .part huérfanos de sesiones
-  // anteriores (crash/apagado a mitad de descarga).
   unawaited(DownloadService.instance.init());
   unawaited(FsrService.init());
-  // Limpieza proactiva de cualquier resto de caché de reproducción previa
   unawaited(AppPlayer.clearPlaybackCacheGlobal());
 
-  // Restaurar sesión de Google Sign-In y sincronizar en segundo plano.
-  // google_sign_in 6.x usa signInSilently() (100% invisible en Android, sin
-  // ventanas emergentes de Credential Manager).
   unawaited(() async {
     await SyncService.initialize();
-    // Arrancar SIEMPRE el polling de 10s y el watcher de conectividad, esté
-    // o no la sesión restaurada todavía: si la app inicia sin Internet, al
-    // volver la red el watcher reintenta restaurar sesión y sincronizar —
-    // todo de fondo, el usuario no tiene que tocar nada.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SyncService.startAutoSync();
       SyncService.watchConnectivity();
       SyncService.attemptRestoreAndSync();
-      // Notificaciones: permiso + agendado del worker + espejo de seguidos.
-      // Se pide al ARRANQUE (no al entrar a un capítulo): app recién instalada
-      // debe tener todas las notificaciones habilitadas desde el comienzo.
       NotificationService.init();
-      // Si el permiso de notificaciones fue denegado de forma permanente
-      // (Android 13+: "Don't allow" no permite volver a preguntar), guiar una
-      // sola vez a Ajustes. Sin esto, un usuario que negó sin querer jamás
-      // recibe avisos de capítulos nuevos, ni con la app abierta ni cerrada.
+
       Future.delayed(const Duration(milliseconds: 1500), () async {
         final status = await NotificationService.notificationStatus();
         if (status != 'permanent') return;
@@ -135,10 +118,7 @@ void main() async {
           ),
         );
       });
-      // Optimización de batería (Doze): el worker de capítulos revisa cada
-      // 8 min en segundo plano y tras reinicios. Si el sistema difiere el
-      // trabajo en reposo, los avisos se retrasan. Eximir a la app (una sola
-      // vez, dialog del sistema) la equipara a WhatsApp/Facebook.
+
       Future.delayed(const Duration(milliseconds: 2400), () async {
         final ignored = await NotificationService.isBatteryOptimizationIgnored();
         if (ignored) return;
@@ -172,9 +152,7 @@ void main() async {
           ),
         );
       });
-      // Actualización: consultar releases de GitHub. Si hay versión nueva,
-      // mostrar el diálogo Actualizar/Posponer (diálogo también accesible
-      // desde el botón-badge junto a la cuenta).
+
       Future.delayed(const Duration(milliseconds: 2500), () async {
         final hasUpdate = await UpdateService.checkForUpdate();
         if (!hasUpdate) return;
@@ -190,7 +168,6 @@ void main() async {
     });
   }());
 
-  // Global async error handler — catches errors outside the widget tree
   runZonedGuarded(
     (() {
       runApp(const AniMapleApp());

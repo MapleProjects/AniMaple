@@ -22,7 +22,6 @@ class HistoryPageState extends State<HistoryPage> {
     _load();
   }
 
-  /// Called by parent when tab becomes active
   void refresh() => _load();
 
   Future<void> _load() async {
@@ -31,8 +30,6 @@ class HistoryPageState extends State<HistoryPage> {
       setState(() { _history = h; _loading = false; });
     } catch (e, st) {
       debugPrint('HISTORY ERROR: $e');
-      // Offline esperado: sin hoja de error; el historial es local y la app
-      // reintenta sola al volver la red.
       if (mounted && !isConnectivityError(e)) {
         showErrorSheet(context, e, st);
       }
@@ -108,7 +105,6 @@ class HistoryPageState extends State<HistoryPage> {
                             children: [
                               Image.network(h.posterUrl, fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.play_circle_outline, color: Color(0xFF4a4260), size: 40))),
-                              // Episode badge
                               Positioned(
                                 top: 6, left: 6,
                                 child: Container(
@@ -117,7 +113,6 @@ class HistoryPageState extends State<HistoryPage> {
                                   child: Text('Ep ${h.episodeNumber}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                                 ),
                               ),
-                              // Delete button
                               Positioned(
                                 top: 4, right: 4,
                                 child: Material(

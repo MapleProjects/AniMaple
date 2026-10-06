@@ -4,21 +4,11 @@ import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
 
-/// Hoja de selección de capítulos para descargar.
-///
-/// Comportamiento:
-/// - NADA preseleccionado: el usuario elige qué bajar.
-/// - "Descargar todo" como atajo explícito.
-/// - Toggle "Doblaje" visible SOLO si al menos un capítulo tiene DUB
-///   (sonda ligera en segundo plano). Con doblaje activo, cada capítulo
-///   se baja con DUB cuando lo tiene y cae a SUB cuando no.
-/// - Vistos: punto azul. Descargados: gris con X para borrar.
-/// - En cola: ámbar con progreso. Error: rojo con reintento.
+/// Selector modal de episodios para descarga con soporte de variantes.
 class DownloadSheet extends StatefulWidget {
   final AnimeDetail anime;
 
-  /// Capítulos que vienen ya marcados al abrir (p.ej. el capítulo actual
-  /// cuando se abre desde el reproductor). Se ignoran los descargados/en cola.
+  /// Episodios preseleccionados al abrir la hoja.
   final Set<int> preselected;
 
   const DownloadSheet({super.key, required this.anime, this.preselected = const {}});
@@ -49,17 +39,15 @@ class _DownloadSheetState extends State<DownloadSheet> {
   bool _enqueued = false;
   bool _preferDub = false;
 
-  // Sonda de doblaje (solo corre si hay caps sin descargar).
+  // Sonda de disponibilidad de doblaje.
   bool _dubAvailable = false;
   bool _probingDub = false;
-  int? _dubEpCached; // ep con DUB ya descargado → toggle directo
+  int? _dubEpCached;
 
   @override
   void initState() {
     super.initState();
     _dl = DownloadService.instance;
-    // Preselección: solo el capítulo desde donde se abrió (si aplica y es
-    // válido). Sin preselección, la grilla abre totalmente vacía.
     _selected = widget.preselected
         .where((n) =>
             !_dl.isDownloaded(widget.anime.slug, n) &&
@@ -71,7 +59,6 @@ class _DownloadSheetState extends State<DownloadSheet> {
 
   Set<int> _watchedNumbers = {};
 
-  /// Vistos según historial (para el punto azul en la grilla).
   Future<void> _loadWatched() async {
     try {
       final history = await ApiService.fetchHistory();
@@ -84,7 +71,6 @@ class _DownloadSheetState extends State<DownloadSheet> {
   }
 
   Future<void> _probeDub() async {
-    // DUB ya comprobado por descargas previas: toggle sin sondear red.
     if (_dl.downloadedDubEpisodes(widget.anime.slug).isNotEmpty) {
       if (!mounted) return;
       setState(() {
@@ -94,8 +80,6 @@ class _DownloadSheetState extends State<DownloadSheet> {
       return;
     }
     final slug = widget.anime.slug;
-    // Caps candidatos: no descargados aún (los descargados ya tienen su
-    // variante guardada y no afectan la decisión).
     final candidates = List<int>.generate(
       widget.anime.episodes.length,
       (i) => widget.anime.episodes[i].number,
@@ -109,7 +93,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
     setState(() {
       _dubAvailable = any;
       _probingDub = false;
-      if (any) _preferDub = true; // Default: doblaje cuando existe.
+      if (any) _preferDub = true;
     });
   }
 
@@ -347,7 +331,6 @@ class _DownloadSheetState extends State<DownloadSheet> {
   }
 }
 
-/// Switch compacto de doblaje para el header del sheet.
 class _DubToggle extends StatelessWidget {
   const _DubToggle({required this.value, required this.onChanged});
 
@@ -391,12 +374,6 @@ class _DubToggle extends StatelessWidget {
   }
 }
 
-/// Tile de episodio del selector. Estados:
-/// - descargado: GRIS con número apagado + X roja para borrar.
-/// - en cola: ámbar con spinner de progreso + X para cancelar.
-/// - error: rojo con icono de reintento.
-/// - visto (historial): punto azul arriba-izquierda.
-/// - normal: checkbox de selección (empieza desmarcado).
 class _EpTile extends StatelessWidget {
   const _EpTile({
     super.key,
@@ -429,7 +406,6 @@ class _EpTile extends StatelessWidget {
         Widget content;
 
         if (downloaded) {
-          // Ya está en disco: gris, no seleccionable, X para eliminar.
           border = const Color(0xFF2a2440);
           fill = const Color(0xFF1a1626);
           content = Stack(
@@ -518,7 +494,6 @@ class _EpTile extends StatelessWidget {
             ],
           );
         } else {
-          // Seleccionable normal (checkbox empieza vacío).
           if (selected) {
             border = const Color(0xFF8b5cf6);
             fill = const Color(0xFF241b45);

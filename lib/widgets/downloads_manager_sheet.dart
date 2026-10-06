@@ -5,15 +5,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../services/download_service.dart';
 
-/// Gestor de descargas con 2 pestañas: "Descargando" (cola + activo +
-/// errores con reintento) y "Completados" (éxitos de la sesión).
-///
-/// Optimización (dispositivos de bajos recursos):
-/// - El progreso se refresca con un Ticker manual a ~2 fps SOLO mientras el
-///   sheet está abierto (los ValueNotifier del servicio ya vienen
-///   throttled >=1%). Nada de streams por frame ni listeners globales.
-/// - Cada fila escucha su propio progreso con [ValueListenableBuilder];
-///   una fila que cambia no reconstruye las demás.
+/// Gestor modal de descargas con pestañas de cola y elementos completados.
 Future<void> showDownloadsManager(BuildContext context) {
   return showModalBottomSheet(
     context: context,
@@ -42,7 +34,7 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
   @override
   void initState() {
     super.initState();
-    // Refresco barato de la estructura de la lista (entradas/salidas) a 2fps.
+    // Actualiza la lista de elementos periódicamente.
     _ticker = createTicker((_) {
       if (mounted && _tick++ % 30 == 0) {
         setState(() {});
@@ -116,8 +108,6 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
       ),
     );
   }
-
-  // ── Pestaña 1: en curso + cola + fallidos ─────────────────────────────
 
   Widget _buildActiveTab(DownloadService svc) {
     final queue = svc.queueSnapshot();
@@ -202,8 +192,6 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
     return ListView(children: rows);
   }
 
-  // ── Pestaña 2: completados en esta sesión ─────────────────────────────
-
   Widget _buildCompletedTab(DownloadService svc) {
     final done = svc.recentCompleted.value;
     if (done.isEmpty) {
@@ -286,8 +274,6 @@ class _DoneIcon extends StatelessWidget {
   }
 }
 
-// ── Fila de la cola: escucha SOLO su propio progreso ────────────────────
-
 class _QueueRow extends StatelessWidget {
   const _QueueRow({
     super.key,
@@ -321,7 +307,6 @@ class _QueueRow extends StatelessWidget {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Portada del anime recortada en círculo.
                 SizedBox(
                   width: 38,
                   height: 38,
@@ -337,7 +322,6 @@ class _QueueRow extends StatelessWidget {
                         : const _QueueFallback(),
                   ),
                 ),
-                // Anillo de progreso alrededor.
                 SizedBox(
                   width: 48,
                   height: 48,

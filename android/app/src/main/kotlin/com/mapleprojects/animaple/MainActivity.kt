@@ -28,7 +28,6 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
 
-    // ── Method Channels ──
     private val PIP_CHANNEL = "com.mapleprojects.animaple/pip"
     private val MEDIA_CHANNEL = "com.mapleprojects.animaple/media_session"
     private val NOTIF_CHANNEL = "com.mapleprojects.animaple/notifications"
@@ -43,7 +42,6 @@ class MainActivity : FlutterActivity() {
     private var downloadMethodChannel: MethodChannel? = null
     private var tvMethodChannel: MethodChannel? = null
 
-    // ── PiP State ──
     private var isPipSupported = false
     private var isPlaying = false
     private val handler = Handler(Looper.getMainLooper())
@@ -54,7 +52,6 @@ class MainActivity : FlutterActivity() {
         private const val PREFS_NOTIF = "animaple_notif"
     }
 
-    // ── Broadcast Receivers ──
     private val pipPauseReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             isPlaying = !isPlaying
@@ -63,11 +60,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // Sin mediaReceiver: los controles play/pause/stop de la notificación los
-    // maneja el sistema vía MediaSession.Callback (PlaybackService). Añadir
-    // broadcasts manuales duplicaba el toggle y el estado quedaba invertido.
-
-    // ── Engine Configuration ──
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
@@ -94,7 +86,6 @@ class MainActivity : FlutterActivity() {
 
         registerReceiver(pipPauseReceiver, IntentFilter("com.mapleprojects.animaple.PIP_PAUSE"), RECEIVER_EXPORTED)
 
-        // ── PiP Channel ──
         pipMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PIP_CHANNEL)
         pipMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -118,10 +109,6 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // ── Media Session Channel ──
-        // La notificación media vive en PlaybackService (foreground service
-        // mediaPlayback, la forma correcta de mostrar barra+controles). Aquí
-        // solo se reenvía el estado desde Dart.
         mediaMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL)
         mediaMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -129,8 +116,6 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: ""
                     val episode = call.argument<Int>("episode") ?: 0
                     val playing = call.argument<Boolean>("playing") ?: false
-                    // Flutter envía ints pequeños como Integer (no Long).
-                    // argument<Long> revienta con ClassCastException.
                     val position = (call.argument<Number>("position") ?: 0L).toLong()
                     val duration = (call.argument<Number>("duration") ?: 0L).toLong()
                     val animeId = call.argument<Int>("animeId") ?: 0
@@ -154,14 +139,12 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Crea el canal de notificaciones de novedades (idempotente).
         Notifier.ensureNewEpisodeChannel(this)
         setupNotificationChannel(flutterEngine)
         setupUpdateChannel(flutterEngine)
         setupTvChannel(flutterEngine)
     }
 
-    // ── Android TV Channel ──
     private fun setupTvChannel(flutterEngine: FlutterEngine) {
         tvMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TV_CHANNEL)
         tvMethodChannel?.setMethodCallHandler { call, result ->
@@ -178,13 +161,8 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ── Updater Channel ──
-    // Actualización automática desde GitHub. Flutter consulta el release,
-    // descarga el APK en `updates/` y pide instalar vía FileProvider.
     private fun setupUpdateChannel(flutterEngine: FlutterEngine) {
         updateMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATE_CHANNEL)
-        // Al arrancar la app nueva, limpiar APK descargados que ya no se
-        // necesitan (la instalación anterior dejó el archivo huérfano).
         Updater.cleanupDownloaded(this)
 
         updateMethodChannel?.setMethodCallHandler { call, result ->
@@ -259,7 +237,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // ── Download Channel ──
+        // Canal de descargas.
         downloadMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DOWNLOAD_CHANNEL)
         downloadMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -289,22 +267,13 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Registra el seguimiento periódico de capítulos (15 min). El
-     *  PeriodicWorkRequest lo administra el sistema: sobrevive reinicios y
-     *  proceso muerto. KEEP: no se duplica en cada arranque. También se
-     *  agenda la alarma robusta que dispara en Doze (ver receiver). */
+    /** Registra la verificación periódica de capítulos y la alarma de fondo. */
     private fun scheduleEpisodeCheck() {
         EpisodeCheckWorker.enqueuePeriodic(this)
         EpisodeCheckWorker.enqueueAlarm(this)
     }
 
-    // ── Permiso de notificaciones (Android 13+ / POST_NOTIFICATIONS) ──
-    // Regla del sistema: si el usuario toca "Don't allow", el diálogo ya NO
-    // vuelve a aparecer y solo se reactiva desde Ajustes. Se guarda el
-    // resultado del request (1002) en prefs para distinguir "posible" (nunca
-    // respondió / swipe-away) de "permanente" (negó) sin consultar una API
-    // inestable. La app re-pide solo en "posible"; en "permanente" se guía
-    // a Ajustes desde Dart.
+    // Gestión del permiso POST_NOTIFICATIONS en Android 13+.
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -344,14 +313,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ── Optimización de batería (Doze) ──
-    // Si el dispositivo entra en Doze con la app en segundo plano, el trabajo
-    // periódico se difiere a ventanas de mantenimiento (pueden espaciarse
-    // mucho). Eximir a la app (Settings ACTION_REQUEST_IGNORE_BATTERY_
-    // OPTIMIZATIONS) permite que el worker corra con normalidad, como hacen
-    // WhatsApp/Facebook. Es un permiso especial (Play lo restringe a apps
-    // cuyo nucleo se ve perjudicado; esta app distribuye por GitHub).
-
+    // Solicitud de exención de optimizaciones de batería para tareas en segundo plano.
     private fun isBatteryOptimizationIgnored(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -393,40 +355,22 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Persiste el espejo {slug: titulo} de seguidos para que el Worker lo lea
-     *  sin depender de la sesión/red de Google. Si se vacía, se cancela el worker. */
+    /** Sincroniza el catálogo de animes seguidos para el worker de fondo. */
     private fun updateFollowedMirror(json: String) {
         val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
         prefs.edit().putString(EpisodeCheckWorker.KEY_FOLLOWED_JSON, json).apply()
-        // KEEP hace el periódico idempotente: no se duplica si ya existe.
         scheduleEpisodeCheck()
         if (json == "{}" || json.isEmpty()) {
             EpisodeCheckWorker.cancel(this)
         }
     }
 
-    // ══════════════════════════════════════════════
-    //  MEDIA SESSION (moved to PlaybackService)
-    // ══════════════════════════════════════════════
-    // La notificación de reproducción con barra de progreso y controles se
-    // publica desde PlaybackService (foreground service mediaPlayback), la
-    // única forma de que Android la muestre de forma fiable y con timeline.
-    // MainActivity solo reenvía el estado de Dart y los controles vuelven por
-    // el canal media_session (play/pause/stop desde el MediaSession.Callback).
-
-    // ══════════════════════════════════════════════
-    //  PICTURE-IN-PICTURE
-    // ══════════════════════════════════════════════
-
+    // Parámetros y control de Picture-in-Picture.
     private fun buildPipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16, 9))
 
-        // NOTA: no se usa setAutoEnterEnabled. En Android 12+ ese flag solo
-        // surte efecto si el usuario ya entró en PiP manualmente al menos una
-        // vez (o lo habilitó en Ajustes), que es exactamente el bug reportado.
-        // La vía confiable es la llamada explícita enterPictureInPictureMode()
-        // desde onUserLeaveHint, que funciona en todas las versiones.
+        // El modo PiP se gestiona explícitamente desde onUserLeaveHint.
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val pauseIcon = Icon.createWithResource(this,

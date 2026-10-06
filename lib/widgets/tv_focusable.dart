@@ -1,12 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Componente envoltorio universal para navegación con control remoto (D-Pad) en Android TV.
-///
-/// Proporciona:
-/// - Resaltado visual con escalado animado (1.05x), borde brillante y resplandor (glow).
-/// - Desplazamiento automático al elemento enfocado con [Scrollable.ensureVisible].
-/// - Soporte para botones D-Pad Center / OK / Enter / Gamepad A para activar [onTap].
+/// Envoltorio para navegación por D-Pad / control remoto en Android TV.
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;

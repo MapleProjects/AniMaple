@@ -14,9 +14,7 @@ import 'package:flutter/services.dart';
 
 void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
     {String? title, String? slug}) {
-  // Guardas anti-saturación: nunca dos hojas a la vez ni más de una cada
-  // 8 s. Sin esto, un arranque sin Internet apila decenas de hojas por
-  // segundo (una por cada reintento o imagen que falla).
+  // Rate limit para evitar saturación de diálogos concurrentes.
   if (_sheetOpen) return;
   final now = DateTime.now();
   if (now.difference(_lastSheetShown) < const Duration(seconds: 8)) return;
@@ -24,11 +22,7 @@ void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
   _lastSheetShown = now;
 
   final detail = _formatError(error, stackTrace, slug: slug);
-  // Diferir el push al terminar el frame actual. FlutterError.onError puede
-  // dispararse DURANTE build/layout; empujar una ruta en ese momento deja
-  // Navigator._debugLocked pegado (bloquea toda navegación posterior con
-  // assert '!_debugLocked') y provoca la cascada "Build scheduled during
-  // frame" / null checks en slivers.
+  // Diferir al final del frame para evitar conflictos con el Navigator durante build/layout.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     if (!context.mounted) {
       _sheetOpen = false;
@@ -146,7 +140,6 @@ class _ErrorSheet extends StatelessWidget {
           child: ListView(
             controller: scrollController,
             children: [
-              // Drag handle
               Center(
                 child: Container(
                   width: 40, height: 4,
@@ -157,20 +150,17 @@ class _ErrorSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              // Icon + category
               Row(children: [
                 Icon(icon, color: iconColor, size: 28),
                 const SizedBox(width: 10),
                 Text(category, style: TextStyle(color: iconColor, fontSize: 16, fontWeight: FontWeight.w700)),
               ]),
               const SizedBox(height: 8),
-              // Error message (short)
               Text(
                 _shortError(errorStr),
                 style: const TextStyle(color: Color(0xFFe8e4f0), fontSize: 14, height: 1.4),
               ),
               const SizedBox(height: 16),
-              // Full error detail in a code block
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -190,7 +180,6 @@ class _ErrorSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              // Copy button
               SizedBox(
                 width: double.infinity,
                 height: 44,
@@ -246,21 +235,15 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
   @override
   void initState() {
     super.initState();
-    // Catch Flutter framework errors
     FlutterError.onError = (details) {
       debugPrint('FLUTTER ERROR: ${details.exception}');
       debugPrint('${details.stack}');
-      // Errores de red de Image.network etc. (offline esperado): solo log,
-      // NUNCA hoja de error — saturarían la app en modo sin conexión.
+      // Ignorar fallos de red previstos en modo offline.
       if (isConnectivityError(details.exception)) return;
-      // Assert exclusivo de debug de Flutter: el grid del primer frame
-      // tras el arranque recibe constraints de ancho ~0 y revienta
-      // 'crossAxisExtent > 0.0'. Solo log, no debe alarmar al usuario.
+      // Ignorar aserciones transitorias de constraints en primer frame.
       if (details.exception.toString().contains('crossAxisExtent > 0.0')) {
         return;
       }
-      // Cascada de layout de slivers (geometry null tras un fallo previo):
-      // efecto secundario, no accionable — solo log.
       final stackStr = details.stack?.toString() ?? '';
       if (stackStr.contains('rendering/sliver_') ||
           stackStr.contains('rendering/viewport.dart')) {
@@ -279,10 +262,7 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
 
   @override
   Widget build(BuildContext context) {
-    // Los primeros frames del engine llegan con physicalSize 0×0 (métricas
-    // asíncronas). Construir el árbol completo en 0×0 rompe los grids
-    // (assert 'crossAxisExtent > 0.0' + cascada de null-checks en slivers).
-    // Se espera en vacío hasta que las métricas de la ventana sean reales.
+    // Evitar renderizado mientras las dimensiones de pantalla sean 0.
     if (MediaQuery.sizeOf(context) == Size.zero) {
       return const SizedBox.shrink();
     }

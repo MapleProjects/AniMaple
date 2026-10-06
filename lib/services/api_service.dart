@@ -27,7 +27,6 @@ class ApiService {
 
   static SharedPreferences? _prefs;
 
-  // ── HTTP client with timeouts (fixes Android slow/unstable connections) ──
   static http.Client? _client;
   static http.Client get _http {
     if (_client != null) return _client!;
@@ -61,8 +60,6 @@ class ApiService {
   }
 
   static Map<String, String> get _headers => {'User-Agent': _ua};
-
-  // ── Devalue parser ──────────────────────────────────
 
   static dynamic _val(List<dynamic> data, int idx) {
     if (idx < 0 || idx >= data.length) return null;
@@ -280,8 +277,6 @@ class ApiService {
     return cur;
   }
 
-  // ── Recent episodes ─────────────────────────────────
-
   static Future<List<RecentEpisode>> fetchRecentEpisodes() async {
     return _retry(() async {
       final resp = await _http.get(
@@ -362,8 +357,6 @@ class ApiService {
     });
   }
 
-  // ── Catalog & Search ─────────────────────────────────
-
   static Future<List<AnimeBasic>> fetchCatalog({
     String? search,
     dynamic genre,
@@ -420,9 +413,6 @@ class ApiService {
   static Future<List<AnimeBasic>> search(String query) =>
       fetchCatalog(search: query);
 
-
-  // ── Schedule ────────────────────────────────────────
-
   static Future<List<AnimeBasic>> fetchSchedule() async {
     return _retry(() async {
       final resp = await _http.get(
@@ -454,8 +444,6 @@ class ApiService {
       return [];
     });
   }
-
-  // ── Anime detail ────────────────────────────────────
 
   static Future<AnimeDetail> fetchAnimeDetail(String slug) async {
     return _retry(() async {
@@ -527,8 +515,6 @@ class ApiService {
       );
     });
   }
-
-  // ── Episode detail ──────────────────────────────────
 
   static Future<EpisodeDetail> fetchEpisodeDetail(
     String animeSlug,
@@ -636,14 +622,7 @@ class ApiService {
     });
   }
 
-  // ── Video URL extraction ────────────────────────────
-
-  /// Despierta el origin del video directo (mp4upload) antes de abrir el
-  /// player. El servidor a3.mp4upload.com:183 tarda ~20-35s en servir el
-  /// primer byte si está "frío"; tras un request Range: bytes=0-0 la misma
-  /// URL responde en ~7s. Este prewarm reduce la espera visible del usuario.
-  /// Devuelve true si el servidor está listo (cualquier 2xx/206), false si
-  /// falló (el player intentará igualmente).
+  /// Despierta el servidor de video directo antes de iniciar la reproducción.
   static Future<bool> prewarmVideo(String url, {Map<String, String>? headers}) async {
     try {
       final reqHeaders = <String, String>{
@@ -755,10 +734,7 @@ class ApiService {
     }
   }
 
-  /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
-  /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
-  /// Resuelve la variante HLS de mayor resolución (ej: 1080p) desde una lista de
-  /// reproducción maestra para garantizar la calidad máxima independiente del ancho de banda.
+  /// Resuelve la variante HLS de mayor resolución desde la lista de reproducción maestra.
   static Future<Map<String, dynamic>> resolveHighestQualityHls(
     String masterUrl, {
     Map<String, String>? headers,
@@ -1377,8 +1353,6 @@ class ApiService {
     }
   }
 
-  // ── History (local) ─────────────────────────────────
-
   static Future<List<HistoryEntry>> fetchHistory() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final raw = prefs.getStringList('history') ?? [];
@@ -1473,12 +1447,6 @@ class ApiService {
     SyncService.notifyLocalChanged();
   }
 
-  // ── Tombstones de borrado (local) ───────────────────
-  // El sync hace union, así que sin estos marcadores el remoto
-  // "resucita" lo que se elimina localmente. Cada delete escribe una
-  // clave con timestamp; el merge se lleva la más reciente y descarta
-  // las entradas vivas cuyo borrado es más nuevo que el propio dato.
-
   static const _kDeletedHistory = 'deleted_history';
   static const _kDeletedFollowed = 'deleted_followed';
 
@@ -1522,8 +1490,6 @@ class ApiService {
 
   static String _encodeTombstones(Map<String, String> m) =>
       jsonEncode(m);
-
-  // ── Followed (local) ────────────────────────────────
 
   static Future<List<FollowedAnime>> fetchFollowed() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
@@ -1655,8 +1621,6 @@ class ApiService {
     );
     NotificationService.updateFollowedMirror();
   }
-
-  // ── Helpers ─────────────────────────────────────────
 
   static List<AnimeBasic> _resolveAnimeList(
     List<dynamic> data,
