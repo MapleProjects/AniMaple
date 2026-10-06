@@ -48,4 +48,5 @@ NUL
 secrets.env
 *.env
 android/key.properties
+.codegraph/
 

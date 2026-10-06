@@ -3,8 +3,8 @@ set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VM_NAME="${VM_NAME:-Windows11}"
-VM_IP="${VM_IP:-192.168.122.237}"
-VM_USER="${VM_USER:-Maple}"
+VM_IP="${VM_IP:-192.168.122.2}"
+VM_USER="${VM_USER:-Builder}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/Escritorio}"
 
 # Cargar secretos locales si existen (ignorado en git)
