@@ -66,14 +66,9 @@ Var isUpdate
 
 Function CloseApp
     DetailPrint "Cerrando instancias previas de AniMaple..."
-    ; 1. Cerrar cualquier otro instalador previo colgado
-    System::Call 'kernel32::GetCurrentProcessId() i .r0'
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process | Where-Object { ($$_.ProcessName -match \"animaple.*setup\" -or $$_.MainWindowTitle -match \"Instalaci[oó]n de AniMaple\") -and $$_.Id -ne $0 } | Stop-Process -Force -ErrorAction SilentlyContinue"'
-
-    ; 2. Terminar animaple.exe de forma completamente silenciosa
+    ; 1. Terminar animaple.exe de forma directa y silenciosa
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
-    Sleep 500
+    Sleep 300
 
     IfFileExists "$INSTDIR\animaple.exe" 0 DoneCheck
     StrCpy $R0 0
@@ -83,10 +78,9 @@ CheckLoop:
     IfFileExists "$INSTDIR\animaple.exe" 0 FileUnlocked
     ; Sigue bloqueado: reintentar terminacion forzada
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
-    Sleep 500
+    Sleep 300
     IntOp $R0 $R0 + 1
-    ${If} $R0 < 6
+    ${If} $R0 < 4
         Goto CheckLoop
     ${EndIf}
     ; Si persiste bloqueo, renombrar el archivo para permitir instalar
@@ -164,8 +158,7 @@ SectionEnd
 Function un.CloseApp
     DetailPrint "Cerrando instancias previas de AniMaple..."
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
-    Sleep 500
+    Sleep 300
 
     IfFileExists "$INSTDIR\animaple.exe" 0 DoneUnCheck
     StrCpy $R0 0
@@ -174,10 +167,9 @@ UnCheckLoop:
     Delete "$INSTDIR\animaple.exe"
     IfFileExists "$INSTDIR\animaple.exe" 0 FileUnUnlocked
     nsExec::Exec '"$SYSDIR\taskkill.exe" /F /T /IM animaple.exe'
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process -Name animaple -ErrorAction SilentlyContinue | Stop-Process -Force"'
-    Sleep 500
+    Sleep 300
     IntOp $R0 $R0 + 1
-    ${If} $R0 < 6
+    ${If} $R0 < 4
         Goto UnCheckLoop
     ${EndIf}
     Rename "$INSTDIR\animaple.exe" "$INSTDIR\animaple.exe.old"
