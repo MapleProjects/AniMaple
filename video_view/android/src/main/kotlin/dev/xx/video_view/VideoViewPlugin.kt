@@ -862,30 +862,33 @@ class VideoViewPlugin : FlutterPlugin, ActivityAware {
 			return cache
 		}
 
-		@Synchronized
 		fun clearPlaybackCache(context: Context) {
-			try {
-				playbackCache?.let { cache ->
-					val keys = cache.keys.toSet()
-					for (key in keys) {
-						try {
-							cache.removeResource(key)
-						} catch (_: Throwable) {}
-					}
-				}
-			} catch (_: Throwable) {}
-			try {
-				if (playbackCache == null) {
-					val cacheDir = File(context.cacheDir, "player_playback_cache")
-					if (cacheDir.exists()) {
-						cacheDir.listFiles()?.forEach { file ->
-							try {
-								file.deleteRecursively()
-							} catch (_: Throwable) {}
+			Thread {
+				synchronized(this) {
+					try {
+						playbackCache?.let { cache ->
+							val keys = cache.keys.toSet()
+							for (key in keys) {
+								try {
+									cache.removeResource(key)
+								} catch (_: Throwable) {}
+							}
 						}
-					}
+					} catch (_: Throwable) {}
+					try {
+						if (playbackCache == null) {
+							val cacheDir = File(context.cacheDir, "player_playback_cache")
+							if (cacheDir.exists()) {
+								cacheDir.listFiles()?.forEach { file ->
+									try {
+										file.deleteRecursively()
+									} catch (_: Throwable) {}
+								}
+							}
+						}
+					} catch (_: Throwable) {}
 				}
-			} catch (_: Throwable) {}
+			}.start()
 		}
 	}
 

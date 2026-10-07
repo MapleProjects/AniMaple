@@ -37,8 +37,7 @@ FittedBox showVideo(VideoController player, VideoView widget) {
     );
   }
 
-  // Ocultar la línea verde provocada por relleno de macrobloques de decodificadores
-  // hardware en Android TV (Amlogic/MediaTek) recortando los píxeles residuales del borde inferior.
+  // Recorta el borde inferior para eliminar artefactos y relleno de macrobloques YUV en decodificadores hardware.
   Widget content = ClipRect(
     child: SizedBox(
       width: effectiveW,
@@ -46,8 +45,8 @@ FittedBox showVideo(VideoController player, VideoView widget) {
       child: OverflowBox(
         minWidth: effectiveW,
         maxWidth: effectiveW,
-        minHeight: effectiveH + 6.0,
-        maxHeight: effectiveH + 6.0,
+        minHeight: effectiveH + 16.0,
+        maxHeight: effectiveH + 16.0,
         alignment: Alignment.topCenter,
         child: video,
       ),

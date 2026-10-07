@@ -1,8 +1,10 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../services/tv_service.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/tv_focusable.dart';
@@ -126,227 +128,617 @@ class _DetailPageState extends State<DetailPage> {
       );
     }
 
+    final isWide = TvService.isTvMode || MediaQuery.sizeOf(context).width > 760;
+
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 300,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (anime.backdrop != null)
-                    Image.network(anime.backdrop!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox())
-                  else
-                    Container(color: const Color(0xFF110e1a)),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF0a0812)]),
-                    ),
-                  ),
+      backgroundColor: const Color(0xFF0a0812),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Fondo ambiental decorativo: backdrop o póster desenfocado para evitar espacios vacíos.
+          if (anime.backdrop != null)
+            Opacity(
+              opacity: 0.22,
+              child: Image.network(
+                anime.backdrop!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox(),
+              ),
+            )
+          else if (anime.poster != null)
+            Opacity(
+              opacity: 0.16,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                child: Image.network(
+                  anime.poster!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+            ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x990a0812),
+                  Color(0xCC0a0812),
+                  Color(0xFF0a0812),
                 ],
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+          CustomScrollView(
+            slivers: [
+              if (!isWide && anime.backdrop != null)
+                SliverAppBar(
+                  expandedHeight: 220,
+                  pinned: true,
+                  backgroundColor: const Color(0xFF0a0812),
+                  flexibleSpace: FlexibleSpaceBar(
+                    background: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(
+                          anime.backdrop!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox(),
+                        ),
+                        const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Color(0xFF0a0812)],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverAppBar(
+                  pinned: false,
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  leading: const BackButton(color: Color(0xFFe8e4f0)),
+                ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isWide ? 28 : 16,
+                    vertical: isWide ? 8 : 12,
+                  ),
+                  child: isWide
+                      ? _buildWideHeader(anime)
+                      : _buildMobileHeader(anime),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: isWide ? 28 : 16,
+                    right: isWide ? 28 : 16,
+                    top: 12,
+                    bottom: 8,
+                  ),
+                  child: Text(
+                    'Episodios (${anime.episodesCount})',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFe8e4f0),
+                    ),
+                  ),
+                ),
+              ),
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: isWide ? 28 : 16),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 80,
+                    childAspectRatio: 1,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (ctx, i) {
+                      final ep = anime.episodes[i];
+                      final isWatched = _watchedEpisodes.contains(ep.number);
+                      final isDownloaded = _dl.isDownloaded(anime.slug, ep.number);
+                      final isQueued = _dl.isQueued(anime.slug, ep.number);
+                      final epProgress =
+                          _dl.progress.value['${anime.slug}#${ep.number}'];
+                      return TvFocusable(
+                        onTap: () => _playEpisode(anime, ep.number),
+                        borderRadius: BorderRadius.circular(8),
+                        scaleOnFocus: 1.10,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF110e1a),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isQueued
+                                  ? const Color(0xFFf59e0b)
+                                  : isDownloaded
+                                      ? const Color(0xFF22c55e)
+                                      : isWatched
+                                          ? const Color(0xFF8b5cf6)
+                                          : const Color(0xFF1e1832),
+                              width: isWatched || isDownloaded || isQueued ? 2 : 1,
+                            ),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Text('${ep.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isDownloaded ? const Color(0xFF22c55e) : const Color(0xFFe8e4f0))),
+                              if (isWatched && !isDownloaded)
+                                Positioned(
+                                  top: 2, right: 2,
+                                  child: Container(
+                                    width: 8, height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF8b5cf6),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                              if (isWatched && isDownloaded)
+                                Positioned(
+                                  top: 2, right: 2,
+                                  child: Container(width: 8, height: 8,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF8b5cf6),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: const Color(0xFF0a0812), width: 1.5),
+                                    ),
+                                  ),
+                                ),
+                              if (isDownloaded && !isQueued)
+                                Positioned(
+                                  bottom: 2, left: 2,
+                                  child: Icon(Icons.download_done_rounded,
+                                      size: 11, color: const Color(0xFF22c55e)),
+                                ),
+                              if (isQueued)
+                                Padding(
+                                  padding: const EdgeInsets.all(7),
+                                  child: CircularProgressIndicator(
+                                    value: (epProgress != null && epProgress > 0 && epProgress <= 1)
+                                        ? epProgress
+                                        : null,
+                                    strokeWidth: 2,
+                                    color: const Color(0xFFf59e0b),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                    childCount: anime.episodes.length,
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 80)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWideHeader(AnimeDetail anime) {
+    final hasEpisodes = anime.episodes.isNotEmpty;
+    final hasHistory = _lastWatchedEpisode != null &&
+        anime.episodes.any((e) => e.number == _lastWatchedEpisode);
+    final targetEpisode = hasHistory
+        ? _lastWatchedEpisode!
+        : (hasEpisodes ? anime.episodes.first.number : 1);
+    final playLabel = hasHistory
+        ? 'Continuar Ep. $_lastWatchedEpisode'
+        : 'Reproducir';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (anime.poster != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF2a2240)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Image.network(
+                anime.poster!,
+                width: 150,
+                height: 225,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox(),
+              ),
+            ),
+          ),
+        const SizedBox(width: 20),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                anime.title,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFFe8e4f0),
+                ),
+              ),
+              if (anime.aka != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  anime.aka!,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF8b82a3),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _chip(anime.category, const Color(0xFF8b5cf6)),
+                  _chip(
+                    anime.status,
+                    anime.status.contains('Finalizado')
+                        ? const Color(0xFF22c55e)
+                        : const Color(0xFFf59e0b),
+                  ),
+                  _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
+                  ...anime.genres.map((g) => _chip(g.name, const Color(0xFF6366f1))),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                anime.synopsis,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  color: Color(0xFFb4abc9),
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  TvFocusable(
+                    onTap: hasEpisodes
+                        ? () => _playEpisode(anime, targetEpisode)
+                        : null,
+                    borderRadius: BorderRadius.circular(8),
+                    scaleOnFocus: 1.05,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8b5cf6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            playLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  TvFocusable(
+                    onTap: _toggleFollow,
+                    borderRadius: BorderRadius.circular(8),
+                    scaleOnFocus: 1.05,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131022),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _followed
+                              ? const Color(0xFFef4444)
+                              : const Color(0xFF2a2240),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _followed
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: _followed
+                                ? const Color(0xFFef4444)
+                                : const Color(0xFFa78bfa),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _followed ? 'Siguiendo' : 'Mi lista',
+                            style: TextStyle(
+                              color: _followed
+                                  ? const Color(0xFFef4444)
+                                  : const Color(0xFFe8e4f0),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  TvFocusable(
+                    onTap: () => DownloadSheet.show(context, anime),
+                    borderRadius: BorderRadius.circular(8),
+                    scaleOnFocus: 1.05,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131022),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF2a2240)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.download_rounded,
+                            color: Color(0xFFa78bfa),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _downloadLabel(anime.slug),
+                            style: const TextStyle(
+                              color: Color(0xFFa78bfa),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileHeader(AnimeDetail anime) {
+    final hasEpisodes = anime.episodes.isNotEmpty;
+    final hasHistory = _lastWatchedEpisode != null &&
+        anime.episodes.any((e) => e.number == _lastWatchedEpisode);
+    final targetEpisode = hasHistory
+        ? _lastWatchedEpisode!
+        : (hasEpisodes ? anime.episodes.first.number : 1);
+    final playLabel = hasHistory
+        ? 'Continuar Ep. $_lastWatchedEpisode'
+        : 'Reproducir';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (anime.poster != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  anime.poster!,
+                  width: 100,
+                  height: 150,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Text(
+                    anime.title,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFFe8e4f0),
+                    ),
+                  ),
+                  if (anime.aka != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      anime.aka!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF6d6488),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
-                      if (anime.poster != null)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(anime.poster!, width: 100, height: 150, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
-                        ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(anime.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFFe8e4f0))),
-                            if (anime.aka != null) ...[
-                              const SizedBox(height: 4),
-                              Text(anime.aka!, style: const TextStyle(fontSize: 13, color: Color(0xFF6d6488))),
-                            ],
-                            const SizedBox(height: 8),
-                            Wrap(spacing: 6, runSpacing: 4, children: [
-                              _chip(anime.category, const Color(0xFF8b5cf6)),
-                              _chip(anime.status, anime.status.contains('Finalizado') ? const Color(0xFF22c55e) : const Color(0xFFf59e0b)),
-                              _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
-                            ]),
-                          ],
+                      _chip(anime.category, const Color(0xFF8b5cf6)),
+                      _chip(
+                        anime.status,
+                        anime.status.contains('Finalizado')
+                            ? const Color(0xFF22c55e)
+                            : const Color(0xFFf59e0b),
+                      ),
+                      _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: TvFocusable(
+                onTap: hasEpisodes
+                    ? () => _playEpisode(anime, targetEpisode)
+                    : null,
+                borderRadius: BorderRadius.circular(8),
+                scaleOnFocus: 1.05,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8b5cf6),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.play_arrow_rounded, color: Colors.white),
+                      const SizedBox(width: 6),
+                      Text(
+                        playLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Row(children: [
-                    Expanded(
-                      child: Builder(
-                        builder: (_) {
-                          final hasEpisodes = anime.episodes.isNotEmpty;
-                          final hasHistory = _lastWatchedEpisode != null &&
-                              anime.episodes.any((e) => e.number == _lastWatchedEpisode);
-                          final targetEpisode = hasHistory
-                              ? _lastWatchedEpisode!
-                              : (hasEpisodes ? anime.episodes.first.number : 1);
-                          final label = hasHistory
-                              ? 'Continuar Ep. $_lastWatchedEpisode'
-                              : 'Reproducir';
-                          return ElevatedButton.icon(
-                            onPressed: hasEpisodes
-                                ? () => _playEpisode(anime, targetEpisode)
-                                : null,
-                            icon: const Icon(Icons.play_arrow),
-                            label: Text(label),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8b5cf6),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: _toggleFollow,
-                      icon: Icon(_followed ? Icons.favorite : Icons.favorite_border, color: _followed ? const Color(0xFFef4444) : const Color(0xFF6d6488)),
-                      label: Text(_followed ? 'Siguiendo' : 'Mi lista', style: TextStyle(color: _followed ? const Color(0xFFef4444) : const Color(0xFF6d6488))),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF1e1832)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => DownloadSheet.show(context, anime),
-                        icon: const Icon(Icons.download_rounded,
-                            color: Color(0xFFa78bfa)),
-                        label: Text(
-                          _downloadLabel(anime.slug),
-                          style: const TextStyle(color: Color(0xFFa78bfa)),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Color(0xFF2a2240)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: 16),
-                  if (anime.genres.isNotEmpty) Wrap(spacing: 6, runSpacing: 4, children: anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))).toList()),
-                  const SizedBox(height: 16),
-                  Text(anime.synopsis, style: const TextStyle(fontSize: 14, color: Color(0xFFa99fc0), height: 1.5)),
-                  const SizedBox(height: 24),
-                  Text('Episodios (${anime.episodesCount})', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFe8e4f0))),
-                  const SizedBox(height: 12),
-                ],
+                ),
               ),
             ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 80,
-                childAspectRatio: 1,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) {
-                  final ep = anime.episodes[i];
-                  final isWatched = _watchedEpisodes.contains(ep.number);
-                  final isDownloaded = _dl.isDownloaded(anime.slug, ep.number);
-                  final isQueued = _dl.isQueued(anime.slug, ep.number);
-                  final epProgress =
-                      _dl.progress.value['${anime.slug}#${ep.number}'];
-                  return TvFocusable(
-                    onTap: () => _playEpisode(anime, ep.number),
-                    borderRadius: BorderRadius.circular(8),
-                    scaleOnFocus: 1.10,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF110e1a),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isQueued
-                              ? const Color(0xFFf59e0b)
-                              : isDownloaded
-                                  ? const Color(0xFF22c55e)
-                                  : isWatched
-                                      ? const Color(0xFF8b5cf6)
-                                      : const Color(0xFF1e1832),
-                          width: isWatched || isDownloaded || isQueued ? 2 : 1,
-                        ),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Text('${ep.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isDownloaded ? const Color(0xFF22c55e) : const Color(0xFFe8e4f0))),
-                          if (isWatched && !isDownloaded)
-                            Positioned(
-                              top: 2, right: 2,
-                              child: Container(
-                                width: 8, height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF8b5cf6),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                          if (isWatched && isDownloaded)
-                            Positioned(
-                              top: 2, right: 2,
-                              child: Container(width: 8, height: 8,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF8b5cf6),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFF0a0812), width: 1.5),
-                                ),
-                              ),
-                            ),
-                          if (isDownloaded && !isQueued)
-                            Positioned(
-                              bottom: 2, left: 2,
-                              child: Icon(Icons.download_done_rounded,
-                                  size: 11, color: const Color(0xFF22c55e)),
-                            ),
-                          if (isQueued)
-                            Padding(
-                              padding: const EdgeInsets.all(7),
-                              child: CircularProgressIndicator(
-                                value: (epProgress != null && epProgress > 0 && epProgress <= 1)
-                                    ? epProgress
-                                    : null,
-                                strokeWidth: 2,
-                                color: const Color(0xFFf59e0b),
-                              ),
-                            ),
-                        ],
+            const SizedBox(width: 12),
+            TvFocusable(
+              onTap: _toggleFollow,
+              borderRadius: BorderRadius.circular(8),
+              scaleOnFocus: 1.05,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF131022),
+                  border: Border.all(
+                    color: _followed
+                        ? const Color(0xFFef4444)
+                        : const Color(0xFF2a2240),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _followed
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: _followed
+                          ? const Color(0xFFef4444)
+                          : const Color(0xFFa78bfa),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _followed ? 'Siguiendo' : 'Mi lista',
+                      style: TextStyle(
+                        color: _followed
+                            ? const Color(0xFFef4444)
+                            : const Color(0xFFe8e4f0),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  );
-                },
-                childCount: anime.episodes.length,
+                  ],
+                ),
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TvFocusable(
+          onTap: () => DownloadSheet.show(context, anime),
+          borderRadius: BorderRadius.circular(8),
+          scaleOnFocus: 1.05,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 11),
+            decoration: BoxDecoration(
+              color: const Color(0xFF131022),
+              border: Border.all(color: const Color(0xFF2a2240)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.download_rounded,
+                  color: Color(0xFFa78bfa),
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _downloadLabel(anime.slug),
+                  style: const TextStyle(
+                    color: Color(0xFFa78bfa),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
-        ],
-      ),
+        ),
+        const SizedBox(height: 14),
+        if (anime.genres.isNotEmpty)
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))).toList(),
+          ),
+        const SizedBox(height: 14),
+        Text(
+          anime.synopsis,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFFa99fc0),
+            height: 1.5,
+          ),
+        ),
+      ],
     );
   }
 

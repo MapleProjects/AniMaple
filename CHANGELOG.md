@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.0.10
+
+### Novedades y mejoras
+- Eliminación completa de artefactos residuales en la base de video en Android TV mediante recorte de macrobloques de dieciséis píxeles.
+- Limpieza asíncrona de caché multimedia en segundo plano para evitar congelamientos en dispositivos con almacenamiento lento.
+- Rediseño de la vista de detalle con fondo ambiental dinámico y distribución optimizada en dos columnas para televisores.
+- Reorganización de controles remotos en el reproductor con salto directo a controles principales y navegación fluida por cruceta.
+- Corrección del conflicto de doble enfoque entre los botones de navegación y el reproductor en Android TV.
+- Optimización del ciclo de actualización del reproductor reduciendo el uso de procesador cuando los controles están ocultos.
+
 ## v2.0.9
 
 ### Novedades y mejoras

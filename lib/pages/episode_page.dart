@@ -63,7 +63,6 @@ class _ServerQualityCandidate {
 enum _PlayerTvFocus {
   none,
   backButton,
-  seekBar,
   playPause,
   fullscreen,
   pageContent,
@@ -71,7 +70,10 @@ enum _PlayerTvFocus {
 
 class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
   _PlayerTvFocus _tvFocus = _PlayerTvFocus.none;
+  final FocusNode _playerFocusNode = FocusNode();
   final FocusNode _pageContentFocusNode = FocusNode();
+  final FocusNode _prevBtnFocusNode = FocusNode(canRequestFocus: false, skipTraversal: true);
+  final FocusNode _nextBtnFocusNode = FocusNode(canRequestFocus: false, skipTraversal: true);
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
@@ -258,43 +260,52 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
       if (_tvFocus == _PlayerTvFocus.pageContent) {
         if (key == LogicalKeyboardKey.arrowUp) {
+          _pageContentFocusNode.unfocus();
+          _playerFocusNode.requestFocus();
           _showControlsTemporarily();
           setState(() {
-            _tvFocus = _PlayerTvFocus.playPause;
+            _tvFocus = _PlayerTvFocus.fullscreen;
           });
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       }
 
+      // Salto de 10s con izquierda o derecha de una pulsación o continuo por repetición.
+      final isNavigatingButtons = _controlsVisible &&
+          ((_tvFocus == _PlayerTvFocus.playPause && key == LogicalKeyboardKey.arrowRight) ||
+              (_tvFocus == _PlayerTvFocus.fullscreen && key == LogicalKeyboardKey.arrowLeft));
+
+      if (!isNavigatingButtons && isSeekKey) {
+        final delta = (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind)
+            ? -10000
+            : 10000;
+        _seekRelative(delta);
+        if (_controlsVisible) _startHideTimer();
+        return KeyEventResult.handled;
+      }
+
       if (!_controlsVisible) {
         if (key == LogicalKeyboardKey.arrowDown) {
           if (!_isFullscreen) {
+            _playerFocusNode.unfocus();
+            _pageContentFocusNode.requestFocus();
             setState(() {
               _tvFocus = _PlayerTvFocus.pageContent;
             });
-            _pageContentFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
           _showControlsTemporarily();
           setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
+            _tvFocus = _PlayerTvFocus.playPause;
           });
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowUp) {
           _showControlsTemporarily();
           setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
+            _tvFocus = _PlayerTvFocus.playPause;
           });
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-          _seekRelative(-9900);
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-          _seekRelative(9900);
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.space ||
@@ -322,7 +333,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (key == LogicalKeyboardKey.arrowDown) {
           _startHideTimer();
           setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
+            _tvFocus = _PlayerTvFocus.playPause;
           });
           return KeyEventResult.handled;
         }
@@ -335,21 +346,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           return KeyEventResult.handled;
         }
         return KeyEventResult.handled;
-      } else if (_tvFocus == _PlayerTvFocus.seekBar) {
-        if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-          _seekRelative(-9900);
-          _startHideTimer();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-          _seekRelative(9900);
-          _startHideTimer();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowDown) {
+      } else if (_tvFocus == _PlayerTvFocus.playPause) {
+        if (key == LogicalKeyboardKey.arrowRight) {
           _startHideTimer();
           setState(() {
-            _tvFocus = _PlayerTvFocus.playPause;
+            _tvFocus = _PlayerTvFocus.fullscreen;
           });
           return KeyEventResult.handled;
         }
@@ -369,44 +370,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _controlsAnim?.reverse();
           return KeyEventResult.handled;
         }
-        if (key == LogicalKeyboardKey.space ||
-            key == LogicalKeyboardKey.select ||
-            key == LogicalKeyboardKey.enter ||
-            key == LogicalKeyboardKey.numpadEnter ||
-            key == LogicalKeyboardKey.gameButtonA ||
-            key == LogicalKeyboardKey.mediaPlayPause) {
-          _togglePlayPause();
-          _startHideTimer();
-          return KeyEventResult.handled;
-        }
-      } else if (_tvFocus == _PlayerTvFocus.playPause) {
-        if (key == LogicalKeyboardKey.arrowRight) {
-          _startHideTimer();
-          setState(() {
-            _tvFocus = _PlayerTvFocus.fullscreen;
-          });
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowLeft) {
-          _startHideTimer();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowUp) {
-          _startHideTimer();
-          setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
-          });
-          return KeyEventResult.handled;
-        }
         if (key == LogicalKeyboardKey.arrowDown) {
           if (!_isFullscreen) {
             _hideTimer?.cancel();
+            _playerFocusNode.unfocus();
+            _pageContentFocusNode.requestFocus();
             setState(() {
               _controlsVisible = false;
               _tvFocus = _PlayerTvFocus.pageContent;
             });
             _controlsAnim?.reverse();
-            _pageContentFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
           _startHideTimer();
@@ -430,26 +403,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           });
           return KeyEventResult.handled;
         }
-        if (key == LogicalKeyboardKey.arrowRight) {
-          _startHideTimer();
-          return KeyEventResult.handled;
-        }
         if (key == LogicalKeyboardKey.arrowUp) {
-          _startHideTimer();
+          _hideTimer?.cancel();
           setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
+            _controlsVisible = false;
+            _tvFocus = _PlayerTvFocus.none;
           });
+          _controlsAnim?.reverse();
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
           if (!_isFullscreen) {
             _hideTimer?.cancel();
+            _playerFocusNode.unfocus();
+            _pageContentFocusNode.requestFocus();
             setState(() {
               _controlsVisible = false;
               _tvFocus = _PlayerTvFocus.pageContent;
             });
             _controlsAnim?.reverse();
-            _pageContentFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
           _startHideTimer();
@@ -468,7 +440,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (key == LogicalKeyboardKey.arrowDown) {
           _startHideTimer();
           setState(() {
-            _tvFocus = _PlayerTvFocus.seekBar;
+            _tvFocus = _PlayerTvFocus.playPause;
           });
           return KeyEventResult.handled;
         }
@@ -1062,7 +1034,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _seekResetTimer?.cancel();
     _seekDebounceTimer?.cancel();
     _reconnectTimer?.cancel();
+    _playerFocusNode.dispose();
     _pageContentFocusNode.dispose();
+    _prevBtnFocusNode.dispose();
+    _nextBtnFocusNode.dispose();
     _controlsAnim?.dispose();
     _seekAnim?.dispose();
     _seekFadeAnim?.dispose();
@@ -1598,7 +1573,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       child: scaffold,
     );
 
-    return Focus(autofocus: true, onKeyEvent: _handleKeyEvent, child: wrapped);
+    return Focus(
+      focusNode: _playerFocusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: wrapped,
+    );
   }
 
   Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
@@ -1670,6 +1650,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _dragValue = null;
         }
       }
+      if (!_controlsVisible && !_isDragging && !_showCountdown && _seekAccumulatorMs == 0 && !_seekAnimating) return;
       setState(() {});
     });
   }
@@ -2223,38 +2204,22 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                                                   decoration: BoxDecoration(
                                                     color: const Color(0xFF8b5cf6),
                                                     borderRadius: BorderRadius.circular(2),
-                                                    boxShadow: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
-                                                        ? [
-                                                            BoxShadow(
-                                                              color: const Color(0xFF8b5cf6).withValues(alpha: 0.8),
-                                                              blurRadius: 8,
-                                                              spreadRadius: 1,
-                                                            ),
-                                                          ]
-                                                        : null,
                                                   ),
                                                 ),
                                               ),
                                               Positioned(
-                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) -
-                                                    (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 10 : 7),
-                                                top: topY - (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 8 : 5),
+                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) - 7,
+                                                top: topY - 5,
                                                 child: Container(
-                                                  width: TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 20 : 14,
-                                                  height: TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar ? 20 : 14,
-                                                  decoration: BoxDecoration(
-                                                    color: const Color(0xFF8b5cf6),
+                                                  width: 14,
+                                                  height: 14,
+                                                  decoration: const BoxDecoration(
+                                                    color: Color(0xFF8b5cf6),
                                                     shape: BoxShape.circle,
-                                                    border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
-                                                        ? Border.all(color: Colors.white, width: 2.5)
-                                                        : null,
                                                     boxShadow: [
                                                       BoxShadow(
-                                                        color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar)
-                                                            ? const Color(0xFF8b5cf6).withValues(alpha: 0.8)
-                                                            : Colors.black45,
-                                                        blurRadius: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar) ? 10 : 4,
-                                                        spreadRadius: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.seekBar) ? 2 : 0,
+                                                        color: Colors.black45,
+                                                        blurRadius: 4,
                                                       ),
                                                     ],
                                                   ),
@@ -2393,6 +2358,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 height: 44,
                 width: double.infinity,
                 child: ElevatedButton.icon(
+                  focusNode: _prevBtnFocusNode,
                   onPressed: hasPrev ? _goPrev : null,
                   icon: const Icon(Icons.skip_previous_rounded, size: 20),
                   label: const Text('Anterior', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -2417,6 +2383,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                 height: 44,
                 width: double.infinity,
                 child: ElevatedButton.icon(
+                  focusNode: _nextBtnFocusNode,
                   onPressed: hasNext ? _goNext : null,
                   icon: const Icon(Icons.skip_next_rounded, size: 20),
                   label: const Text('Siguiente', style: TextStyle(fontWeight: FontWeight.w600)),
