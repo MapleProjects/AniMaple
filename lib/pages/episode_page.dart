@@ -437,6 +437,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           return KeyEventResult.handled;
         }
       } else {
+        if (key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.gameButtonA ||
+            key == LogicalKeyboardKey.mediaPlayPause) {
+          _togglePlayPause();
+          return KeyEventResult.handled;
+        }
         if (key == LogicalKeyboardKey.arrowDown) {
           _startHideTimer();
           setState(() {
@@ -1681,13 +1690,23 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (ps) {
       _player.pause();
       if (!_isPipMode) {
-        setState(() => _controlsVisible = true);
+        setState(() {
+          _controlsVisible = true;
+          if (TvService.isTvMode) {
+            _tvFocus = _PlayerTvFocus.playPause;
+          }
+        });
         _controlsAnim!.forward();
       }
       _hideTimer?.cancel();
     } else {
       _player.play();
-      if (!_isPipMode) _startHideTimer();
+      if (!_isPipMode) {
+        if (TvService.isTvMode) {
+          _tvFocus = _PlayerTvFocus.none;
+        }
+        _startHideTimer();
+      }
     }
   }
 

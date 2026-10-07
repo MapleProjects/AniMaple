@@ -1,7 +1,7 @@
 name: animaple
 description: "AniMaple — Anime streaming app"
 publish_to: 'none'
-version: 2.0.10+52
+version: 2.0.11+53
 
 environment:
   sdk: ^3.10.0
@@ -23,6 +23,7 @@ dependencies:
   media_kit_libs_windows_video: ^1.0.9
   media_kit_libs_linux: ^1.2.1
   window_manager: ^0.5.2
+  ffi: ^2.1.4
   wakelock_plus: ^1.2.8
   google_sign_in: ^6.2.2
   # 6.x usa silentSignIn sin ventanas emergentes de Credential Manager en Android

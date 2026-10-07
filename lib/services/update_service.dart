@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
+import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:window_manager/window_manager.dart';
+import '../widgets/tv_focusable.dart';
 import 'app_player.dart';
 
 /// Información de una actualización disponible.
@@ -39,7 +42,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.10';
+  static const String appVersion = '2.0.11';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -277,6 +280,32 @@ class UpdateService {
   }) =>
       downloadFile(url: url, onProgress: onProgress);
 
+  static bool _win32ShellExecute(String filePath) {
+    try {
+      final shell32 = DynamicLibrary.open('shell32.dll');
+      final shellExecute = shell32.lookupFunction<
+          IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Int32),
+          int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, int)>('ShellExecuteW');
+
+      final op = 'runas'.toNativeUtf16();
+      final file = filePath.toNativeUtf16();
+      final empty = ''.toNativeUtf16();
+
+      try {
+        final res = shellExecute(0, op, file, empty, empty, 1);
+        debugPrint('Update Windows: ShellExecuteW runas retorno $res');
+        return res > 32;
+      } finally {
+        calloc.free(op);
+        calloc.free(file);
+        calloc.free(empty);
+      }
+    } catch (e) {
+      debugPrint('Update Windows: error en ShellExecuteW ($e)');
+      return false;
+    }
+  }
+
   /// Pide la instalación de la actualización (nativo en Android, proceso desacoplado en Windows).
   /// Devuelve true si se lanzó el instalador.
   static Future<bool> requestInstall(String filePath) async {
@@ -287,33 +316,34 @@ class UpdateService {
           debugPrint('Update installer not found at $filePath');
           return false;
         }
-        debugPrint('Update: ejecutando instalador con elevación administrativa: $filePath');
-        final escapedPath = filePath.replaceAll("'", "''");
-        try {
-          await Process.start(
-            'powershell.exe',
-            [
-              '-NoProfile',
-              '-NonInteractive',
-              '-WindowStyle',
-              'Hidden',
-              '-Command',
-              "Start-Process -FilePath '$escapedPath' -Verb RunAs",
-            ],
-            mode: ProcessStartMode.detached,
-          );
-        } catch (pe) {
-          debugPrint('Update: fallback a Process.start directo ($pe)');
-          await Process.start(filePath, [], mode: ProcessStartMode.detached);
+        debugPrint('Update: ejecutando instalador con elevacion administrativa: $filePath');
+        bool launched = _win32ShellExecute(filePath);
+        if (!launched) {
+          debugPrint('Update: fallback a cmd.exe start');
+          try {
+            final proc = await Process.start(
+              'cmd.exe',
+              ['/c', 'start', '', filePath],
+              mode: ProcessStartMode.detached,
+            );
+            launched = proc.pid > 0;
+          } catch (e) {
+            debugPrint('Update: fallback cmd fallo ($e)');
+          }
         }
 
-        // Detener reproducción y liberar texturas nativas / libmpv antes de cerrar
+        if (!launched) {
+          debugPrint('Update: instalador no pudo ser iniciado o fue cancelado');
+          return false;
+        }
+
+        // Dar margen para que Windows Shell inicialice el instalador antes de cerrar
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+
         try {
           AppPlayer.disposeGlobal();
         } catch (_) {}
 
-        // Cierre ordenado de la ventana para permitir que el motor de Flutter y plugins
-        // destruyan sus recursos de forma limpia sin generar excepciones de acceso a memoria (0xC0000005)
         try {
           await windowManager.destroy();
         } catch (_) {
@@ -322,8 +352,7 @@ class UpdateService {
           } catch (_) {}
         }
 
-        // Si la ventana no finalizó el proceso en 1.2s, terminar limpiamente sin CRT teardown
-        Future.delayed(const Duration(milliseconds: 1200), () {
+        Future.delayed(const Duration(milliseconds: 1500), () {
           try {
             Process.run('taskkill', ['/F', '/PID', '$pid']);
           } catch (_) {
@@ -438,20 +467,30 @@ class UpdateService {
         ),
         actionsAlignment: MainAxisAlignment.spaceBetween,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Posponer',
-              style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(ctx, false),
+            child: TextButton(
+              focusNode: FocusNode(canRequestFocus: false),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(
+                'Posponer',
+                style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600),
+              ),
             ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8b5cf6),
-              foregroundColor: Colors.white,
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(ctx, true),
+            child: FilledButton(
+              focusNode: FocusNode(canRequestFocus: false),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8b5cf6),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Actualizar', style: TextStyle(fontWeight: FontWeight.w700)),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Actualizar', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -494,17 +533,27 @@ class UpdateService {
         ),
         actionsAlignment: MainAxisAlignment.spaceBetween,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8b5cf6),
-              foregroundColor: Colors.white,
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(ctx, false),
+            child: TextButton(
+              focusNode: FocusNode(canRequestFocus: false),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600)),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Permitir', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(ctx, true),
+            child: FilledButton(
+              focusNode: FocusNode(canRequestFocus: false),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8b5cf6),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Permitir', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
           ),
         ],
       ),
@@ -588,12 +637,20 @@ class UpdateService {
                     ),
               actions: err != null
                   ? [
-                      TextButton(
-                        onPressed: () {
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
                           done.value = true;
                           Navigator.pop(ctx);
                         },
-                        child: const Text('Cerrar', style: TextStyle(color: Color(0xFF6d6488))),
+                        child: TextButton(
+                          focusNode: FocusNode(canRequestFocus: false),
+                          onPressed: () {
+                            done.value = true;
+                            Navigator.pop(ctx);
+                          },
+                          child: const Text('Cerrar', style: TextStyle(color: Color(0xFF6d6488))),
+                        ),
                       ),
                     ]
                   : null,

@@ -135,7 +135,20 @@ class _DetailPageState extends State<DetailPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Fondo ambiental decorativo: backdrop o póster desenfocado para evitar espacios vacíos.
+          // Fondo ambiental decorativo: póster desenfocado como base garantizada
+          if (anime.poster != null)
+            Opacity(
+              opacity: 0.18,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 45, sigmaY: 45),
+                child: Image.network(
+                  anime.poster!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+            ),
+          // Capa de cabecera si existe y carga sin errores
           if (anime.backdrop != null)
             Opacity(
               opacity: 0.22,
@@ -143,18 +156,6 @@ class _DetailPageState extends State<DetailPage> {
                 anime.backdrop!,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => const SizedBox(),
-              ),
-            )
-          else if (anime.poster != null)
-            Opacity(
-              opacity: 0.16,
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                child: Image.network(
-                  anime.poster!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
-                ),
               ),
             ),
           const DecoratedBox(
@@ -172,7 +173,7 @@ class _DetailPageState extends State<DetailPage> {
           ),
           CustomScrollView(
             slivers: [
-              if (!isWide && anime.backdrop != null)
+              if (!isWide && (anime.backdrop != null || anime.poster != null))
                 SliverAppBar(
                   expandedHeight: 220,
                   pinned: true,
@@ -181,11 +182,21 @@ class _DetailPageState extends State<DetailPage> {
                     background: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(
-                          anime.backdrop!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const SizedBox(),
-                        ),
+                        if (anime.poster != null)
+                          ImageFiltered(
+                            imageFilter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+                            child: Image.network(
+                              anime.poster!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const SizedBox(),
+                            ),
+                          ),
+                        if (anime.backdrop != null)
+                          Image.network(
+                            anime.backdrop!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox(),
+                          ),
                         const DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(

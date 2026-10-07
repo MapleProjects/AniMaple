@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v2.0.11
+
+### Novedades y mejoras
+- Corrección del iniciador de actualización en Windows invocando ShellExecuteW nativo con privilegios administrativos para garantizar la ejecución del instalador.
+- Control de reproducción por control remoto en Android TV permitiendo pausar y reanudar directamente con el botón de selección.
+- Integración de contorno de enfoque limpio sin resplandores en botones y ventanas de diálogo para control remoto.
+- Fondo ambiental garantizado en la vista de detalle mediante póster desenfocado para series que carecen de imagen de cabecera.
+
 ## v2.0.10
 
 ### Novedades y mejoras
