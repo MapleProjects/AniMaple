@@ -1,5 +1,13 @@
 # AniMaple — Registro de cambios
 
+## v2.0.12
+
+### Novedades y mejoras
+- Restauración universal y robusta de la sincronización en la nube mediante Google Drive para todas las plataformas.
+- Fallback ofuscado embebido de credenciales OAuth para clientes de escritorio y Android TV, evitando fallos de refresco de tokens al carecer de archivos locales.
+- Manejo integral de excepciones de alcance (`ACCESS_TOKEN_SCOPE_INSUFFICIENT` e `insufficientPermissions`) en la API de Google Drive con restablecimiento limpio de sesión para revinculación.
+- Soporte completo de parámetros `--dart-define` en el flujo de compilación nativa de Windows.
+
 ## v2.0.11
 
 ### Novedades y mejoras

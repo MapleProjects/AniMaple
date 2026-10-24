@@ -987,7 +987,11 @@ class SyncService {
 
     debugPrint('Sync: $method $path → ${streamed.statusCode}');
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-      if (streamed.statusCode == 403 && res.contains('insufficientScopes')) {
+      if (streamed.statusCode == 403 &&
+          (res.contains('insufficientScopes') ||
+              res.contains('insufficientPermissions') ||
+              res.contains('ACCESS_TOKEN_SCOPE_INSUFFICIENT') ||
+              res.contains('insufficient authentication scopes'))) {
         throw InsufficientScopesException('Drive API insufficientScopes: $res');
       }
       throw Exception('Drive API $method $path → ${streamed.statusCode}: $res');
@@ -1001,6 +1005,11 @@ class SyncService {
     lastError = 'Tu sesión requiere volver a vincularse para sincronizar con Google Drive.';
     if (!googleSignInSupported) {
       DesktopGoogleAuth.signOut();
+    } else {
+      _account = null;
+      try {
+        _googleSignIn?.signOut();
+      } catch (_) {}
     }
     stateVersion.value++;
   }

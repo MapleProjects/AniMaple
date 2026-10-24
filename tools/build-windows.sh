@@ -13,6 +13,14 @@ if [ -f "$REPO_DIR/secrets.env" ]; then
     source "$REPO_DIR/secrets.env"
 fi
 
+DART_DEFINES=""
+if [ -n "${GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]; then
+    DART_DEFINES="$DART_DEFINES --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=$GOOGLE_DESKTOP_CLIENT_SECRET"
+fi
+if [ -n "${GOOGLE_TV_CLIENT_SECRET:-}" ]; then
+    DART_DEFINES="$DART_DEFINES --dart-define=GOOGLE_TV_CLIENT_SECRET=$GOOGLE_TV_CLIENT_SECRET"
+fi
+
 SSH_OPTS="-o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
 
 echo "=== AniMaple Windows Native Build ==="
@@ -65,7 +73,7 @@ if (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release") {
 Set-Location "C:\Users\Maple\AniMaple"
 & "C:\flutter\bin\flutter.bat" pub get
 if ($LASTEXITCODE -ne 0) { Write-Error "flutter pub get fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
-& "C:\flutter\bin\flutter.bat" build windows --release
+& "C:\flutter\bin\flutter.bat" build windows --release '"$DART_DEFINES"'
 if ($LASTEXITCODE -ne 0) { Write-Error "flutter build windows fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
 if (-not (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\animaple.exe")) {
     Write-Error "ERROR: animaple.exe no fue generado tras la compilacion"; exit 1
@@ -94,3 +102,6 @@ cp -f "$DIST_DIR/animaple-v$VERSION-setup.exe" "$OUTPUT_DIR/"
 echo "=== Compilación completada con éxito ==="
 ls -lh "$DIST_DIR"
 ls -lh "$OUTPUT_DIR/animaple-v$VERSION-setup.exe"
+
+echo "Apagando máquina virtual $VM_NAME ordenadamente..."
+virsh -c qemu:///system shutdown "$VM_NAME" 2>/dev/null || true

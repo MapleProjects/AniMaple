@@ -284,6 +284,7 @@ else:
         cd "$AUR_DIR"
         git add PKGBUILD .SRCINFO
         git commit -m "update to v$TARGET_VERSION" || true
+        git push origin master || true
     fi
 
     cd "$REPO_DIR"

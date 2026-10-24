@@ -23,13 +23,20 @@ class GDriveConfig {
       ]);
 
   /// Client Secret tipo Web application para el flujo OAuth en Desktop.
-  /// En compilaciones públicas o desarrollo abierto se provee mediante:
-  ///   --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=...
-  /// o se lee de forma automática desde secrets.env local si existe.
+  /// Prioridad:
+  ///   1. --dart-define=GOOGLE_DESKTOP_CLIENT_SECRET=...
+  ///   2. secrets.env local
+  ///   3. Fallback ofuscado compilado
   static String get clientSecret {
     const envVal = String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_SECRET');
     if (envVal.isNotEmpty) return envVal;
-    return _readLocalSecret('GOOGLE_DESKTOP_CLIENT_SECRET');
+    final local = _readLocalSecret('GOOGLE_DESKTOP_CLIENT_SECRET');
+    if (local.isNotEmpty) return local;
+    return _xorDecode(const [
+      120, 112, 124, 108, 111, 103, 18, 121, 82, 108, 78, 74, 92, 75, 18, 125,
+      126, 117, 14, 113, 69, 77, 7, 85, 119, 79, 86, 106, 7, 10, 120, 126, 86,
+      91, 9,
+    ]);
   }
 
   /// Client ID tipo TV (Limited Input Devices) para Device Authorization Grant (RFC 8628).
@@ -42,14 +49,24 @@ class GDriveConfig {
       ]);
 
   /// Client Secret tipo TV (Limited Input Devices).
-  /// En compilaciones públicas o desarrollo abierto se provee mediante:
-  ///   --dart-define=GOOGLE_TV_CLIENT_SECRET=...
-  /// o se lee de forma automática desde secrets.env local si existe.
+  /// Prioridad:
+  ///   1. --dart-define=GOOGLE_TV_CLIENT_SECRET=...
+  ///   2. secrets.env local
+  ///   3. Fallback ofuscado compilado
   static String get tvClientSecret {
     const envVal = String.fromEnvironment('GOOGLE_TV_CLIENT_SECRET');
     if (envVal.isNotEmpty) return envVal;
-    return _readLocalSecret('GOOGLE_TV_CLIENT_SECRET');
+    final local = _readLocalSecret('GOOGLE_TV_CLIENT_SECRET');
+    if (local.isNotEmpty) return local;
+    return _xorDecode(const [
+      120, 112, 124, 108, 111, 103, 18, 81, 110, 88, 10, 74, 84, 84, 8, 101,
+      11, 113, 12, 71, 102, 125, 96, 18, 7, 111, 79, 82, 114, 113, 89, 119,
+      101, 71, 96,
+    ]);
   }
+
+  static String _xorDecode(List<int> bytes, [int key = 0x3F]) =>
+      String.fromCharCodes(bytes.map((b) => b ^ key));
 
   static String _readLocalSecret(String key) {
     try {
