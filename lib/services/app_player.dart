@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
-import 'package:path_provider/path_provider.dart';
 import 'package:video_view/video_view.dart' as vv;
 import 'fsr_service.dart';
 
@@ -84,6 +83,7 @@ class MediaKitAppPlayer implements AppPlayer {
 
   final List<StreamSubscription> _subscriptions = [];
   bool _disposed = false;
+  DateTime? _lastSeekTime;
 
   static File? _logFile;
   static void _log(String msg) {
@@ -141,7 +141,14 @@ class MediaKitAppPlayer implements AppPlayer {
     }));
 
     _subscriptions.add(_player.stream.position.listen((pos) {
-      if (!_disposed) _positionMs.value = pos.inMilliseconds;
+      if (_disposed) return;
+      final ms = pos.inMilliseconds;
+      // Durante un seek activo, mpv emite transitoriamente position = 0 mientras
+      // vacía los buffers del decodificador. Ignoramos 0 transitorio si acabamos de hacer seek.
+      if (ms == 0 && _lastSeekTime != null && DateTime.now().difference(_lastSeekTime!) < const Duration(milliseconds: 1200)) {
+        return;
+      }
+      _positionMs.value = ms;
     }));
 
     _subscriptions.add(_player.stream.duration.listen((dur) {
@@ -154,7 +161,12 @@ class MediaKitAppPlayer implements AppPlayer {
       if (!_disposed && completed) {
         final dur = _durationMs.value;
         final pos = _positionMs.value;
-        if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
+        if (_lastSeekTime != null && DateTime.now().difference(_lastSeekTime!) < const Duration(seconds: 4)) {
+          debugPrint('MediaKit: completed ignorado inmediatamente tras seek');
+          _player.play();
+          return;
+        }
+        if (dur > 20000 && pos < (dur - 15000)) {
           debugPrint('MediaKit: spurious completed/eof ignored at $pos ms / $dur ms');
           _player.play();
           return;
@@ -179,6 +191,7 @@ class MediaKitAppPlayer implements AppPlayer {
     _durationMs.value = 0;
     _error.value = null;
     _finishedCount.value = 0;
+    _lastSeekTime = null;
   }
 
   static const String _defaultUserAgent =
@@ -245,27 +258,18 @@ class MediaKitAppPlayer implements AppPlayer {
           await (platform as dynamic).setProperty('hwdec', 'no');
           await (platform as dynamic).setProperty('opengl-es', 'yes');
         }
-        final tempDir = await getTemporaryDirectory();
-        final cachePath = '${tempDir.path}/animaple_player_cache';
-        try {
-          Directory(cachePath).createSync(recursive: true);
-        } catch (_) {}
-
         await (platform as dynamic).setProperty('cache', 'yes');
-        await (platform as dynamic).setProperty('cache-on-disk', 'yes');
-        await (platform as dynamic).setProperty('cache-dir', cachePath);
-        await (platform as dynamic).setProperty('cache-pause', 'yes');
-        await (platform as dynamic).setProperty('cache-pause-initial', 'yes');
-        await (platform as dynamic).setProperty('cache-pause-wait', '5');
-        await (platform as dynamic).setProperty('cache-secs', '300');
-        await (platform as dynamic).setProperty('demuxer-seekable-cache', 'yes');
+        await (platform as dynamic).setProperty('cache-pause', 'no');
+        await (platform as dynamic).setProperty('cache-pause-initial', 'no');
+        await (platform as dynamic).setProperty('cache-secs', '120');
+        await (platform as dynamic).setProperty('demuxer-seekable-cache', 'auto');
         await (platform as dynamic).setProperty('keep-open', 'yes');
-        await (platform as dynamic).setProperty('hr-seek', 'yes');
+        await (platform as dynamic).setProperty('hr-seek', 'default');
         await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
-        await (platform as dynamic).setProperty('demuxer-readahead-secs', '300');
-        await (platform as dynamic).setProperty('demuxer-max-bytes', '536870912'); // 512 MB en disco
-        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '134217728'); // 128 MB en disco
-        await (platform as dynamic).setProperty('network-timeout', '40');
+        await (platform as dynamic).setProperty('demuxer-readahead-secs', '120');
+        await (platform as dynamic).setProperty('demuxer-max-bytes', '67108864'); // 64 MB RAM
+        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '33554432'); // 32 MB RAM
+        await (platform as dynamic).setProperty('network-timeout', '30');
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');
@@ -320,6 +324,7 @@ class MediaKitAppPlayer implements AppPlayer {
   @override
   Future<void> seekTo(int positionMs) async {
     if (_disposed) return;
+    _lastSeekTime = DateTime.now();
     _positionMs.value = positionMs;
     _isLoading.value = true;
     try {

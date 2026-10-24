@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.0.13
+
+### Novedades y mejoras
+- Corrección de salto temporal en la barra de reproducción en Windows, evitando reinicios a cero durante la navegación del episodio.
+- Instalador y actualizador automático desatendido en Windows con verificación activa del proceso antes del cierre de la aplicación.
+- Optimización arquitectónica universal del reproductor multimedia con transmisión directa y búfer equilibrado en memoria.
+- Eliminación de bloqueos de entrada y salida en almacenamiento secundario durante la reproducción prolongada de secuencias HLS.
+- Detección y recuperación automática ante estancamientos de flujo con reconexión transparente y conmutación de servidor.
+- Selección ultrarrápida del servidor de mayor calidad y resolución, reduciendo los tiempos de espera a menos de dos segundos.
+
 ## v2.0.12
 
 ### Novedades y mejoras

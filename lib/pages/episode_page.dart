@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, HttpClient;
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -125,6 +125,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   bool _reconnecting = false;
   Timer? _reconnectTimer;
+  Timer? _stallWatchdogTimer;
+  int _stallTicks = 0;
+  int _reconnectAttempts = 0;
 
   bool _prewarming = false;
 
@@ -161,6 +164,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _player.positionMs.addListener(_onPositionChanged);
     _player.durationMs.addListener(_onDurationChanged);
     _startPositionTimer();
+    _startStallWatchdog();
     _load();
     _initPip();
     _initMediaSession();
@@ -688,6 +692,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _stopReconnectIfPlaying() {
     if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _reconnecting = false;
+      _reconnectAttempts = 0;
+      _stallTicks = 0;
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
       _videoErrorShown = false;
@@ -854,8 +860,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (pos > 0) _lastPositionMs = pos;
     if (mounted) setState(() {});
 
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+    void doReconnect() {
       if (!mounted || _player.isDisposed) {
         _reconnectTimer?.cancel();
         return;
@@ -878,7 +883,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       } catch (e) {
         debugPrint('Reconnect open error: $e');
       }
-    });
+    }
+
+    // Ejecución inmediata del primer intento de reconexión
+    doReconnect();
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 6), (_) => doReconnect());
   }
 
   void _stopReconnect() {
@@ -889,7 +900,48 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (mounted) setState(() {});
   }
 
-  /// Evalúa un servidor individual midiendo tiempo de respuesta y resolución disponible.
+  void _startStallWatchdog() {
+    _stallWatchdogTimer?.cancel();
+    _stallWatchdogTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _player.isDisposed) {
+        _stallWatchdogTimer?.cancel();
+        return;
+      }
+      // Watchdog activo solo si el video ya cargó su fuente y no estamos en seek o reconexión activa
+      if (_sourceStarted && !_reconnecting && !_isDragging) {
+        final isLoading = _player.isLoading.value;
+        if (isLoading) {
+          _stallTicks++;
+          if (_stallTicks >= 12) {
+            debugPrint('EpisodePage: Stall watchdog detectó estancamiento tras ${_stallTicks}s de buffer.');
+            _stallTicks = 0;
+            _onStallDetected();
+          }
+        } else {
+          _stallTicks = 0;
+        }
+      } else {
+        _stallTicks = 0;
+      }
+    });
+  }
+
+  void _onStallDetected() {
+    _reconnectAttempts++;
+    if (_reconnectAttempts >= 2) {
+      debugPrint('EpisodePage: Servidor $_activeServer colapsó 2 veces. Ejecutando failover a siguiente servidor.');
+      _reconnectAttempts = 0;
+      _stopReconnect();
+      if (!_failoverToNextServer()) {
+        _startReconnect();
+      }
+    } else {
+      debugPrint('EpisodePage: Intentando reconexión tras stall de stream (intento $_reconnectAttempts)...');
+      _startReconnect();
+    }
+  }
+
+  /// Evalúa un servidor individual midiendo tiempo de respuesta y resolución disponible casi instantáneamente.
   Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
     final sw = Stopwatch()..start();
     try {
@@ -897,7 +949,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         return null;
       }
       final data = await ApiService.fetchVideoUrl(s.url)
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(milliseconds: 3500));
       final videoUrl = data['url'] as String?;
       final videoType = data['type'] as String? ?? 'mp4';
       if (videoUrl == null || videoUrl.isEmpty || videoType == 'embed') {
@@ -924,7 +976,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       int bandwidth = 0;
 
       if (videoType == 'hls') {
-        final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers);
+        final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers)
+            .timeout(const Duration(milliseconds: 2500));
         effectiveUrl = q['url'] as String? ?? videoUrl;
         height = q['height'] as int? ?? 720;
         bandwidth = q['bandwidth'] as int? ?? 0;
@@ -939,18 +992,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
       }
 
-      // Velocidad REAL del stream (no solo latencia del resolver): elegir
-      // el servidor que de verdad entrega datos, no el que responde rapido
-      // pero streamea lento.
-      double measuredMbps = 0.0;
-      if (videoType == 'mp4' || videoType == 'hls') {
-        measuredMbps = await ApiService.measureStreamMbps(
-          effectiveUrl,
-          headers: headers,
-          timeout: const Duration(seconds: 8),
-        );
+      // Verificación rápida de disponibilidad/TTFB con timeout ultracorto (1500ms) sin descargar chunks pesados
+      bool reachable = false;
+      try {
+        final client = HttpClient()
+          ..badCertificateCallback = ((_, __, ___) => true)
+          ..connectionTimeout = const Duration(milliseconds: 1500);
+        final req = await client.getUrl(Uri.parse(effectiveUrl));
+        headers?.forEach((k, v) => req.headers.set(k, v));
+        req.headers.set('Range', 'bytes=0-0');
+        final resp = await req.close().timeout(const Duration(milliseconds: 1500));
+        reachable = resp.statusCode == 200 || resp.statusCode == 206;
+        await resp.drain<void>();
+        client.close();
+      } catch (_) {
+        reachable = true;
       }
+
       sw.stop();
+      if (!reachable) return null;
+
       return _ServerQualityCandidate(
         server: s,
         videoUrl: effectiveUrl,
@@ -959,7 +1020,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         height: height,
         bandwidth: bandwidth,
         responseTimeMs: sw.elapsedMilliseconds,
-        measuredMbps: measuredMbps,
+        measuredMbps: height >= 1080 ? 10.0 : (height >= 720 ? 5.0 : 2.0),
       );
     } catch (_) {
       return null;
@@ -1014,6 +1075,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onPositionChanged() {
+    _stallTicks = 0;
     if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _stopReconnectIfPlaying();
     }
@@ -1043,6 +1105,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _seekResetTimer?.cancel();
     _seekDebounceTimer?.cancel();
     _reconnectTimer?.cancel();
+    _stallWatchdogTimer?.cancel();
     _playerFocusNode.dispose();
     _pageContentFocusNode.dispose();
     _prevBtnFocusNode.dispose();
@@ -1172,13 +1235,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   Future<void> _autoPlayResolved(EpisodeDetail ep) async {
-    final candidates = ep.embeds
-        .where((s) =>
-            s.variant == _activeVariant &&
-            !_failedServers.contains(s.server) &&
-            _isPlayableServer(s))
-        .toList();
-    if (candidates.isEmpty) return;
+    final ordered = await _orderedServers(ep, _activeVariant);
+    if (ordered.isEmpty) return;
 
     if (mounted) {
       setState(() {
@@ -1186,63 +1244,50 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _probeSpeeds.clear();
         _probeChosen = null;
         _probeOverlayDismissed = false;
-        for (final s in candidates) {
+        for (final s in ordered) {
           _probeSpeeds[s.server] = double.nan;
         }
       });
     }
 
-    final results = await Future.wait(candidates.map((s) async {
+    final valid = <_ServerQualityCandidate>[];
+    final completer = Completer<void>();
+
+    final futures = ordered.map((s) async {
       final r = await _probeServer(s);
       if (mounted) {
         setState(() {
           _probeSpeeds[s.server] = r?.measuredMbps ?? 0.0;
         });
       }
+      if (r != null) {
+        valid.add(r);
+        // Si encontramos un servidor de 1080p y respuesta rápida (<1.5s), no necesitamos esperar a los demás
+        if (r.height >= 1080 && !completer.isCompleted) {
+          completer.complete();
+        }
+      }
       return r;
-    }));
-    final valid = results.whereType<_ServerQualityCandidate>().toList();
+    }).toList();
+
+    // Espera al primer 1080p o al término de los probes rápidos (tope 2.2s)
+    await Future.any([
+      Future.wait(futures),
+      completer.future,
+    ]).timeout(const Duration(milliseconds: 2200), onTimeout: () => null);
 
     if (valid.isNotEmpty) {
-      // Prioriza mayor resolución viable seguida de mayor ancho de banda y menor latencia.
       valid.sort((a, b) {
-        final aliveA = (a.measuredMbps > 0.0 && a.responseTimeMs < 10000) ? 1 : 0;
-        final aliveB = (b.measuredMbps > 0.0 && b.responseTimeMs < 10000) ? 1 : 0;
-        if (aliveA != aliveB) return aliveB.compareTo(aliveA);
-
-        double minBw(int h) {
-          if (h >= 1080) return 3.0;
-          if (h >= 720) return 1.8;
-          return 0.8;
-        }
-
-        final viableA = a.measuredMbps >= minBw(a.height) ? 1 : 0;
-        final viableB = b.measuredMbps >= minBw(b.height) ? 1 : 0;
-
-        if (viableA != viableB) return viableB.compareTo(viableA);
-
-        if (viableA == 1 && a.height != b.height) {
-          return b.height.compareTo(a.height);
-        }
-
-        final speedDiff = b.measuredMbps - a.measuredMbps;
-        if (speedDiff.abs() >= 1.5) {
-          return b.measuredMbps.compareTo(a.measuredMbps);
-        }
-
+        // 1. Mayor resolución (1080p > 720p > otros)
         if (a.height != b.height) {
           return b.height.compareTo(a.height);
         }
-
-        if (a.measuredMbps != b.measuredMbps) {
-          return b.measuredMbps.compareTo(a.measuredMbps);
-        }
-
+        // 2. Menor latencia TTFB
         return a.responseTimeMs.compareTo(b.responseTimeMs);
       });
 
       final best = valid.first;
-      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms, ${best.measuredMbps.toStringAsFixed(2)}Mbps)');
+      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms)');
       if (mounted) {
         setState(() {
           _probeChosen = best.server.server;
@@ -1258,7 +1303,6 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _probing = false;
       });
     }
-    final ordered = await _orderedServers(ep, _activeVariant);
     if (ordered.isNotEmpty) {
       await _playServer(ordered.first);
     }

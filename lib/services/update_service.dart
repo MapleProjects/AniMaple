@@ -42,7 +42,7 @@ class UpdateService {
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.12';
+  static const String appVersion = '2.0.13';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -280,7 +280,7 @@ class UpdateService {
   }) =>
       downloadFile(url: url, onProgress: onProgress);
 
-  static bool _win32ShellExecute(String filePath) {
+  static bool _win32ShellExecute(String filePath, {String parameters = ''}) {
     try {
       final shell32 = DynamicLibrary.open('shell32.dll');
       final shellExecute = shell32.lookupFunction<
@@ -289,15 +289,17 @@ class UpdateService {
 
       final op = 'runas'.toNativeUtf16();
       final file = filePath.toNativeUtf16();
+      final params = parameters.toNativeUtf16();
       final empty = ''.toNativeUtf16();
 
       try {
-        final res = shellExecute(0, op, file, empty, empty, 1);
+        final res = shellExecute(0, op, file, params, empty, 1);
         debugPrint('Update Windows: ShellExecuteW runas retorno $res');
         return res > 32;
       } finally {
         calloc.free(op);
         calloc.free(file);
+        calloc.free(params);
         calloc.free(empty);
       }
     } catch (e) {
@@ -316,14 +318,15 @@ class UpdateService {
           debugPrint('Update installer not found at $filePath');
           return false;
         }
-        debugPrint('Update: ejecutando instalador con elevacion administrativa: $filePath');
-        bool launched = _win32ShellExecute(filePath);
+        final exeName = filePath.split(Platform.pathSeparator).last;
+        debugPrint('Update: ejecutando instalador con elevacion administrativa en modo silencioso (/S): $filePath');
+        bool launched = _win32ShellExecute(filePath, parameters: '/S');
         if (!launched) {
           debugPrint('Update: fallback a cmd.exe start');
           try {
             final proc = await Process.start(
               'cmd.exe',
-              ['/c', 'start', '', filePath],
+              ['/c', 'start', '', filePath, '/S'],
               mode: ProcessStartMode.detached,
             );
             launched = proc.pid > 0;
@@ -337,9 +340,29 @@ class UpdateService {
           return false;
         }
 
-        // Dar margen para que Windows Shell inicialice el instalador antes de cerrar
-        await Future<void>.delayed(const Duration(milliseconds: 1000));
+        // Verificar activamente que el proceso del instalador realmente esté en ejecución
+        bool isRunning = false;
+        for (int i = 0; i < 15; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          try {
+            final check = await Process.run('tasklist', ['/FI', 'IMAGENAME eq $exeName', '/NH']);
+            final stdout = check.stdout.toString().toLowerCase();
+            if (stdout.contains(exeName.toLowerCase()) || stdout.contains('setup')) {
+              isRunning = true;
+              debugPrint('Update: proceso de instalacion verificado en ejecucion: $exeName');
+              break;
+            }
+          } catch (e) {
+            debugPrint('Update: error verificando tasklist ($e)');
+          }
+        }
 
+        if (!isRunning) {
+          debugPrint('Update: instalador no detectado en ejecucion tras invocacion');
+          return false;
+        }
+
+        // Solo cuando esté verificado el setup corriendo, cerrar la app principal
         try {
           AppPlayer.disposeGlobal();
         } catch (_) {}
@@ -352,7 +375,7 @@ class UpdateService {
           } catch (_) {}
         }
 
-        Future.delayed(const Duration(milliseconds: 1500), () {
+        Future.delayed(const Duration(milliseconds: 800), () {
           try {
             Process.run('taskkill', ['/F', '/PID', '$pid']);
           } catch (_) {

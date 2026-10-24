@@ -297,17 +297,11 @@ class HlsProxy {
   ) async {
     final clientRange = request.headers.value(HttpHeaders.rangeHeader);
 
-    // If request is a tiny probe (e.g. bytes=0-0 or < 512KB range), pipe directly without worker overhead
+    // If client requested a byte range (e.g. seeking or range-based progressive stream),
+    // pipe directly to preserve byte stream fidelity and exact server range headers.
     if (clientRange != null) {
-      final m = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(clientRange);
-      if (m != null) {
-        final start = int.tryParse(m.group(1)!) ?? 0;
-        final end = int.tryParse(m.group(2)!) ?? 0;
-        if (end >= start && (end - start) < 512 * 1024) {
-          await _pipeDirectVideo(request, videoUrl, customReferer);
-          return;
-        }
-      }
+      await _pipeDirectVideo(request, videoUrl, customReferer);
+      return;
     }
 
     int totalLength = _videoLengths[videoUrl] ?? -1;

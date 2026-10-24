@@ -1,11 +1,7 @@
 package dev.xx.video_view
 
 import android.app.Activity
-import android.app.ActivityManager
-import android.app.UiModeManager
 import android.content.Context
-import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.os.Handler
@@ -57,32 +53,25 @@ class VideoController(
 	private var pendingHeaders: Map<String, String>? = null
 	private val exoPlayer: ExoPlayer = run {
 		val context = binding.applicationContext
-		val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-		val isTv = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-				context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-				context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
-		val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-		val isLowRam = isTv || (activityManager?.isLowRamDevice == true)
-
 		val allocator = DefaultAllocator(true, 64 * 1024)
 		val loadControl = DefaultLoadControl.Builder()
 			.setAllocator(allocator)
 			.setBufferDurationsMs(
-				if (isLowRam) 25_000 else 40_000,
-				if (isLowRam) 50_000 else 90_000,
-				4_500,
-				if (isLowRam) 6_000 else 8_000
+				20_000,
+				50_000,
+				2_500,
+				4_000
 			)
-			.setBackBuffer(if (isLowRam) 10_000 else 20_000, true)
+			.setBackBuffer(5_000, true)
 			.setPrioritizeTimeOverSizeThresholds(true)
-			.setTargetBufferBytes(if (isLowRam) 32 * 1024 * 1024 else 64 * 1024 * 1024)
+			.setTargetBufferBytes(32 * 1024 * 1024)
 			.build()
 
 		val trackSelector = DefaultTrackSelector(context).apply {
 			setParameters(
 				buildUponParameters()
+					.setMaxVideoSize(1920, 1080)
 					.setForceHighestSupportedBitrate(true)
-					.setExceedRendererCapabilitiesIfNecessary(true)
 					.setAllowVideoMixedMimeTypeAdaptiveness(true)
 					.setAllowVideoNonSeamlessAdaptiveness(true)
 			)
@@ -210,15 +199,8 @@ class VideoController(
 						override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {}
 					})
 
-				// Delegar la caché de reproducción al almacenamiento del dispositivo (/player_playback_cache).
-				// Alivia el uso de RAM, soporta precarga continua para conexiones lentas y evita caídas en episodios largos.
-				val cacheDataSourceFactory = CacheDataSource.Factory()
-					.setCache(VideoViewPlugin.getPlaybackCache(binding.applicationContext))
-					.setUpstreamDataSourceFactory(httpFactory)
-					.setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
-				val loadErrorPolicy = DefaultLoadErrorHandlingPolicy(8)
-				val mediaSource = DefaultMediaSourceFactory(cacheDataSourceFactory)
+				val loadErrorPolicy = DefaultLoadErrorHandlingPolicy(4)
+				val mediaSource = DefaultMediaSourceFactory(httpFactory)
 					.setLoadErrorHandlingPolicy(loadErrorPolicy)
 					.createMediaSource(mediaItem)
 				exoPlayer.setMediaSource(mediaSource)
@@ -520,7 +502,7 @@ class VideoController(
 				watching = false
 			}
 			watchPosition()
-		}, 10)
+		}, 100L)
 	}
 
 	private fun watchPosition() {
