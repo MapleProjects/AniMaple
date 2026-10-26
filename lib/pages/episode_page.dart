@@ -577,23 +577,29 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   static Size _lastPipSize = const Size(380, 214);
   Size? _savedWindowSize;
   Offset? _savedWindowPosition;
+  bool _savedMaximized = false;
+  bool _savedFullscreen = false;
   bool _pipHovered = false;
 
   Future<void> _enterPip() async {
     if (_isDesktop) {
       try {
         if (!_isPipMode) {
-          // Si la ventana está en pantalla completa o maximizada, restaurarla primero
-          if (_isFullscreen || await windowManager.isFullScreen()) {
+          // Guarda el estado real antes de compactar la ventana. Capturar el
+          // tamaño después de des-maximizar devolvía el tamaño restaurado
+          // (reducido) al salir del PiP.
+          _savedFullscreen = _isFullscreen || await windowManager.isFullScreen();
+          _savedMaximized = await windowManager.isMaximized();
+          _savedWindowSize = await windowManager.getSize();
+          _savedWindowPosition = await windowManager.getPosition();
+
+          if (_savedFullscreen) {
             await windowManager.setFullScreen(false);
             _isFullscreen = false;
           }
-          if (await windowManager.isMaximized()) {
+          if (_savedMaximized) {
             await windowManager.unmaximize();
           }
-
-          _savedWindowSize = await windowManager.getSize();
-          _savedWindowPosition = await windowManager.getPosition();
 
           await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
           await windowManager.setAlwaysOnTop(true);
@@ -629,10 +635,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
   }
 
-  Future<void> _exitPipDesktop() async {
+  Future<void> _exitPipDesktop({bool restoreState = true}) async {
     if (!_isDesktop) return;
+    final wasInPip = _isPipMode;
+    _isPipMode = false;
     try {
-      if (_isPipMode) {
+      if (wasInPip) {
         try {
           final curSize = await windowManager.getSize();
           if (curSize.width >= 280 && curSize.width <= 700) {
@@ -649,24 +657,34 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       await windowManager.setAlwaysOnTop(false);
       await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
 
-      final targetW = (_savedWindowSize != null && _savedWindowSize!.width >= 900)
-          ? _savedWindowSize!.width
-          : 1280.0;
-      final targetH = (_savedWindowSize != null && _savedWindowSize!.height >= 600)
-          ? _savedWindowSize!.height
-          : 720.0;
-      await windowManager.setSize(Size(targetW, targetH));
-      if (_savedWindowPosition != null) {
-        await windowManager.setPosition(_savedWindowPosition!);
+      if (restoreState && _savedFullscreen) {
+        await windowManager.setFullScreen(true);
+        await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+        if (mounted) setState(() => _isFullscreen = true);
       } else {
-        await windowManager.center();
+        final targetW = (_savedWindowSize != null && _savedWindowSize!.width >= 900)
+            ? _savedWindowSize!.width
+            : 1280.0;
+        final targetH = (_savedWindowSize != null && _savedWindowSize!.height >= 600)
+            ? _savedWindowSize!.height
+            : 720.0;
+        await windowManager.setSize(Size(targetW, targetH));
+        if (restoreState && _savedMaximized) {
+          // Devuelve la ventana maximizada tal como estaba antes del PiP.
+          await windowManager.maximize();
+        } else if (_savedWindowPosition != null) {
+          await windowManager.setPosition(_savedWindowPosition!);
+        } else {
+          await windowManager.center();
+        }
       }
+      _savedMaximized = false;
+      _savedFullscreen = false;
     } catch (e) {
       debugPrint('Error exiting Desktop PiP: $e');
     }
     if (mounted) {
       setState(() {
-        _isPipMode = false;
         _controlsVisible = true;
       });
     }
@@ -683,7 +701,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
       }
       if (_isPipMode) {
-        _exitPipDesktop();
+        _exitPipDesktop(restoreState: false);
       }
     }
     if (mounted) Navigator.maybePop(context);
@@ -712,6 +730,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     } else {
       WakelockPlus.disable();
       _positionTimer?.cancel();
+      _stallTicks = 0;
     }
     _syncPipState(playing);
     _updateMediaSession(playing);
@@ -937,8 +956,14 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _stallWatchdogTimer?.cancel();
         return;
       }
-      // Watchdog activo solo si el video ya cargó su fuente y no estamos en seek o reconexión activa
-      if (_sourceStarted && !_reconnecting && !_isDragging) {
+      // Watchdog activo solo si el video ya cargó su fuente, no estamos en seek
+      // o reconexión activa y el usuario no pausó. mpv mantiene buffering=true
+      // mientras está pausado, así que sin el chequeo de isPlaying el watchdog
+      // reconstruía el stream y reanudaba la reproducción por su cuenta.
+      if (_sourceStarted &&
+          !_reconnecting &&
+          !_isDragging &&
+          _player.isPlaying.value) {
         final isLoading = _player.isLoading.value;
         if (isLoading) {
           _stallTicks++;
@@ -1156,7 +1181,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
       }
       if (_isPipMode) {
-        _exitPipDesktop();
+        _exitPipDesktop(restoreState: false);
       }
     }
     _syncPipState(false);
@@ -1546,7 +1571,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _toggleFullscreen() async {
     if (_isDesktop && _isPipMode) {
-      await _exitPipDesktop();
+      await _exitPipDesktop(restoreState: false);
     }
     final nextFullscreen = !_isFullscreen;
     if (_isDesktop) {
