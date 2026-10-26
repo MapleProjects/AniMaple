@@ -1,5 +1,12 @@
 # AniMaple — Registro de cambios
 
+## v2.0.14
+
+### Novedades y mejoras
+• Ocultación automática del puntero durante la reproducción en escritorio, con reaparición al mover el ratón o mostrar los controles.
+• La pausa del usuario se mantiene aunque el flujo tarde en responder, sin reanudaciones automáticas por reconexión.
+• La ventana recupera su tamaño maximizado o su estado de pantalla completa al salir del modo compacto en Windows y Linux.
+
 ## v2.0.13
 
 ### Novedades y mejoras
