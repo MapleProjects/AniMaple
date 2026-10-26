@@ -108,6 +108,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   static const _pipChannel = MethodChannel('com.mapleprojects.animaple/pip');
   bool _isPipMode = false;
 
+  /// Puntero oculto por inactividad dentro del área de video.
+  bool _cursorHidden = false;
+
+  /// El puntero está sobre el reproductor (solo escritorio).
+  bool _pointerInPlayer = false;
+
   Set<int> _watchedEpisodes = {};
 
   static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
@@ -522,27 +528,50 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _onMouseEnter(PointerEvent event) {
+    _pointerInPlayer = true;
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
       _controlsAnim!.forward();
     }
     _startHideTimer();
+    _updateCursor();
   }
 
   void _onMouseMove(PointerEvent event) {
+    _pointerInPlayer = true;
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
       _controlsAnim!.forward();
     }
     _startHideTimer();
+    _updateCursor();
   }
 
   void _onMouseExit(PointerEvent event) {
+    _pointerInPlayer = false;
     if (!_isDragging && !_showCountdown) {
       _hideTimer?.cancel();
       setState(() => _controlsVisible = false);
       _controlsAnim?.reverse();
     }
+    _updateCursor();
+  }
+
+  /// Sincroniza la visibilidad del puntero con el estado del reproductor.
+  ///
+  /// El cursor solo se oculta si hay reproducción activa, los controles están
+  /// ocultos y el puntero está sobre el área de video (o en pantalla completa).
+  void _updateCursor() {
+    if (!_isDesktop) return;
+    final shouldHide = !_isPipMode &&
+        !_controlsVisible &&
+        !_isDragging &&
+        !_showCountdown &&
+        _player.isPlaying.value &&
+        (_pointerInPlayer || _isFullscreen);
+    if (shouldHide == _cursorHidden) return;
+    _cursorHidden = shouldHide;
+    if (mounted) setState(() {});
   }
 
   static Size _lastPipSize = const Size(380, 214);
@@ -686,6 +715,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
     _syncPipState(playing);
     _updateMediaSession(playing);
+    _updateCursor();
     if (mounted) setState(() {});
   }
 
@@ -1682,6 +1712,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _hideTimer?.cancel();
       _controlsAnim!.reverse();
     }
+    _updateCursor();
   }
 
   void _startPositionTimer() {
@@ -1703,6 +1734,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _dragValue = null;
         }
       }
+      _updateCursor();
       if (!_controlsVisible && !_isDragging && !_showCountdown && _seekAccumulatorMs == 0 && !_seekAnimating) return;
       setState(() {});
     });
@@ -1714,6 +1746,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       _controlsAnim!.forward();
     }
     _startHideTimer();
+    _updateCursor();
   }
 
   void _startHideTimer() {
@@ -1725,6 +1758,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _tvFocus = _PlayerTvFocus.none;
         });
         _controlsAnim?.reverse();
+        _updateCursor();
       }
     });
   }
@@ -1752,6 +1786,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         _startHideTimer();
       }
     }
+    _updateCursor();
   }
 
   void _seekRelative(int deltaMs) {
@@ -2381,6 +2416,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         onEnter: _onMouseEnter,
         onHover: _onMouseMove,
         onExit: _onMouseExit,
+        cursor: _cursorHidden
+            ? SystemMouseCursors.none
+            : MouseCursor.defer,
         child: playerWidget,
       );
     }
