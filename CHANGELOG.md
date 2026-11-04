@@ -1,5 +1,18 @@
 # AniMaple — Registro de cambios
 
+## v2.1.0
+
+### Novedades y mejoras
+• Rediseño completo de la interfaz con identidad visual en tonos índigo y tipografía integrada, aplicada de forma uniforme en todas las pantallas.
+• Inicio reorganizado en un héroe principal y carruseles de Continuar viendo, Estrenos y Mi lista.
+• Fondos ambientales generados a partir de los colores de cada portada, con movimiento lento y sin impacto en el rendimiento.
+• Cabeceras y navegación translúcidas: el contenido se desplaza por debajo de forma fluida.
+• Carruseles navegables con flechas, rueda del ratón y control remoto en Windows, Linux y Android TV.
+• Seguir, dejar de seguir y eliminar del historial se refleja al instante, sin recargar.
+• Distribución adaptada a móvil, tablet, escritorio y televisión, con rejillas y tarjetas que escalan según el ancho.
+• Descargas y Mi lista corregidas para respetar la cabecera y las pestañas en todas las resoluciones.
+• Botones de retroceso y transiciones de pantalla unificados.
+
 ## v2.0.14
 
 ### Novedades y mejoras

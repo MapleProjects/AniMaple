@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../ui/tokens.dart';
 
 /// Global error handler — shows a bottom sheet with the full error detail
 /// and a copy button. Use from any catch block:
@@ -12,8 +13,13 @@ import 'package:flutter/services.dart';
 ///
 /// Or wrap the whole app in a [ErrorBoundary] to catch unhandled errors.
 
-void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
-    {String? title, String? slug}) {
+void showErrorSheet(
+  BuildContext context,
+  Object error,
+  StackTrace? stackTrace, {
+  String? title,
+  String? slug,
+}) {
   // Rate limit para evitar saturación de diálogos concurrentes.
   if (_sheetOpen) return;
   final now = DateTime.now();
@@ -31,15 +37,12 @@ void showErrorSheet(BuildContext context, Object error, StackTrace? stackTrace,
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF110e1a),
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _ErrorSheet(
-        title: title ?? 'Error',
-        error: error,
-        detail: detail,
-      ),
+      builder: (_) =>
+          _ErrorSheet(title: title ?? 'Error', error: error, detail: detail),
     ).whenComplete(() => _sheetOpen = false);
   });
   WidgetsBinding.instance.scheduleFrame();
@@ -70,7 +73,9 @@ String _formatError(Object error, StackTrace? stackTrace, {String? slug}) {
   final buf = StringBuffer();
   buf.writeln('=== AniMaple Error Report ===');
   buf.writeln('Time: ${DateTime.now().toIso8601String()}');
-  buf.writeln('Platform: ${kIsWeb ? "web" : Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+  buf.writeln(
+    'Platform: ${kIsWeb ? "web" : Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+  );
   if (slug != null) buf.writeln('Slug: $slug');
   buf.writeln();
   buf.writeln('--- Error ---');
@@ -81,10 +86,14 @@ String _formatError(Object error, StackTrace? stackTrace, {String? slug}) {
   if (stackTrace != null) {
     buf.writeln();
     buf.writeln('--- Stack Trace ---');
-    buf.writeln(stackTrace.toString().substring(
-      0,
-      stackTrace.toString().length > 2000 ? 2000 : stackTrace.toString().length,
-    ));
+    buf.writeln(
+      stackTrace.toString().substring(
+        0,
+        stackTrace.toString().length > 2000
+            ? 2000
+            : stackTrace.toString().length,
+      ),
+    );
   }
   return buf.toString();
 }
@@ -94,17 +103,24 @@ class _ErrorSheet extends StatelessWidget {
   final Object error;
   final String detail;
 
-  const _ErrorSheet({required this.title, required this.error, required this.detail});
+  const _ErrorSheet({
+    required this.title,
+    required this.error,
+    required this.detail,
+  });
 
   @override
   Widget build(BuildContext context) {
     final errorStr = error.toString();
-    final isTimeout = errorStr.toLowerCase().contains('timeout') ||
+    final isTimeout =
+        errorStr.toLowerCase().contains('timeout') ||
         errorStr.toLowerCase().contains('timed out');
-    final isConnection = errorStr.toLowerCase().contains('connection') ||
+    final isConnection =
+        errorStr.toLowerCase().contains('connection') ||
         errorStr.toLowerCase().contains('socket') ||
         errorStr.toLowerCase().contains('errno');
-    final isParse = errorStr.toLowerCase().contains('format') ||
+    final isParse =
+        errorStr.toLowerCase().contains('format') ||
         errorStr.toLowerCase().contains('parse') ||
         errorStr.toLowerCase().contains('type cast');
 
@@ -113,19 +129,19 @@ class _ErrorSheet extends StatelessWidget {
     String category;
     if (isTimeout) {
       icon = Icons.timer_off_rounded;
-      iconColor = const Color(0xFFf59e0b);
+      iconColor = AppColors.warning;
       category = 'Timeout de conexión';
     } else if (isConnection) {
       icon = Icons.wifi_off_rounded;
-      iconColor = const Color(0xFFef4444);
+      iconColor = AppColors.danger;
       category = 'Error de red';
     } else if (isParse) {
       icon = Icons.data_object_rounded;
-      iconColor = const Color(0xFF8b5cf6);
+      iconColor = AppColors.primary;
       category = 'Error de parseo';
     } else {
       icon = Icons.error_outline_rounded;
-      iconColor = const Color(0xFFef4444);
+      iconColor = AppColors.danger;
       category = 'Error inesperado';
     }
 
@@ -142,39 +158,53 @@ class _ErrorSheet extends StatelessWidget {
             children: [
               Center(
                 child: Container(
-                  width: 40, height: 4,
+                  width: 40,
+                  height: 4,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF3a3252),
+                    color: AppColors.outlineStrong,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-              Row(children: [
-                Icon(icon, color: iconColor, size: 28),
-                const SizedBox(width: 10),
-                Text(category, style: TextStyle(color: iconColor, fontSize: 16, fontWeight: FontWeight.w700)),
-              ]),
+              Row(
+                children: [
+                  Icon(icon, color: iconColor, size: 28),
+                  const SizedBox(width: 10),
+                  Text(
+                    category,
+                    style: TextStyle(
+                      color: iconColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               Text(
                 _shortError(errorStr),
-                style: const TextStyle(color: Color(0xFFe8e4f0), fontSize: 14, height: 1.4),
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
               ),
               const SizedBox(height: 16),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0a0812),
+                  color: AppColors.bg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF1e1832)),
+                  border: Border.all(color: AppColors.outline),
                 ),
                 child: SelectableText(
                   detail,
                   style: const TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 11,
-                    color: Color(0xFFa99fc0),
+                    color: AppColors.textSecondary,
                     height: 1.5,
                   ),
                 ),
@@ -189,17 +219,22 @@ class _ErrorSheet extends StatelessWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Error copiado al portapapeles'),
-                        backgroundColor: Color(0xFF8b5cf6),
+                        backgroundColor: AppColors.primary,
                         duration: Duration(seconds: 2),
                       ),
                     );
                   },
                   icon: const Icon(Icons.copy_rounded, size: 18),
-                  label: const Text('Copiar error', style: TextStyle(fontWeight: FontWeight.w600)),
+                  label: const Text(
+                    'Copiar error',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1e1832),
-                    foregroundColor: const Color(0xFFa78bfa),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    backgroundColor: AppColors.outline,
+                    foregroundColor: AppColors.primaryBright,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),

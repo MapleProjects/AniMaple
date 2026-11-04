@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/download_service.dart';
 import 'downloads_manager_sheet.dart';
+import '../ui/tokens.dart';
 
 /// Botón flotante para consultar el progreso global de descargas.
 class DownloadsFab extends StatelessWidget {
@@ -21,11 +22,12 @@ class DownloadsFab extends StatelessWidget {
           sum += v.clamp(0.0, 1.0);
         }
         final avg = progress.isEmpty ? 0.0 : sum / progress.length;
-        final poster =
-            DownloadService.instance.posterPathFor(queue.first['slug']!);
+        final poster = DownloadService.instance.posterPathFor(
+          queue.first['slug']!,
+        );
         return FloatingActionButton(
           heroTag: 'downloads_fab',
-          backgroundColor: const Color(0xFF110e1a),
+          backgroundColor: AppColors.surface,
           elevation: 4,
           onPressed: () => showDownloadsManager(context),
           child: Stack(
@@ -40,8 +42,7 @@ class DownloadsFab extends StatelessWidget {
                           File(poster),
                           fit: BoxFit.cover,
                           gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) =>
-                              const _FallbackIcon(),
+                          errorBuilder: (_, __, ___) => const _FallbackIcon(),
                         )
                       : const _FallbackIcon(),
                 ),
@@ -52,7 +53,7 @@ class DownloadsFab extends StatelessWidget {
                 child: CircularProgressIndicator(
                   value: avg <= 0 ? null : avg,
                   strokeWidth: 3,
-                  color: const Color(0xFF8b5cf6),
+                  color: AppColors.primary,
                   backgroundColor: Colors.white24,
                   strokeCap: StrokeCap.round,
                 ),
@@ -71,11 +72,11 @@ class _FallbackIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF1e1832),
+      color: AppColors.outline,
       child: const Icon(
         Icons.download_rounded,
         size: 22,
-        color: Color(0xFFa78bfa),
+        color: AppColors.primaryBright,
       ),
     );
   }

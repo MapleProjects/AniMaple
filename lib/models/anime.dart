@@ -86,7 +86,9 @@ class AnimeDetail {
     genres: (j['genres'] as List? ?? []).map((g) => Genre.fromJson(g)).toList(),
     episodesCount: j['episodes_count'] ?? 0,
     slug: j['slug'] ?? '',
-    episodes: (j['episodes'] as List? ?? []).map((e) => EpisodeBasic.fromJson(e)).toList(),
+    episodes: (j['episodes'] as List? ?? [])
+        .map((e) => EpisodeBasic.fromJson(e))
+        .toList(),
     mature: j['mature'] ?? false,
   );
 }
@@ -99,7 +101,7 @@ class Genre {
   Genre({required this.id, required this.name, required this.slug});
 
   factory Genre.fromJson(Map<String, dynamic> j) =>
-    Genre(id: j['id'] ?? 0, name: j['name'] ?? '', slug: j['slug'] ?? '');
+      Genre(id: j['id'] ?? 0, name: j['name'] ?? '', slug: j['slug'] ?? '');
 }
 
 class EpisodeBasic {
@@ -109,7 +111,7 @@ class EpisodeBasic {
   EpisodeBasic({required this.id, required this.number});
 
   factory EpisodeBasic.fromJson(Map<String, dynamic> j) =>
-    EpisodeBasic(id: j['id'] ?? 0, number: j['number'] ?? 0);
+      EpisodeBasic(id: j['id'] ?? 0, number: j['number'] ?? 0);
 }
 
 class EpisodeDetail {
@@ -143,8 +145,12 @@ class EpisodeDetail {
     variants: List<String>.from(j['variants'] ?? []),
     filler: j['filler'] ?? false,
     publishedAt: j['published_at'],
-    embeds: (j['embeds'] as List? ?? []).map((e) => ServerMirror.fromJson(e)).toList(),
-    downloads: (j['downloads'] as List? ?? []).map((e) => ServerMirror.fromJson(e)).toList(),
+    embeds: (j['embeds'] as List? ?? [])
+        .map((e) => ServerMirror.fromJson(e))
+        .toList(),
+    downloads: (j['downloads'] as List? ?? [])
+        .map((e) => ServerMirror.fromJson(e))
+        .toList(),
   );
 }
 
@@ -154,7 +160,12 @@ class ServerMirror {
   final String variant;
   final bool? alive;
 
-  ServerMirror({required this.server, required this.url, required this.variant, this.alive});
+  ServerMirror({
+    required this.server,
+    required this.url,
+    required this.variant,
+    this.alive,
+  });
 
   factory ServerMirror.fromJson(Map<String, dynamic> j) => ServerMirror(
     server: j['server'] ?? '',

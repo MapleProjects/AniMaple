@@ -100,7 +100,11 @@ class HlsProxy {
     }
   }
 
-  void _applyHeaders(HttpClientRequest req, String targetUrl, String? customReferer) {
+  void _applyHeaders(
+    HttpClientRequest req,
+    String targetUrl,
+    String? customReferer,
+  ) {
     req.headers.set('User-Agent', _defaultUserAgent);
     req.headers.set('Accept', '*/*');
     req.headers.set('Accept-Language', 'es-ES,es;q=0.9,en;q=0.8');
@@ -218,7 +222,10 @@ class HlsProxy {
     _applyHeaders(req, url, referer);
     final resp = await req.close();
     if (resp.statusCode != 200 && resp.statusCode != 206) {
-      throw HttpException('HTTP ${resp.statusCode} fetching segment', uri: Uri.parse(url));
+      throw HttpException(
+        'HTTP ${resp.statusCode} fetching segment',
+        uri: Uri.parse(url),
+      );
     }
     final builder = BytesBuilder(copy: false);
     await for (final chunk in resp) {
@@ -242,14 +249,18 @@ class HlsProxy {
           final targetIdx = idx + i;
           if (targetIdx < segs.length) {
             final nextUrl = segs[targetIdx];
-            if (!_segmentCache.containsKey(nextUrl) && !_inFlight.containsKey(nextUrl)) {
+            if (!_segmentCache.containsKey(nextUrl) &&
+                !_inFlight.containsKey(nextUrl)) {
               final f = _downloadSegment(nextUrl, referer);
               _inFlight[nextUrl] = f;
-              f.then((bytes) {
-                _addToCache(nextUrl, bytes);
-              }).catchError((_) {}).whenComplete(() {
-                _inFlight.remove(nextUrl);
-              });
+              f
+                  .then((bytes) {
+                    _addToCache(nextUrl, bytes);
+                  })
+                  .catchError((_) {})
+                  .whenComplete(() {
+                    _inFlight.remove(nextUrl);
+                  });
             }
           }
         }
@@ -278,7 +289,10 @@ class HlsProxy {
 
     final contentRange = res.headers.value(HttpHeaders.contentRangeHeader);
     if (contentRange != null) {
-      request.response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        contentRange,
+      );
     }
     final contentLength = res.headers.contentLength;
     if (contentLength > 0) {
@@ -314,7 +328,9 @@ class HlsProxy {
         probeReq.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
         final probeRes = await probeReq.close();
 
-        final contentRange = probeRes.headers.value(HttpHeaders.contentRangeHeader);
+        final contentRange = probeRes.headers.value(
+          HttpHeaders.contentRangeHeader,
+        );
         if (contentRange != null) {
           final m = RegExp(r'/(\d+)').firstMatch(contentRange);
           if (m != null) totalLength = int.tryParse(m.group(1)!) ?? -1;
@@ -322,8 +338,12 @@ class HlsProxy {
         if (totalLength <= 0) {
           totalLength = probeRes.headers.contentLength;
         }
-        supportsRanges = probeRes.statusCode == 206 ||
-            probeRes.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase() == 'bytes' ||
+        supportsRanges =
+            probeRes.statusCode == 206 ||
+            probeRes.headers
+                    .value(HttpHeaders.acceptRangesHeader)
+                    ?.toLowerCase() ==
+                'bytes' ||
             contentRange != null;
 
         await probeRes.drain<void>();
@@ -359,13 +379,21 @@ class HlsProxy {
     if (endByte >= totalLength) endByte = totalLength - 1;
     final contentLength = endByte - startByte + 1;
 
-    request.response.statusCode = (clientRange != null) ? HttpStatus.partialContent : HttpStatus.ok;
+    request.response.statusCode = (clientRange != null)
+        ? HttpStatus.partialContent
+        : HttpStatus.ok;
     request.response.headers.set('Access-Control-Allow-Origin', '*');
     request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
     request.response.headers.set(HttpHeaders.contentTypeHeader, 'video/mp4');
-    request.response.headers.set(HttpHeaders.contentLengthHeader, contentLength.toString());
+    request.response.headers.set(
+      HttpHeaders.contentLengthHeader,
+      contentLength.toString(),
+    );
     if (clientRange != null) {
-      request.response.headers.set(HttpHeaders.contentRangeHeader, 'bytes $startByte-$endByte/$totalLength');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes $startByte-$endByte/$totalLength',
+      );
     }
 
     // Concurrent multi-worker slice streaming (2MB slices, 4 concurrent workers)
@@ -377,13 +405,18 @@ class HlsProxy {
 
     Future<Uint8List?> fetchSlice(int sliceIndex) async {
       final sliceStart = startByte + (sliceIndex * chunkSize);
-      final sliceEnd = (sliceStart + chunkSize - 1 > endByte) ? endByte : sliceStart + chunkSize - 1;
+      final sliceEnd = (sliceStart + chunkSize - 1 > endByte)
+          ? endByte
+          : sliceStart + chunkSize - 1;
 
       for (int attempt = 0; attempt < 2; attempt++) {
         try {
           final req = await _client.getUrl(Uri.parse(videoUrl));
           _applyHeaders(req, videoUrl, customReferer);
-          req.headers.set(HttpHeaders.rangeHeader, 'bytes=$sliceStart-$sliceEnd');
+          req.headers.set(
+            HttpHeaders.rangeHeader,
+            'bytes=$sliceStart-$sliceEnd',
+          );
           final res = await req.close();
           if (res.statusCode == 200 || res.statusCode == 206) {
             final builder = BytesBuilder(copy: false);
@@ -408,7 +441,8 @@ class HlsProxy {
 
       for (int i = 0; i < sliceCount; i++) {
         final nextToPrefetch = i + concurrency;
-        if (nextToPrefetch < sliceCount && !chunkFutures.containsKey(nextToPrefetch)) {
+        if (nextToPrefetch < sliceCount &&
+            !chunkFutures.containsKey(nextToPrefetch)) {
           chunkFutures[nextToPrefetch] = fetchSlice(nextToPrefetch);
         }
 
@@ -497,18 +531,19 @@ class HlsProxy {
       if (trimmed.isEmpty) {
         result.add(line);
       } else if (trimmed.startsWith('#')) {
-        result.add(trimmed.replaceAllMapped(
-          RegExp(r'URI="([^"]+)"'),
-          (m) {
+        result.add(
+          trimmed.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (m) {
             final uriVal = m.group(1)!;
             final resolved = _absoluteUrl(uriVal, base);
-            final path = resolved.toLowerCase().contains('.m3u8') ? 'play.m3u8' : 'segment';
+            final path = resolved.toLowerCase().contains('.m3u8')
+                ? 'play.m3u8'
+                : 'segment';
             if (path == 'segment') {
               segments.add(resolved);
             }
             return 'URI="http://127.0.0.1:$_port/$path?url=${Uri.encodeComponent(resolved)}$refParam"';
-          },
-        ));
+          }),
+        );
       } else {
         final resolved = _absoluteUrl(trimmed, base);
         if (resolved.toLowerCase().contains('.m3u8')) {

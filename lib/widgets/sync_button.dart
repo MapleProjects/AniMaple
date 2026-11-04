@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
+import '../ui/tokens.dart';
+import 'tv_focusable.dart';
 
 /// Botón y estado de cuenta de sincronización en AppBar.
 class SyncButton extends StatefulWidget {
@@ -77,7 +79,7 @@ class _SyncButtonState extends State<SyncButton> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Cuenta conectada. Sincronizando…'),
-              backgroundColor: Color(0xFF8b5cf6),
+              backgroundColor: AppColors.primary,
               duration: Duration(seconds: 2),
             ),
           );
@@ -92,13 +94,15 @@ class _SyncButtonState extends State<SyncButton> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Reconectando con tu cuenta…'),
-          backgroundColor: Color(0xFF8b5cf6),
+          backgroundColor: AppColors.primary,
           duration: Duration(seconds: 2),
         ),
       );
-      unawaited(SyncService.attemptRestoreAndSync().then((_) {
-        if (mounted) _refreshFromService();
-      }));
+      unawaited(
+        SyncService.attemptRestoreAndSync().then((_) {
+          if (mounted) _refreshFromService();
+        }),
+      );
       return;
     }
 
@@ -119,7 +123,8 @@ class _SyncButtonState extends State<SyncButton> {
     if (err == null || !mounted) return;
     String displayMsg = err;
     if (err.contains('12500')) {
-      displayMsg = 'Error 12500 al autenticar con Google. Revisa tu cuenta en la TV o autoriza el acceso a Drive.';
+      displayMsg =
+          'Error 12500 al autenticar con Google. Revisa tu cuenta en la TV o autoriza el acceso a Drive.';
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -133,7 +138,7 @@ class _SyncButtonState extends State<SyncButton> {
   Future<void> _showAccountMenu() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF16121f),
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -144,12 +149,16 @@ class _SyncButtonState extends State<SyncButton> {
             const SizedBox(height: 12),
             CircleAvatar(
               radius: 32,
-              backgroundColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+              backgroundColor: AppColors.primary.withValues(alpha: 0.2),
               backgroundImage: _photoUrl != null && _photoUrl!.isNotEmpty
                   ? NetworkImage(_photoUrl!)
                   : null,
               child: (_photoUrl == null || _photoUrl!.isEmpty)
-                  ? const Icon(Icons.person, size: 32, color: Color(0xFFa78bfa))
+                  ? const Icon(
+                      Icons.person,
+                      size: 32,
+                      color: AppColors.primaryBright,
+                    )
                   : null,
             ),
             const SizedBox(height: 12),
@@ -158,7 +167,7 @@ class _SyncButtonState extends State<SyncButton> {
               style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFFe8e4f0),
+                color: AppColors.text,
               ),
             ),
             if (_email != null)
@@ -168,28 +177,28 @@ class _SyncButtonState extends State<SyncButton> {
                   _email!,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF6d6488),
+                    color: AppColors.textMuted,
                   ),
                 ),
               ),
             const SizedBox(height: 16),
-            const Divider(height: 1, color: Color(0xFF2a2438)),
+            const Divider(height: 1, color: AppColors.surfaceHighest),
             ListTile(
-              leading: const Icon(Icons.sync, color: Color(0xFFa78bfa)),
+              leading: const Icon(Icons.sync, color: AppColors.primaryBright),
               title: const Text(
                 'Sincronizar ahora',
-                style: TextStyle(fontSize: 14, color: Color(0xFFe8e4f0)),
+                style: TextStyle(fontSize: 14, color: AppColors.text),
               ),
               subtitle: const Text(
                 'Tus datos se sincronizan automáticamente entre todos tus dispositivos',
-                style: TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
               onTap: () async {
                 Navigator.pop(sheetCtx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Sincronizando con Google Drive…'),
-                    backgroundColor: Color(0xFF8b5cf6),
+                    backgroundColor: AppColors.primary,
                     duration: Duration(seconds: 2),
                   ),
                 );
@@ -199,7 +208,7 @@ class _SyncButtonState extends State<SyncButton> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Sincronización completada.'),
-                        backgroundColor: Color(0xFF8b5cf6),
+                        backgroundColor: AppColors.primary,
                         duration: Duration(seconds: 2),
                       ),
                     );
@@ -208,10 +217,10 @@ class _SyncButtonState extends State<SyncButton> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.logout, color: Color(0xFFf87171)),
+              leading: const Icon(Icons.logout, color: AppColors.dangerSoft),
               title: const Text(
                 'Cerrar sesión',
-                style: TextStyle(fontSize: 14, color: Color(0xFFf87171)),
+                style: TextStyle(fontSize: 14, color: AppColors.dangerSoft),
               ),
               onTap: () async {
                 Navigator.pop(sheetCtx);
@@ -228,7 +237,7 @@ class _SyncButtonState extends State<SyncButton> {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return TvFocusable(
       borderRadius: BorderRadius.circular(20),
       onTap: _handleTap,
       child: (_signedIn || _remembered)
@@ -236,7 +245,7 @@ class _SyncButtonState extends State<SyncButton> {
               padding: const EdgeInsets.all(4),
               child: CircleAvatar(
                 radius: 14,
-                backgroundColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+                backgroundColor: AppColors.primary.withValues(alpha: 0.2),
                 backgroundImage: _photoUrl != null && _photoUrl!.isNotEmpty
                     ? NetworkImage(_photoUrl!)
                     : null,
@@ -244,7 +253,7 @@ class _SyncButtonState extends State<SyncButton> {
                     ? const Icon(
                         Icons.person,
                         size: 16,
-                        color: Color(0xFFa78bfa),
+                        color: AppColors.primaryBright,
                       )
                     : null,
               ),
@@ -255,8 +264,8 @@ class _SyncButtonState extends State<SyncButton> {
                 Icons.account_circle_outlined,
                 size: 26,
                 color: (_signedIn
-                    ? const Color(0xFFa78bfa)
-                    : const Color(0xFF6d6488)),
+                    ? AppColors.primaryBright
+                    : AppColors.textMuted),
               ),
             ),
     );

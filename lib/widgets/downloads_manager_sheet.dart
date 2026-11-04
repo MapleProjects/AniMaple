@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../services/download_service.dart';
+import '../ui/tokens.dart';
 
 /// Gestor modal de descargas con pestañas de cola y elementos completados.
 Future<void> showDownloadsManager(BuildContext context) {
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    backgroundColor: const Color(0xFF110e1a),
+    backgroundColor: AppColors.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
@@ -74,7 +75,7 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
                   child: Text(
                     'Descargas',
                     style: TextStyle(
-                      color: Color(0xFFe8e4f0),
+                      color: AppColors.text,
                       fontSize: 17,
                       fontWeight: FontWeight.w600,
                     ),
@@ -82,16 +83,16 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
                 ),
                 IconButton(
                   tooltip: 'Cerrar',
-                  icon: const Icon(Icons.close, color: Color(0xFF6d6488)),
+                  icon: const Icon(Icons.close, color: AppColors.textMuted),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
             ),
             TabBar(
               controller: _tabs,
-              indicatorColor: const Color(0xFF8b5cf6),
-              labelColor: const Color(0xFFe8e4f0),
-              unselectedLabelColor: const Color(0xFFa99fc0),
+              indicatorColor: AppColors.primary,
+              labelColor: AppColors.text,
+              unselectedLabelColor: AppColors.textSecondary,
               tabs: const [
                 Tab(text: 'Descargando'),
                 Tab(text: 'Completados'),
@@ -150,13 +151,19 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
           child: Row(
             children: [
-              const Icon(Icons.error_outline,
-                  size: 15, color: Color(0xFFef4444)),
+              const Icon(
+                Icons.error_outline,
+                size: 15,
+                color: AppColors.danger,
+              ),
               const SizedBox(width: 5),
               Flexible(
                 child: Text(
                   '${failedKeys.length} con error',
-                  style: const TextStyle(color: Color(0xFFef4444), fontSize: 12.5),
+                  style: const TextStyle(
+                    color: AppColors.danger,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
               const Spacer(),
@@ -171,19 +178,21 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
         for (final k in failedKeys)
           ListTile(
             dense: true,
-            leading: const Icon(Icons.error_outline, color: Color(0xFFef4444)),
+            leading: const Icon(Icons.error_outline, color: AppColors.danger),
             title: Text(
               '${svc.titleFor(k.substring(0, k.indexOf('#')))} — Ep ${k.substring(k.indexOf('#') + 1)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Color(0xFFe8e4f0), fontSize: 13.5),
+              style: const TextStyle(color: AppColors.text, fontSize: 13.5),
             ),
             trailing: IconButton(
-              icon: const Icon(Icons.refresh_rounded,
-                  color: Color(0xFFa78bfa), size: 21),
+              icon: const Icon(
+                Icons.refresh_rounded,
+                color: AppColors.primaryBright,
+                size: 21,
+              ),
               tooltip: 'Reintentar',
-              onPressed: () =>
-                  DownloadService.instance.retryFailed([k]),
+              onPressed: () => DownloadService.instance.retryFailed([k]),
             ),
           ),
       ],
@@ -227,8 +236,7 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
                       posterFile,
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) =>
-                          const _DoneIcon(),
+                      errorBuilder: (_, __, ___) => const _DoneIcon(),
                     )
                   : const _DoneIcon(),
             ),
@@ -237,15 +245,21 @@ class _DownloadsManagerSheetState extends State<DownloadsManagerSheet>
             '${e['title']} — Ep ${e['episode']}${e['dub'] == true ? ' · DUB' : ''}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFFe8e4f0), fontSize: 13.5),
+            style: const TextStyle(color: AppColors.text, fontSize: 13.5),
           ),
           subtitle: Text(
             'Guardado · ${_fmtBytes((e['bytes'] as num?)?.toInt() ?? 0)}',
-            style: const TextStyle(color: Color(0xFFa99fc0), fontSize: 11.5),
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11.5,
+            ),
           ),
           trailing: IconButton(
-            icon: const Icon(Icons.delete_outline,
-                color: Color(0xFF6d6488), size: 20),
+            icon: const Icon(
+              Icons.delete_outline,
+              color: AppColors.textMuted,
+              size: 20,
+            ),
             tooltip: 'Eliminar descarga',
             onPressed: () async {
               await DownloadService.instance.deleteEpisode(
@@ -267,19 +281,18 @@ class _DoneIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF16241a),
-      child: const Icon(Icons.check_circle_rounded,
-          color: Color(0xFF22c55e), size: 22),
+      color: AppColors.surface,
+      child: const Icon(
+        Icons.check_circle_rounded,
+        color: AppColors.success,
+        size: 22,
+      ),
     );
   }
 }
 
 class _QueueRow extends StatelessWidget {
-  const _QueueRow({
-    super.key,
-    required this.slug,
-    required this.episode,
-  });
+  const _QueueRow({super.key, required this.slug, required this.episode});
 
   final String slug;
   final int episode;
@@ -294,10 +307,9 @@ class _QueueRow extends StatelessWidget {
         final active = progress.containsKey(key);
         final frac = progress[key] ?? 0.0;
         final posterPath = svc.posterPathFor(slug);
-        final posterFile =
-            posterPath != null && File(posterPath).existsSync()
-                ? File(posterPath)
-                : null;
+        final posterFile = posterPath != null && File(posterPath).existsSync()
+            ? File(posterPath)
+            : null;
         return ListTile(
           dense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -328,7 +340,7 @@ class _QueueRow extends StatelessWidget {
                   child: CircularProgressIndicator(
                     value: frac > 0 && frac <= 1 ? frac : null,
                     strokeWidth: 2.6,
-                    color: const Color(0xFF8b5cf6),
+                    color: AppColors.primary,
                     backgroundColor: Colors.white12,
                     strokeCap: StrokeCap.round,
                   ),
@@ -340,19 +352,29 @@ class _QueueRow extends StatelessWidget {
             '${svc.titleFor(slug)} — Ep $episode',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFFe8e4f0), fontSize: 13.5),
+            style: const TextStyle(color: AppColors.text, fontSize: 13.5),
           ),
           subtitle: active
               ? Text(
                   '${(frac * 100).floor()}%',
                   style: const TextStyle(
-                      color: Color(0xFFa78bfa), fontSize: 11.5),
+                    color: AppColors.primaryBright,
+                    fontSize: 11.5,
+                  ),
                 )
-              : const Text('En espera…',
-                  style: TextStyle(color: Color(0xFFa99fc0), fontSize: 11.5)),
+              : const Text(
+                  'En espera…',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11.5,
+                  ),
+                ),
           trailing: IconButton(
-            icon: const Icon(Icons.close_rounded,
-                color: Color(0xFF6d6488), size: 20),
+            icon: const Icon(
+              Icons.close_rounded,
+              color: AppColors.textMuted,
+              size: 20,
+            ),
             tooltip: 'Cancelar',
             onPressed: () => svc.cancelQueued(slug, episode: episode),
           ),
@@ -368,8 +390,12 @@ class _QueueFallback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF1e1832),
-      child: const Icon(Icons.movie_rounded, size: 18, color: Color(0xFFa78bfa)),
+      color: AppColors.outline,
+      child: const Icon(
+        Icons.movie_rounded,
+        size: 18,
+        color: AppColors.primaryBright,
+      ),
     );
   }
 }

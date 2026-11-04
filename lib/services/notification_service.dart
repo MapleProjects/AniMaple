@@ -5,8 +5,9 @@ import 'api_service.dart';
 
 /// Coordinador de notificaciones locales y verificación en segundo plano.
 class NotificationService {
-  static const MethodChannel _channel =
-      MethodChannel('com.mapleprojects.animaple/notifications');
+  static const MethodChannel _channel = MethodChannel(
+    'com.mapleprojects.animaple/notifications',
+  );
 
   static bool _mirrorRegistered = false;
 
@@ -42,7 +43,9 @@ class NotificationService {
   /// true si la app ya está exenta de la optimización de batería (Doze).
   static Future<bool> isBatteryOptimizationIgnored() async {
     try {
-      return await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored') ??
+      return await _channel.invokeMethod<bool>(
+            'isBatteryOptimizationIgnored',
+          ) ??
           true;
     } catch (_) {
       return true;
@@ -80,10 +83,7 @@ class NotificationService {
       final followed = await ApiService.fetchFollowed();
       final mirror = <String, dynamic>{
         for (final FollowedAnime f in followed)
-          f.animeSlug: {
-            'title': f.animeTitle,
-            'followedAt': f.followedAt,
-          },
+          f.animeSlug: {'title': f.animeTitle, 'followedAt': f.followedAt},
       };
       await _channel.invokeMethod('updateFollowedMirror', {
         'json': jsonEncode(mirror),

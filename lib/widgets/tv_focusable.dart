@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../ui/tokens.dart';
 
 /// Envoltorio para navegación por D-Pad / control remoto en Android TV.
 class TvFocusable extends StatefulWidget {
@@ -94,7 +95,8 @@ class _TvFocusableState extends State<TvFocusable> {
       if (res != KeyEventResult.ignored) return res;
     }
 
-    final isActivationKey = event.logicalKey == LogicalKeyboardKey.select ||
+    final isActivationKey =
+        event.logicalKey == LogicalKeyboardKey.select ||
         event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter ||
         event.logicalKey == LogicalKeyboardKey.space ||
@@ -116,12 +118,10 @@ class _TvFocusableState extends State<TvFocusable> {
   @override
   Widget build(BuildContext context) {
     final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(8);
-    final borderColor = widget.focusBorderColor ?? const Color(0xFFa78bfa);
-    final glow = widget.glowColor ?? const Color(0xFF8b5cf6);
+    final borderColor = widget.focusBorderColor ?? AppColors.primaryBright;
+    final glow = widget.glowColor ?? AppColors.primary;
 
-    final scale = _isPressed
-        ? 0.98
-        : (_isFocused ? widget.scaleOnFocus : 1.0);
+    final scale = _isPressed ? 0.98 : (_isFocused ? widget.scaleOnFocus : 1.0);
 
     return Focus(
       focusNode: _focusNode,

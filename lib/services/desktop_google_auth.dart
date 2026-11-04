@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart' show AniMapleApp;
 import 'gdrive_config.dart';
+import '../ui/tokens.dart';
 
 /// Auth de escritorio y Android TV para Google.
 ///
@@ -92,7 +93,9 @@ class DesktopGoogleAuth {
   static Future<bool> tryRestore() async {
     await load();
     if (_grantedScope != null && !_grantedScope!.contains('drive.file')) {
-      debugPrint('DesktopAuth: sesión existente carece de drive.file scope → se requiere re-login');
+      debugPrint(
+        'DesktopAuth: sesión existente carece de drive.file scope → se requiere re-login',
+      );
       await signOut();
       return false;
     }
@@ -182,16 +185,17 @@ class DesktopGoogleAuth {
 
     try {
       // 1. Solicitar código de dispositivo a Google
-      final devResp = await http.post(
-        Uri.parse(_deviceEndpoint),
-        body: {
-          'client_id': GDriveConfig.tvClientId,
-          'scope': _tvScope,
-        },
-      ).timeout(const Duration(seconds: 15));
+      final devResp = await http
+          .post(
+            Uri.parse(_deviceEndpoint),
+            body: {'client_id': GDriveConfig.tvClientId, 'scope': _tvScope},
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (devResp.statusCode != 200) {
-        debugPrint('TvAuth device code error ${devResp.statusCode}: ${devResp.body}');
+        debugPrint(
+          'TvAuth device code error ${devResp.statusCode}: ${devResp.body}',
+        );
         return false;
       }
 
@@ -199,9 +203,11 @@ class DesktopGoogleAuth {
       final deviceCode = devData['device_code'] as String?;
       final userCode = devData['user_code'] as String?;
       final verificationUrl =
-          (devData['verification_url'] as String? ?? 'https://www.google.com/device')
+          (devData['verification_url'] as String? ??
+                  'https://www.google.com/device')
               .replaceFirst('https://', '');
-      final qrUrl = (devData['verification_url_complete'] as String?) ??
+      final qrUrl =
+          (devData['verification_url_complete'] as String?) ??
           'https://www.google.com/device?user_code=$userCode';
       final interval = (devData['interval'] as int?) ?? 5;
       final expiresIn = (devData['expires_in'] as int?) ?? 1800;
@@ -224,18 +230,22 @@ class DesktopGoogleAuth {
           if (userCancelled) break;
 
           try {
-            final pollResp = await http.post(
-              Uri.parse(_tokenEndpoint),
-              body: {
-                'client_id': GDriveConfig.tvClientId,
-                'client_secret': GDriveConfig.tvClientSecret,
-                'device_code': deviceCode,
-                'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
-              },
-            ).timeout(const Duration(seconds: 15));
+            final pollResp = await http
+                .post(
+                  Uri.parse(_tokenEndpoint),
+                  body: {
+                    'client_id': GDriveConfig.tvClientId,
+                    'client_secret': GDriveConfig.tvClientSecret,
+                    'device_code': deviceCode,
+                    'grant_type':
+                        'urn:ietf:params:oauth:grant-type:device_code',
+                  },
+                )
+                .timeout(const Duration(seconds: 15));
 
             if (pollResp.statusCode == 200) {
-              final tokenData = jsonDecode(pollResp.body) as Map<String, dynamic>;
+              final tokenData =
+                  jsonDecode(pollResp.body) as Map<String, dynamic>;
               _isTvClient = true;
               await _applyTokenResponse(tokenData);
 
@@ -265,7 +275,8 @@ class DesktopGoogleAuth {
             } else if (errType == 'slow_down') {
               currentInterval += 5;
               continue;
-            } else if (errType == 'access_denied' || errType == 'expired_token') {
+            } else if (errType == 'access_denied' ||
+                errType == 'expired_token') {
               debugPrint('TvAuth: autorización denegada o expirada ($errType)');
               break;
             } else {
@@ -297,12 +308,18 @@ class DesktopGoogleAuth {
               userCancelled = true;
             },
             child: AlertDialog(
-              backgroundColor: const Color(0xFF140f22),
+              backgroundColor: AppColors.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
-                side: const BorderSide(color: Color(0xFF2d2244), width: 1.5),
+                side: const BorderSide(
+                  color: AppColors.surfaceHighest,
+                  width: 1.5,
+                ),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 20,
+              ),
               content: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: 580,
@@ -318,16 +335,20 @@ class DesktopGoogleAuth {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
+                              color: AppColors.primary.withValues(alpha: 0.15),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.tv_rounded, color: Color(0xFFa78bfa), size: 26),
+                            child: const Icon(
+                              Icons.tv_rounded,
+                              color: AppColors.primaryBright,
+                              size: 26,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           const Text(
                             'Vincular con tu Cuenta de Google',
                             style: TextStyle(
-                              color: Color(0xFFf3f0fa),
+                              color: AppColors.textStrong,
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
                             ),
@@ -338,7 +359,10 @@ class DesktopGoogleAuth {
                       const Text(
                         'Escanea el código QR con tu celular para abrir el enlace con el código ya completado, o ingrésalo manualmente.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Color(0xFFa29cb6), fontSize: 12),
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                       const SizedBox(height: 18),
                       Row(
@@ -348,11 +372,16 @@ class DesktopGoogleAuth {
                           Expanded(
                             flex: 5,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 12,
+                              ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1c162e),
+                                color: AppColors.surfaceHigh,
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFF382b54)),
+                                border: Border.all(
+                                  color: AppColors.outlineStrong,
+                                ),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -375,7 +404,7 @@ class DesktopGoogleAuth {
                                   const Text(
                                     'Escanear con celular',
                                     style: TextStyle(
-                                      color: Color(0xFFa78bfa),
+                                      color: AppColors.primaryBright,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -384,7 +413,10 @@ class DesktopGoogleAuth {
                                   const Text(
                                     'Abre con código ya listo',
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -395,11 +427,16 @@ class DesktopGoogleAuth {
                           Expanded(
                             flex: 6,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 14,
+                              ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1c162e),
+                                color: AppColors.surfaceHigh,
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFF382b54)),
+                                border: Border.all(
+                                  color: AppColors.outlineStrong,
+                                ),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -407,13 +444,16 @@ class DesktopGoogleAuth {
                                   const Text(
                                     'O entra desde navegador a:',
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
                                     verificationUrl,
                                     style: const TextStyle(
-                                      color: Color(0xFFa78bfa),
+                                      color: AppColors.primaryBright,
                                       fontSize: 15,
                                       fontWeight: FontWeight.bold,
                                       letterSpacing: 0.5,
@@ -422,16 +462,24 @@ class DesktopGoogleAuth {
                                   const SizedBox(height: 12),
                                   const Text(
                                     'Código de vinculación:',
-                                    style: TextStyle(color: Color(0xFF8e86a4), fontSize: 11),
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                      horizontal: 10,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF281f3d),
+                                      color: AppColors.surfaceHighest,
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.6),
+                                        color: AppColors.primary.withValues(
+                                          alpha: 0.6,
+                                        ),
                                         width: 1.5,
                                       ),
                                     ),
@@ -439,7 +487,7 @@ class DesktopGoogleAuth {
                                       userCode,
                                       textAlign: TextAlign.center,
                                       style: const TextStyle(
-                                        color: Color(0xFFffffff),
+                                        color: AppColors.textStrong,
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 2.0,
@@ -455,11 +503,14 @@ class DesktopGoogleAuth {
                       const SizedBox(height: 18),
                       // Estado de espera en contenedor diferenciado
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF191328),
+                          color: AppColors.surfaceHigh,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFF2d2244)),
+                          border: Border.all(color: AppColors.surfaceHighest),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -469,13 +520,16 @@ class DesktopGoogleAuth {
                               height: 14,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Color(0xFFa78bfa),
+                                color: AppColors.primaryBright,
                               ),
                             ),
                             SizedBox(width: 10),
                             Text(
                               'Esperando confirmación en tu teléfono…',
-                              style: TextStyle(color: Color(0xFFb8b2cb), fontSize: 12),
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
                             ),
                           ],
                         ),
@@ -484,19 +538,27 @@ class DesktopGoogleAuth {
                       ElevatedButton(
                         autofocus: true,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF251d38),
-                          foregroundColor: const Color(0xFFe2def0),
-                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                          backgroundColor: AppColors.outline,
+                          foregroundColor: AppColors.text,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 28,
+                            vertical: 10,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
-                            side: const BorderSide(color: Color(0xFF3d2f5a)),
+                            side: const BorderSide(
+                              color: AppColors.outlineStrong,
+                            ),
                           ),
                         ),
                         onPressed: () {
                           userCancelled = true;
                           Navigator.of(dialogCtx).pop(false);
                         },
-                        child: const Text('Cancelar', style: TextStyle(fontSize: 14)),
+                        child: const Text(
+                          'Cancelar',
+                          style: TextStyle(fontSize: 14),
+                        ),
                       ),
                     ],
                   ),

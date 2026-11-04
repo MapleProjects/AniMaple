@@ -246,7 +246,9 @@ class ApiService {
     if (s.isEmpty) return s;
     var cur = s;
     for (var depth = 0; depth < 2; depth++) {
-      if (!cur.codeUnits.any((c) => (c >= 0x80 && c <= 0xFF) || _cp1252ToByte.containsKey(c))) {
+      if (!cur.codeUnits.any(
+        (c) => (c >= 0x80 && c <= 0xFF) || _cp1252ToByte.containsKey(c),
+      )) {
         break;
       }
       try {
@@ -388,9 +390,9 @@ class ApiService {
         if (page > 1) queryParams['page'] = page.toString();
       }
 
-      final uri = Uri.parse('$_base/catalogo/__data.json').replace(
-        queryParameters: queryParams.isNotEmpty ? queryParams : null,
-      );
+      final uri = Uri.parse(
+        '$_base/catalogo/__data.json',
+      ).replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
 
       final resp = await _http.get(uri, headers: _headers);
       final json = _jsonFrom(resp);
@@ -623,7 +625,10 @@ class ApiService {
   }
 
   /// Despierta el servidor de video directo antes de iniciar la reproducción.
-  static Future<bool> prewarmVideo(String url, {Map<String, String>? headers}) async {
+  static Future<bool> prewarmVideo(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
     try {
       final reqHeaders = <String, String>{
         'Range': 'bytes=0-0',
@@ -635,7 +640,9 @@ class ApiService {
           .get(Uri.parse(url), headers: reqHeaders)
           .timeout(const Duration(seconds: 30));
       final ok = resp.statusCode >= 200 && resp.statusCode < 300;
-      debugPrint('Prewarm $url → ${resp.statusCode} (${stopwatch.elapsedMilliseconds}ms)');
+      debugPrint(
+        'Prewarm $url → ${resp.statusCode} (${stopwatch.elapsedMilliseconds}ms)',
+      );
       return ok;
     } catch (e) {
       debugPrint('Prewarm failed: $e');
@@ -667,7 +674,10 @@ class ApiService {
       if (effectiveHeaders.containsKey('Referer')) {
         try {
           final refUri = Uri.parse(effectiveHeaders['Referer']!);
-          effectiveHeaders.putIfAbsent('Origin', () => '${refUri.scheme}://${refUri.host}');
+          effectiveHeaders.putIfAbsent(
+            'Origin',
+            () => '${refUri.scheme}://${refUri.host}',
+          );
           final targetHost = Uri.parse(targetUrl).host;
           effectiveHeaders.putIfAbsent(
             'Sec-Fetch-Site',
@@ -709,7 +719,9 @@ class ApiService {
         if (effectiveHeaders.containsKey('Referer')) {
           final refHost = Uri.parse(effectiveHeaders['Referer']!).host;
           final segHost = Uri.parse(targetUrl).host;
-          effectiveHeaders['Sec-Fetch-Site'] = refHost == segHost ? 'same-origin' : 'cross-site';
+          effectiveHeaders['Sec-Fetch-Site'] = refHost == segHost
+              ? 'same-origin'
+              : 'cross-site';
         }
       } catch (_) {}
 
@@ -720,13 +732,18 @@ class ApiService {
       });
       final resp = await _http.send(req).timeout(timeout);
       if (resp.statusCode != 206 && resp.statusCode != 200) return 0.0;
-      await resp.stream.listen((chunk) {
-        got += chunk.length;
-      }, onError: (_) {}).asFuture().timeout(timeout, onTimeout: () {});
+      await resp.stream
+          .listen((chunk) {
+            got += chunk.length;
+          }, onError: (_) {})
+          .asFuture()
+          .timeout(timeout, onTimeout: () {});
       final ms = sw.elapsedMilliseconds;
       if (ms <= 0 || got <= 0) return 0.0;
       final mbps = (got * 8.0) / (ms / 1000.0) / 1_000_000.0;
-      debugPrint('Real Media Speed ${targetUrl.substring(0, targetUrl.length > 60 ? 60 : targetUrl.length)}… = ${mbps.toStringAsFixed(2)} Mbps (${got ~/ 1024}KB/${ms}ms)');
+      debugPrint(
+        'Real Media Speed ${targetUrl.substring(0, targetUrl.length > 60 ? 60 : targetUrl.length)}… = ${mbps.toStringAsFixed(2)} Mbps (${got ~/ 1024}KB/${ms}ms)',
+      );
       return mbps;
     } catch (e) {
       debugPrint('Speed measure failed: $e');
@@ -741,7 +758,8 @@ class ApiService {
   }) async {
     try {
       final uri = Uri.parse(masterUrl);
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 10);
       final req = await client.getUrl(uri);
       req.headers.set('User-Agent', _ua);
       headers?.forEach((k, v) => req.headers.set(k, v));
@@ -782,7 +800,9 @@ class ApiService {
               for (var j = i + 1; j < lines.length; j++) {
                 final child = lines[j].trim();
                 if (child.isEmpty || child.startsWith('#')) continue;
-                if (h > maxHeight || (h == maxHeight && bw > maxBw) || bestChild == null) {
+                if (h > maxHeight ||
+                    (h == maxHeight && bw > maxBw) ||
+                    bestChild == null) {
                   maxHeight = h;
                   maxBw = bw;
                   bestChild = child;
@@ -830,7 +850,8 @@ class ApiService {
       }
 
       // Byse (byselapuix.com / n1mwq.org)
-      if (embedUrl.contains('byselapuix.com') || embedUrl.contains('n1mwq.org')) {
+      if (embedUrl.contains('byselapuix.com') ||
+          embedUrl.contains('n1mwq.org')) {
         try {
           return await _resolveByse(embedUrl);
         } catch (e) {
@@ -899,11 +920,13 @@ class ApiService {
         : '';
     if (id.isEmpty) return {'url': embedUrl, 'type': 'embed'};
 
-    final uri = Uri.parse('https://animeav1.uns.bio/api/v1/video?id=$id&w=1920&h=1080&r=');
-    final resp = await _http.get(uri, headers: {
-      'User-Agent': _ua,
-      'Referer': 'https://animeav1.uns.bio/',
-    });
+    final uri = Uri.parse(
+      'https://animeav1.uns.bio/api/v1/video?id=$id&w=1920&h=1080&r=',
+    );
+    final resp = await _http.get(
+      uri,
+      headers: {'User-Agent': _ua, 'Referer': 'https://animeav1.uns.bio/'},
+    );
 
     if (resp.statusCode != 200) {
       throw Exception('UPNShare API error: ${resp.statusCode}');
@@ -912,8 +935,13 @@ class ApiService {
     final hexBody = resp.body.trim();
     final key = encrypt.Key.fromUtf8('kiemtienmua911ca');
     final iv = encrypt.IV.fromUtf8('1234567890oiuytr');
-    final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
-    final decrypted = encrypter.decrypt(encrypt.Encrypted.fromBase16(hexBody), iv: iv);
+    final encrypter = encrypt.Encrypter(
+      encrypt.AES(key, mode: encrypt.AESMode.cbc),
+    );
+    final decrypted = encrypter.decrypt(
+      encrypt.Encrypted.fromBase16(hexBody),
+      iv: iv,
+    );
 
     final json = jsonDecode(decrypted) as Map<String, dynamic>;
     final cfNative = json['cfNative'] as String?;
@@ -924,9 +952,7 @@ class ApiService {
       return {
         'url': streamUrl,
         'type': 'hls',
-        'headers': {
-          'Referer': 'https://animeav1.uns.bio/',
-        },
+        'headers': {'Referer': 'https://animeav1.uns.bio/'},
       };
     }
 
@@ -935,10 +961,10 @@ class ApiService {
 
   static Future<Map<String, dynamic>> _resolveVoe(String embedUrl) async {
     var targetUrl = embedUrl;
-    var resp = await _http.get(Uri.parse(targetUrl), headers: {
-      'User-Agent': _ua,
-      'Referer': 'https://animeav1.com/',
-    });
+    var resp = await _http.get(
+      Uri.parse(targetUrl),
+      headers: {'User-Agent': _ua, 'Referer': 'https://animeav1.com/'},
+    );
 
     var body = resp.body;
     for (var hop = 0; hop < 3; hop++) {
@@ -952,19 +978,23 @@ class ApiService {
         final next = redirMatch.group(1)!;
         if (next == targetUrl) break;
         targetUrl = next;
-        resp = await _http.get(Uri.parse(targetUrl), headers: {
-          'User-Agent': _ua,
-          'Referer': embedUrl,
-        });
+        resp = await _http.get(
+          Uri.parse(targetUrl),
+          headers: {'User-Agent': _ua, 'Referer': embedUrl},
+        );
         body = resp.body;
       } else {
         break;
       }
     }
 
-    final scriptMatch = RegExp(r'<script type="application/json">\s*\["([^"]+)"\]\s*</script>').firstMatch(body);
+    final scriptMatch = RegExp(
+      r'<script type="application/json">\s*\["([^"]+)"\]\s*</script>',
+    ).firstMatch(body);
     if (scriptMatch == null) {
-      final hlsMatch = RegExp(r"'(https://[^']*master\.m3u8[^']*)'").firstMatch(body);
+      final hlsMatch = RegExp(
+        r"'(https://[^']*master\.m3u8[^']*)'",
+      ).firstMatch(body);
       if (hlsMatch != null) {
         return {
           'url': hlsMatch.group(1)!,
@@ -1023,7 +1053,9 @@ class ApiService {
           final label = '${item['label'] ?? ''} ${file ?? ''}'.toLowerCase();
           final match = RegExp(r'(\d{3,4})p?').firstMatch(label);
           final q = match != null ? (int.tryParse(match.group(1)!) ?? 0) : 0;
-          if ((q > maxQ || fallbackMp4 == null) && file != null && file.isNotEmpty) {
+          if ((q > maxQ || fallbackMp4 == null) &&
+              file != null &&
+              file.isNotEmpty) {
             maxQ = q;
             fallbackMp4 = file;
           }
@@ -1037,9 +1069,7 @@ class ApiService {
       return {
         'url': streamUrl,
         'type': isHls ? 'hls' : 'mp4',
-        'headers': {
-          'Referer': targetUrl,
-        },
+        'headers': {'Referer': targetUrl},
       };
     }
 
@@ -1074,9 +1104,7 @@ class ApiService {
       final res = {
         'url': streamUrl,
         'type': 'hls',
-        'headers': {
-          'Referer': 'https://n1mwq.org/',
-        },
+        'headers': {'Referer': 'https://n1mwq.org/'},
       };
       _byseCache[embedUrl] = res;
       return res;
@@ -1092,15 +1120,22 @@ class ApiService {
         final code = embedUrl.contains('/e/')
             ? embedUrl.split('/e/').last.split('?').first.split('/').first
             : embedUrl.split('/').last.split('?').first;
-        final detailsUri = Uri.parse('https://byselapuix.com/api/videos/$code/embed/details');
-        final resp = await _http.get(detailsUri, headers: {
-          'User-Agent': _ua,
-          'Referer': embedUrl,
-          'Origin': 'https://byselapuix.com',
-          'X-Embed-Origin': 'animeav1.com',
-          'X-Embed-Referer': 'https://animeav1.com/',
-          'X-Embed-Parent': embedUrl,
-        }).timeout(const Duration(seconds: 4));
+        final detailsUri = Uri.parse(
+          'https://byselapuix.com/api/videos/$code/embed/details',
+        );
+        final resp = await _http
+            .get(
+              detailsUri,
+              headers: {
+                'User-Agent': _ua,
+                'Referer': embedUrl,
+                'Origin': 'https://byselapuix.com',
+                'X-Embed-Origin': 'animeav1.com',
+                'X-Embed-Referer': 'https://animeav1.com/',
+                'X-Embed-Parent': embedUrl,
+              },
+            )
+            .timeout(const Duration(seconds: 4));
         if (resp.statusCode == 200) {
           final data = jsonDecode(resp.body) as Map<String, dynamic>;
           final frame = data['embed_frame_url'] as String?;
@@ -1144,7 +1179,9 @@ class ApiService {
         NavigationDelegate(
           onPageFinished: (_) {
             pollTimer?.cancel();
-            pollTimer = Timer.periodic(const Duration(milliseconds: 350), (_) async {
+            pollTimer = Timer.periodic(const Duration(milliseconds: 350), (
+              _,
+            ) async {
               try {
                 await controller.runJavaScript(
                   '(() => { const b = document.querySelector("button"); if (b) b.click(); })()',
@@ -1229,7 +1266,9 @@ class ApiService {
 
     for (final c in candidates) {
       try {
-        final res = await Process.run(Platform.isWindows ? 'where' : 'which', [c]);
+        final res = await Process.run(Platform.isWindows ? 'where' : 'which', [
+          c,
+        ]);
         if (res.exitCode == 0) {
           chromePath = res.stdout.toString().trim().split('\n').first.trim();
           break;
@@ -1255,13 +1294,17 @@ class ApiService {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        final match = RegExp(r'DevTools listening on ws://127\.0\.0\.1:(\d+)/').firstMatch(line);
-        if (match != null && !portCompleter.isCompleted) {
-          portCompleter.complete(int.parse(match.group(1)!));
-        }
-      });
+            final match = RegExp(
+              r'DevTools listening on ws://127\.0\.0\.1:(\d+)/',
+            ).firstMatch(line);
+            if (match != null && !portCompleter.isCompleted) {
+              portCompleter.complete(int.parse(match.group(1)!));
+            }
+          });
 
-      final port = await portCompleter.future.timeout(const Duration(seconds: 10));
+      final port = await portCompleter.future.timeout(
+        const Duration(seconds: 10),
+      );
       final client = HttpClient();
 
       // 1. Poll for iframe target
@@ -1269,7 +1312,9 @@ class ApiService {
       final stopwatch = Stopwatch()..start();
       while (stopwatch.elapsedMilliseconds < 15000) {
         try {
-          final req = await client.getUrl(Uri.parse('http://127.0.0.1:$port/json'));
+          final req = await client.getUrl(
+            Uri.parse('http://127.0.0.1:$port/json'),
+          );
           final resp = await req.close();
           final body = await resp.transform(utf8.decoder).join();
           final targets = jsonDecode(body) as List;
@@ -1309,7 +1354,9 @@ class ApiService {
         final id = msgId++;
         final completer = Completer<dynamic>();
         pending[id] = completer;
-        ws.add(jsonEncode({'id': id, 'method': method, 'params': params ?? {}}));
+        ws.add(
+          jsonEncode({'id': id, 'method': method, 'params': params ?? {}}),
+        );
         return completer.future;
       }
 
@@ -1318,7 +1365,8 @@ class ApiService {
       while (stopwatch.elapsedMilliseconds < 10000) {
         try {
           final res = await send('Runtime.evaluate', {
-            'expression': '(() => { const b = document.querySelector("button"); if (b) { b.click(); return true; } return false; })()',
+            'expression':
+                '(() => { const b = document.querySelector("button"); if (b) { b.click(); return true; } return false; })()',
           });
           if (res != null && res['result']?['value'] == true) break;
         } catch (_) {}
@@ -1331,7 +1379,8 @@ class ApiService {
       while (stopwatch.elapsedMilliseconds < 15000) {
         try {
           final res = await send('Runtime.evaluate', {
-            'expression': '(() => { try { const list = window.jwplayer().getConfig().playlist[0].sources; if (!list || list.length === 0) return null; let best = list[0]; let maxQ = -1; for (const s of list) { if (!s || !s.file) continue; const text = ((s.label || "") + " " + s.file).toLowerCase(); const m = text.match(/(\\d{3,4})p?/); const q = m ? parseInt(m[1], 10) : 0; if (q > maxQ) { maxQ = q; best = s; } } return best && best.file ? best.file : null; } catch(e) { return null; } })()',
+            'expression':
+                '(() => { try { const list = window.jwplayer().getConfig().playlist[0].sources; if (!list || list.length === 0) return null; let best = list[0]; let maxQ = -1; for (const s of list) { if (!s || !s.file) continue; const text = ((s.label || "") + " " + s.file).toLowerCase(); const m = text.match(/(\\d{3,4})p?/); const q = m ? parseInt(m[1], 10) : 0; if (q > maxQ) { maxQ = q; best = s; } } return best && best.file ? best.file : null; } catch(e) { return null; } })()',
           });
           final val = res?['result']?['value'] as String?;
           if (val != null && val.isNotEmpty) {
@@ -1480,16 +1529,13 @@ class ApiService {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return {};
-      return decoded.map(
-        (k, v) => MapEntry('$k', '$v'),
-      );
+      return decoded.map((k, v) => MapEntry('$k', '$v'));
     } catch (_) {
       return {};
     }
   }
 
-  static String _encodeTombstones(Map<String, String> m) =>
-      jsonEncode(m);
+  static String _encodeTombstones(Map<String, String> m) => jsonEncode(m);
 
   static Future<List<FollowedAnime>> fetchFollowed() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
@@ -1507,7 +1553,12 @@ class ApiService {
       out.add(FollowedAnime.fromJson(j));
     }
     if (changed) await prefs.setStringList('followed', raw);
-    return out;
+    // Deduplica por anime_id conservando la entrada más reciente.
+    final unique = <int, FollowedAnime>{};
+    for (final f in out) {
+      unique.putIfAbsent(f.animeId, () => f);
+    }
+    return unique.values.toList();
   }
 
   static Future<bool> isFollowing(int animeId) async {

@@ -1,9 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shimmer/shimmer.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
-import '../widgets/anime_card.dart';
+import '../ui/tokens.dart';
+import '../ui/widgets/ambient_page.dart';
+import '../ui/widgets/empty_state.dart';
+import '../ui/widgets/glass_app_bar.dart';
+import '../ui/widgets/poster_card.dart';
+import '../ui/widgets/skeletons.dart';
+import '../widgets/tv_focusable.dart';
 import 'detail_page.dart';
 
 class CatalogGenre {
@@ -89,7 +94,8 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   int _refreshTick = 0;
 
   bool _filtersOrQueryChanged() {
-    final sameGenres = _lastFetchedGenres.length == _selectedGenres.length &&
+    final sameGenres =
+        _lastFetchedGenres.length == _selectedGenres.length &&
         _lastFetchedGenres.containsAll(_selectedGenres);
     return _lastFetchedQuery != _ctrl.text.trim() ||
         _lastFetchedStatus != _selectedStatus ||
@@ -176,10 +182,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
     try {
       final List<AnimeBasic> results;
       if (query.isNotEmpty) {
-        results = await ApiService.fetchCatalog(
-          search: query,
-          page: _page,
-        );
+        results = await ApiService.fetchCatalog(search: query, page: _page);
       } else {
         results = await ApiService.fetchCatalog(
           order: 'latest_released',
@@ -256,7 +259,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF110e1a),
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -272,8 +275,10 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(context).size.height * 0.8,
                 ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +292,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFFe8e4f0),
+                            color: AppColors.text,
                           ),
                         ),
                         if (activeCount > 0)
@@ -300,12 +305,12 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                             },
                             child: const Text(
                               'Limpiar',
-                              style: TextStyle(color: Color(0xFFef4444)),
+                              style: TextStyle(color: AppColors.danger),
                             ),
                           ),
                       ],
                     ),
-                    const Divider(color: Color(0xFF1e1832)),
+                    const Divider(color: AppColors.outline),
                     const SizedBox(height: 8),
 
                     Expanded(
@@ -316,7 +321,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF6d6488),
+                              color: AppColors.textMuted,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -342,7 +347,9 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                                 label: 'Completado',
                                 selected: tempStatus == 'finalizado',
                                 onSelected: () {
-                                  setModalState(() => tempStatus = 'finalizado');
+                                  setModalState(
+                                    () => tempStatus = 'finalizado',
+                                  );
                                 },
                               ),
                             ],
@@ -356,16 +363,18 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF6d6488),
+                                  color: AppColors.textMuted,
                                 ),
                               ),
                               if (tempGenres.isNotEmpty) ...[
                                 const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF8b5cf6),
+                                    color: AppColors.primary,
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
@@ -393,8 +402,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                                 },
                               ),
                               ...kCatalogGenres.map((g) {
-                                final isSelected =
-                                    tempGenres.contains(g.slug);
+                                final isSelected = tempGenres.contains(g.slug);
                                 return _buildChoiceChip(
                                   label: g.name,
                                   selected: isSelected,
@@ -420,7 +428,7 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8b5cf6),
+                          backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -443,7 +451,9 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
                               ? 'Aplicar ($activeCount filtros)'
                               : 'Aplicar filtros',
                           style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ),
@@ -457,35 +467,25 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
     );
   }
 
-  static Widget _buildChoiceChip({
+  Widget _buildChoiceChip({
     required String label,
     required bool selected,
     required VoidCallback onSelected,
   }) {
-    return InkWell(
-      onTap: onSelected,
-      borderRadius: BorderRadius.circular(8),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF8b5cf6) : const Color(0xFF191428),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF8b5cf6)
-                : const Color(0xFF2d2448),
-            width: 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-            color: selected ? Colors.white : const Color(0xFFb8b2cb),
-          ),
-        ),
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      selectedColor: AppColors.primary.withValues(alpha: 0.22),
+      checkmarkColor: AppColors.primaryBright,
+      side: BorderSide(
+        color: selected
+            ? AppColors.primary.withValues(alpha: 0.6)
+            : AppColors.outline,
+      ),
+      labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+        color: selected ? AppColors.primaryBright : AppColors.textSecondary,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
       ),
     );
   }
@@ -507,302 +507,336 @@ class _SearchPageState extends State<SearchPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final query = _ctrl.text.trim();
     final showingSearch = query.isNotEmpty;
-
     final activeFilterCount =
         (_selectedStatus != null ? 1 : 0) + _selectedGenres.length;
+    final showChips = !showingSearch && _hasActiveFilters;
+    final headerHeight = 60.0 + (showChips ? 40.0 : 0.0);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTap: () {
         if (_focusNode.hasFocus) _focusNode.unfocus();
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Catálogo'),
-        ),
-        resizeToAvoidBottomInset: false,
-        body: AnimatedPadding(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: Column(
-            children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _ctrl,
-                      focusNode: _focusNode,
-                      onSubmitted: (_) => _focusNode.unfocus(),
-                      style: const TextStyle(color: Color(0xFFe8e4f0)),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar anime...',
-                        hintStyle: const TextStyle(color: Color(0xFF6d6488)),
-                        filled: true,
-                        fillColor: const Color(0xFF110e1a),
-                        prefixIcon: const Icon(Icons.search,
-                            color: Color(0xFF6d6488)),
-                        suffixIcon: query.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.close,
-                                    color: Color(0xFF6d6488), size: 18),
-                                onPressed: () {
-                                  _ctrl.clear();
-                                  _focusNode.unfocus();
-                                },
-                              )
-                            : null,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: Color(0xFF1e1832)),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: Color(0xFF1e1832)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: Color(0xFF8b5cf6)),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: _showFilterModal,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      height: 48,
-                      width: 48,
-                      decoration: BoxDecoration(
-                        color: _hasActiveFilters
-                            ? const Color(0xFF8b5cf6)
-                            : const Color(0xFF110e1a),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: _hasActiveFilters
-                              ? const Color(0xFF8b5cf6)
-                              : const Color(0xFF1e1832),
-                        ),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Icon(
-                            Icons.tune_rounded,
-                            color: _hasActiveFilters
-                                ? Colors.white
-                                : const Color(0xFF6d6488),
-                            size: 22,
-                          ),
-                          if (_hasActiveFilters)
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  '$activeFilterCount',
-                                  style: const TextStyle(
-                                    color: Color(0xFF8b5cf6),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+      child: AmbientPage(
+        imageUrl: _items.isNotEmpty ? _items.first.poster : null,
+        opacity: 0.50,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          extendBodyBehindAppBar: true,
+          resizeToAvoidBottomInset: false,
+          appBar: GlassAppBar(
+            title: const Text('Catálogo'),
+            bottom: PreferredSize(
+              preferredSize: Size.fromHeight(headerHeight),
+              child: _buildSearchHeader(
+                query: query,
+                showChips: showChips,
+                activeFilterCount: activeFilterCount,
               ),
             ),
+          ),
+          body: AnimatedPadding(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: _buildResults(
+              showingSearch: showingSearch,
+              query: query,
+              topInset: GlassAppBar.inset(context) + headerHeight,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-            if (!showingSearch && _hasActiveFilters)
-              Container(
-                height: 38,
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  children: [
-                    if (_selectedStatus != null)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: InputChip(
-                          label: Text(_statusName(_selectedStatus!)),
-                          labelStyle: const TextStyle(
-                              fontSize: 12, color: Colors.white),
-                          backgroundColor:
-                              const Color(0xFF8b5cf6).withValues(alpha: 0.25),
-                          deleteIcon: const Icon(Icons.close,
-                              size: 14, color: Colors.white70),
-                          side: const BorderSide(color: Color(0xFF8b5cf6)),
-                          onDeleted: () {
-                            setState(() => _selectedStatus = null);
-                            _fetchPage(refresh: true);
-                          },
-                        ),
-                      ),
-                    ..._selectedGenres.map((slug) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: InputChip(
-                          label: Text(_genreName(slug)),
-                          labelStyle: const TextStyle(
-                              fontSize: 12, color: Colors.white),
-                          backgroundColor:
-                              const Color(0xFF8b5cf6).withValues(alpha: 0.25),
-                          deleteIcon: const Icon(Icons.close,
-                              size: 14, color: Colors.white70),
-                          side: const BorderSide(color: Color(0xFF8b5cf6)),
-                          onDeleted: () {
-                            setState(() => _selectedGenres.remove(slug));
-                            _fetchPage(refresh: true);
-                          },
-                        ),
-                      );
-                    }),
-                    TextButton(
-                      onPressed: _clearFilters,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'Limpiar todo',
-                        style:
-                            TextStyle(fontSize: 12, color: Color(0xFF6d6488)),
-                      ),
+  /// Buscador y chips activos: van dentro de la cabecera translúcida.
+  Widget _buildSearchHeader({
+    required String query,
+    required bool showChips,
+    required int activeFilterCount,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.md,
+            AppSpace.xs,
+            AppSpace.md,
+            AppSpace.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  focusNode: _focusNode,
+                  onSubmitted: (_) => _focusNode.unfocus(),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: AppColors.text),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar anime...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              _ctrl.clear();
+                              _focusNode.unfocus();
+                            },
+                          ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: AppSpace.lg,
+                      vertical: AppSpace.md,
                     ),
-                  ],
+                  ),
                 ),
               ),
+              const SizedBox(width: AppSpace.sm),
+              _buildFilterButton(activeFilterCount),
+            ],
+          ),
+        ),
+        if (showChips) _buildActiveChips(),
+      ],
+    );
+  }
 
-            Expanded(
-              child: _loading && _items.isEmpty
-                  ? const _CatalogShimmer()
-                  : _items.isEmpty
-                      ? Center(
-                          child: Text(
-                            showingSearch
-                                ? 'Sin resultados para "$query"'
-                                : 'No se encontraron animes',
-                            style: const TextStyle(color: Color(0xFF6d6488)),
+  Widget _buildFilterButton(int activeFilterCount) {
+    return TvFocusable(
+      onTap: _showFilterModal,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        height: 48,
+        width: 48,
+        decoration: BoxDecoration(
+          color: _hasActiveFilters
+              ? AppColors.primary
+              : AppColors.surface.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+            color: _hasActiveFilters
+                ? AppColors.primary
+                : AppColors.outlineStrong,
+          ),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(
+              Icons.tune_rounded,
+              color: _hasActiveFilters ? Colors.white : AppColors.textMuted,
+              size: 22,
+            ),
+            if (_hasActiveFilters)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '$activeFilterCount',
+                    style: const TextStyle(
+                      color: AppColors.primaryDeep,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveChips() {
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.md,
+          0,
+          AppSpace.md,
+          AppSpace.sm,
+        ),
+        children: [
+          if (_selectedStatus != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: InputChip(
+                label: Text(_statusName(_selectedStatus!)),
+                labelStyle: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.primaryBright,
+                ),
+                backgroundColor: AppColors.primary.withValues(alpha: 0.16),
+                deleteIcon: const Icon(
+                  Icons.close,
+                  size: 14,
+                  color: AppColors.primaryBright,
+                ),
+                side: BorderSide(
+                  color: AppColors.primary.withValues(alpha: 0.45),
+                ),
+                onDeleted: () {
+                  setState(() => _selectedStatus = null);
+                  _fetchPage(refresh: true);
+                },
+              ),
+            ),
+          ..._selectedGenres.map((slug) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: InputChip(
+                label: Text(_genreName(slug)),
+                labelStyle: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.primaryBright,
+                ),
+                backgroundColor: AppColors.primary.withValues(alpha: 0.16),
+                deleteIcon: const Icon(
+                  Icons.close,
+                  size: 14,
+                  color: AppColors.primaryBright,
+                ),
+                side: BorderSide(
+                  color: AppColors.primary.withValues(alpha: 0.45),
+                ),
+                onDeleted: () {
+                  setState(() => _selectedGenres.remove(slug));
+                  _fetchPage(refresh: true);
+                },
+              ),
+            );
+          }),
+          TextButton(
+            onPressed: _clearFilters,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Limpiar todo', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResults({
+    required bool showingSearch,
+    required String query,
+    required double topInset,
+  }) {
+    if (_loading && _items.isEmpty) {
+      return SingleChildScrollView(
+        padding: EdgeInsets.only(top: topInset),
+        child: const SkeletonPosterGrid(itemCount: 12),
+      );
+    }
+
+    if (_items.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.only(top: topInset),
+        child: EmptyState(
+          icon: Icons.search_off_rounded,
+          title: showingSearch
+              ? 'Sin resultados para "$query"'
+              : 'No se encontraron animes',
+          message: showingSearch
+              ? 'Prueba con otro nombre o quita los filtros.'
+              : 'Ajusta los filtros para ampliar el catálogo.',
+          actionLabel: _hasActiveFilters ? 'Limpiar filtros' : null,
+          onAction: _hasActiveFilters ? _clearFilters : null,
+        ),
+      );
+    }
+
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(_refreshTick),
+      duration: AppMotion.slow,
+      curve: AppMotion.curve,
+      tween: Tween(begin: 0, end: 1),
+      builder: (context, opacity, child) =>
+          Opacity(opacity: opacity, child: child),
+      child: Column(
+        children: [
+          if (_refreshing)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              color: AppColors.primary,
+              backgroundColor: AppColors.outline,
+            ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth > 900;
+                return RefreshIndicator(
+                  color: AppColors.primary,
+                  backgroundColor: AppColors.surface,
+                  onRefresh: () => _fetchPage(refresh: true),
+                  child: GridView.builder(
+                    controller: _scrollController,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpace.page,
+                      topInset + AppSpace.sm,
+                      AppSpace.page,
+                      AppLayout.bottomGutter,
+                    ),
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: wide
+                          ? AppLayout.posterExtentWide
+                          : AppLayout.posterExtent,
+                      childAspectRatio: AppLayout.posterAspect,
+                      crossAxisSpacing: AppSpace.md,
+                      mainAxisSpacing: AppSpace.lg,
+                    ),
+                    itemCount: _items.length + (_loadingMore ? 1 : 0),
+                    itemBuilder: (ctx, i) {
+                      if (i >= _items.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(AppSpace.lg),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                        )
-                      : TweenAnimationBuilder<double>(
-                          key: ValueKey(_refreshTick),
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeOut,
-                          tween: Tween(begin: 0, end: 1),
-                          builder: (context, opacity, child) =>
-                              Opacity(opacity: opacity, child: child),
-                          child: Column(
-                            children: [
-                              if (_refreshing)
-                                const LinearProgressIndicator(
-                                  minHeight: 2,
-                                  color: Color(0xFF8b5cf6),
-                                  backgroundColor: Color(0xFF1e1832),
-                                ),
-                              Expanded(
-                                child: RefreshIndicator(
-                                  color: const Color(0xFF8b5cf6),
-                                  onRefresh: () => _fetchPage(refresh: true),
-                                  child: GridView.builder(
-                                    controller: _scrollController,
-                                    keyboardDismissBehavior:
-                                        ScrollViewKeyboardDismissBehavior.onDrag,
-                                    padding: const EdgeInsets.all(12),
-                                    gridDelegate:
-                                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                                      maxCrossAxisExtent: 200,
-                                      childAspectRatio: 0.65,
-                                      crossAxisSpacing: 10,
-                                      mainAxisSpacing: 10,
-                                    ),
-                                    itemCount: _items.length +
-                                        (_loadingMore ? 1 : 0),
-                                    itemBuilder: (ctx, i) {
-                                      if (i >= _items.length) {
-                                        return const Center(
-                                          child: Padding(
-                                            padding: EdgeInsets.all(16),
-                                            child: CircularProgressIndicator(
-                                              color: Color(0xFF8b5cf6),
-                                              strokeWidth: 2,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                      return AnimeCard(
-                                        anime: _items[i],
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => DetailPage(
-                                                slug: _items[i].slug),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ],
+                        );
+                      }
+                      final anime = _items[i];
+                      return PosterCard(
+                        title: anime.title,
+                        imageUrl: anime.poster,
+                        subtitle: anime.category,
+                        badge: anime.latestEpisodeNumber != null
+                            ? 'Ep ${anime.latestEpisodeNumber}'
+                            : null,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DetailPage(slug: anime.slug),
                           ),
                         ),
+                      );
+                    },
+                  ),
+                );
+              },
             ),
-          ],
           ),
-        ),
+        ],
       ),
     );
   }
 }
-
-class _CatalogShimmer extends StatelessWidget {
-  const _CatalogShimmer();
-
-  @override
-  Widget build(BuildContext context) {
-    return Shimmer.fromColors(
-      baseColor: const Color(0xFF191428),
-      highlightColor: const Color(0xFF251d3a),
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 200,
-          childAspectRatio: 0.65,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-        ),
-        itemCount: 10,
-        itemBuilder: (_, __) => Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF191428),
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      ),
-    );
-  }
-}
-

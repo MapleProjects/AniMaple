@@ -5,12 +5,19 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../ui/tokens.dart';
+import '../widgets/tv_focusable.dart';
+import '../ui/widgets/empty_state.dart';
+import '../ui/widgets/glass_app_bar.dart';
 import 'detail_page.dart';
 import 'episode_page.dart';
 
 /// Vista de animes descargados localmente.
 class DownloadsPage extends StatefulWidget {
-  const DownloadsPage({super.key});
+  const DownloadsPage({super.key, this.embedded = false});
+
+  /// Cuando se inserta dentro de un scroll sliver ya posicionado.
+  final bool embedded;
 
   @override
   State<DownloadsPage> createState() => DownloadsPageState();
@@ -43,22 +50,29 @@ class DownloadsPageState extends State<DownloadsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF110e1a),
-        title: const Text('Eliminar descargas',
-            style: TextStyle(color: Color(0xFFe8e4f0))),
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Eliminar descargas',
+          style: TextStyle(color: AppColors.text),
+        ),
         content: Text(
-            '¿Eliminar las $eps descargas de "$title"? Se liberará su espacio.',
-            style: const TextStyle(color: Color(0xFFa99fc0))),
+          '¿Eliminar las $eps descargas de "$title"? Se liberará su espacio.',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child:
-                const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488))),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Eliminar', style: TextStyle(color: Color(0xFFef4444))),
+            child: const Text(
+              'Eliminar',
+              style: TextStyle(color: AppColors.danger),
+            ),
           ),
         ],
       ),
@@ -80,63 +94,95 @@ class DownloadsPageState extends State<DownloadsPage> {
   Widget build(BuildContext context) {
     final slugs = _dl.downloadedSlugs().toList()..sort();
     final progress = _dl.progress.value;
-    // Animes que solo están en cola (sin nada completo aún).
-    final queuedOnly = <String>{};
-    for (final key in progress.keys) {
-      final slug = key.split('#').first;
-      if (!_dl.downloadedSlugs().contains(slug)) queuedOnly.add(slug);
-    }
     final totalBytes = _dl.totalBytesAll();
 
     if (slugs.isEmpty && progress.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.download_for_offline_outlined,
-                size: 56, color: Colors.grey[700]),
-            SizedBox(height: 12),
-            Text('Sin descargas',
-                style: TextStyle(color: Colors.grey[600], fontSize: 15)),
-            SizedBox(height: 6),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 40),
-              child: Text(
-                'Descarga capítulos desde un anime para verlos sin conexión',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[700], fontSize: 12.5),
-              ),
+      return const EmptyState(
+        icon: Icons.download_for_offline_outlined,
+        title: 'Sin descargas',
+        message: 'Descarga capítulos desde un anime para verlos sin conexión.',
+      );
+    }
+
+    final storageInfo = totalBytes > 0
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.page,
+              AppSpace.sm,
+              AppSpace.page,
+              AppSpace.xs,
             ),
-          ],
-        ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.storage_rounded,
+                  size: 15,
+                  color: AppColors.textMuted,
+                ),
+                const SizedBox(width: AppSpace.sm),
+                Text(
+                  '${slugs.length} animes · ${_fmtBytes(totalBytes)} en uso',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          )
+        : const SizedBox.shrink();
+
+    if (widget.embedded) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          storageInfo,
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.page,
+              AppSpace.xs,
+              AppSpace.page,
+              AppLayout.bottomGutter,
+            ),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: AppLayout.posterExtent,
+              childAspectRatio: AppLayout.posterAspect,
+              crossAxisSpacing: AppSpace.md,
+              mainAxisSpacing: AppSpace.lg,
+            ),
+            itemCount: slugs.length,
+            itemBuilder: (ctx, i) => _animeCard(slugs[i]),
+          ),
+        ],
       );
     }
 
     return Column(
       children: [
-        if (totalBytes > 0)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Row(
-              children: [
-                Icon(Icons.storage_rounded, size: 15, color: Colors.grey[600]),
-                const SizedBox(width: 6),
-                Text('${slugs.length} animes · ${_fmtBytes(totalBytes)} en uso',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-              ],
-            ),
-          ),
+        SizedBox(height: GlassAppBar.contentInset(extra: 44)),
+        storageInfo,
         Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 200,
-              childAspectRatio: 0.6,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: slugs.length,
-            itemBuilder: (ctx, i) => _animeCard(slugs[i]),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth > 900;
+              return GridView.builder(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.page,
+                  AppSpace.sm,
+                  AppSpace.page,
+                  AppLayout.bottomGutter,
+                ),
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: wide
+                      ? AppLayout.posterExtentWide
+                      : AppLayout.posterExtent,
+                  childAspectRatio: AppLayout.posterAspect,
+                  crossAxisSpacing: AppSpace.md,
+                  mainAxisSpacing: AppSpace.lg,
+                ),
+                itemCount: slugs.length,
+                itemBuilder: (ctx, i) => _animeCard(slugs[i]),
+              );
+            },
           ),
         ),
       ],
@@ -152,70 +198,83 @@ class DownloadsPageState extends State<DownloadsPage> {
     final activeProgress = _activeProgressFor(slug);
 
     return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => OfflineAnimePage(slug: slug),
-      )),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OfflineAnimePage(slug: slug)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF110e1a),
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF1e1832)),
+                border: Border.all(color: AppColors.outline),
               ),
               clipBehavior: Clip.antiAlias,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   if (posterFile != null)
-                    Image.file(File(posterFile), fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _posterFallback())
+                    Image.file(
+                      File(posterFile),
+                      fit: BoxFit.cover,
+                      cacheWidth: 480,
+                      filterQuality: FilterQuality.medium,
+                      errorBuilder: (_, __, ___) => _posterFallback(),
+                    )
                   else
                     _posterFallback(),
                   Positioned(
-                    top: 6, left: 6,
+                    top: 6,
+                    left: 6,
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF22c55e).withValues(alpha: 0.92),
+                        color: AppColors.success.withValues(alpha: 0.92),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.download_done_rounded,
-                          color: Colors.white, size: 14),
+                      child: const Icon(
+                        Icons.download_done_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
                     ),
                   ),
                   Positioned(
-                    top: 4, right: 4,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: () =>
-                            _confirmDeleteAnime(slug, title as String, eps),
-                        child: Container(
-                           padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.55),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.delete_outline,
-                              color: Color(0xFFef4444), size: 15),
+                    top: 4,
+                    right: 4,
+                    child: TvFocusable(
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      onTap: () =>
+                          _confirmDeleteAnime(slug, title as String, eps),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.delete_outline,
+                          color: AppColors.danger,
+                          size: 15,
                         ),
                       ),
                     ),
                   ),
                   if (activeProgress != null)
                     Positioned(
-                      bottom: 8, left: 8, right: 8,
+                      bottom: 8,
+                      left: 8,
+                      right: 8,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(6),
                         child: LinearProgressIndicator(
                           value: activeProgress,
                           minHeight: 5,
                           backgroundColor: Colors.black54,
-                          color: const Color(0xFFf59e0b),
+                          color: AppColors.warning,
                         ),
                       ),
                     ),
@@ -224,17 +283,16 @@ class DownloadsPageState extends State<DownloadsPage> {
             ),
           ),
           const SizedBox(height: 6),
-          Text(title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFFe8e4f0))),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           const SizedBox(height: 2),
           Text(
             '$eps ${eps == 1 ? 'capítulo' : 'capítulos'} · ${_fmtBytes(bytes)}',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF6d6488)),
+            style: Theme.of(context).textTheme.labelSmall,
           ),
         ],
       ),
@@ -255,11 +313,15 @@ class DownloadsPageState extends State<DownloadsPage> {
   }
 
   Widget _posterFallback() => Container(
-        color: const Color(0xFF181328),
-        child: const Center(
-          child: Icon(Icons.movie_outlined, color: Color(0xFF3d3560), size: 42),
-        ),
-      );
+    color: AppColors.surfaceHigh,
+    child: const Center(
+      child: Icon(
+        Icons.movie_outlined,
+        color: AppColors.outlineStrong,
+        size: 42,
+      ),
+    ),
+  );
 }
 
 /// Vista local de un anime con capítulos descargados.
@@ -330,11 +392,11 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
     final eps = _dl.downloadedEpisodes(widget.slug).toList()..sort();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0a0812),
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: Text(title, style: const TextStyle(color: Color(0xFFe8e4f0))),
-        backgroundColor: const Color(0xFF0a0812),
-        iconTheme: const IconThemeData(color: Color(0xFFe8e4f0)),
+        title: Text(title, style: const TextStyle(color: AppColors.text)),
+        backgroundColor: AppColors.bg,
+        iconTheme: const IconThemeData(color: AppColors.text),
       ),
       body: CustomScrollView(
         slivers: [
@@ -347,30 +409,43 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                   if (posterFile != null)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(File(posterFile),
-                          width: 100, height: 150, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const SizedBox()),
+                      child: Image.file(
+                        File(posterFile),
+                        width: 100,
+                        height: 150,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox(),
+                      ),
                     ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF22c55e).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text('Offline',
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.success.withValues(
+                                  alpha: 0.15,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Offline',
                                 style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF22c55e))),
-                          ),
-                        ]),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.success,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         // Etiquetas idénticas al detail page online.
                         if (online != null) ...[
                           const SizedBox(height: 8),
@@ -378,21 +453,22 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                             spacing: 6,
                             runSpacing: 4,
                             children: [
-                              _labelChip(online.category,
-                                  const Color(0xFF8b5cf6)),
+                              _labelChip(online.category, AppColors.primary),
                               if (online.status.isNotEmpty &&
                                   online.status != 'unknown')
                                 _labelChip(
-                                    online.status,
-                                    online.status
-                                            .contains('Finalizado')
-                                        ? const Color(0xFF22c55e)
-                                        : const Color(0xFFf59e0b)),
-                              _labelChip('${online.episodesCount} eps',
-                                  const Color(0xFF3b82f6)),
-                              ...online.genres
-                                  .map((g) => _labelChip(
-                                      g.name, const Color(0xFF3b82f6))),
+                                  online.status,
+                                  online.status.contains('Finalizado')
+                                      ? AppColors.success
+                                      : AppColors.warning,
+                                ),
+                              _labelChip(
+                                '${online.episodesCount} eps',
+                                AppColors.info,
+                              ),
+                              ...online.genres.map(
+                                (g) => _labelChip(g.name, AppColors.info),
+                              ),
                             ],
                           ),
                         ],
@@ -400,32 +476,48 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                         Text(
                           '${eps.length} ${eps.length == 1 ? 'capítulo descargado' : 'capítulos descargados'}',
                           style: const TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700,
-                              color: Color(0xFFe8e4f0)),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           _dl.fmtBytesFor(widget.slug),
                           style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF6d6488)),
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
                         ),
                         if (online == null) ...[
                           const SizedBox(height: 6),
-                          const Text('Etiquetas al reconectar',
-                              style: TextStyle(
-                                  fontSize: 11.5, color: Color(0xFF4a4260))),
+                          const Text(
+                            'Etiquetas al reconectar',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.textDisabled,
+                            ),
+                          ),
                         ],
                         const SizedBox(height: 10),
                         TextButton.icon(
                           onPressed: () {
-                            Navigator.push(context, MaterialPageRoute(
-                              builder: (_) => DetailPage(slug: widget.slug),
-                            ));
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DetailPage(slug: widget.slug),
+                              ),
+                            );
                           },
-                          icon: const Icon(Icons.wifi_rounded, size: 17,
-                              color: Color(0xFFa78bfa)),
-                          label: const Text('Ver online / gestionar',
-                              style: TextStyle(color: Color(0xFFa78bfa))),
+                          icon: const Icon(
+                            Icons.wifi_rounded,
+                            size: 17,
+                            color: AppColors.primaryBright,
+                          ),
+                          label: const Text(
+                            'Ver online / gestionar',
+                            style: TextStyle(color: AppColors.primaryBright),
+                          ),
                         ),
                       ],
                     ),
@@ -438,18 +530,27 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Text(synopsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, color: Color(0xFFa99fc0), height: 1.5)),
+                child: Text(
+                  synopsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: AppColors.textSecondary,
+                    height: 1.5,
+                  ),
+                ),
               ),
             ),
           const SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text('Descargados',
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold,
-                      color: Color(0xFFe8e4f0))),
+              child: Text(
+                'Descargados',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.text,
+                ),
+              ),
             ),
           ),
           SliverPadding(
@@ -461,17 +562,13 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
               ),
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) {
-                  final ep = eps[i];
-                  final watched = _watched.contains(ep);
-                  final progress =
-                      _dl.progress.value['${widget.slug}#$ep'];
-                  final isQueued = _dl.isQueued(widget.slug, ep);
-                  return _epTile(ep, watched, progress, isQueued);
-                },
-                childCount: eps.length,
-              ),
+              delegate: SliverChildBuilderDelegate((ctx, i) {
+                final ep = eps[i];
+                final watched = _watched.contains(ep);
+                final progress = _dl.progress.value['${widget.slug}#$ep'];
+                final isQueued = _dl.isQueued(widget.slug, ep);
+                return _epTile(ep, watched, progress, isQueued);
+              }, childCount: eps.length),
             ),
           ),
         ],
@@ -487,9 +584,14 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
     );
   }
 
@@ -497,9 +599,9 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
     if (queued || (progress != null && progress < 1)) {
       return Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF110e1a),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFf59e0b), width: 2),
+          border: Border.all(color: AppColors.warning, width: 2),
         ),
         child: Center(
           child: CircularProgressIndicator(
@@ -507,12 +609,12 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
                 ? progress
                 : null,
             strokeWidth: 2.4,
-            color: const Color(0xFFf59e0b),
+            color: AppColors.warning,
           ),
         ),
       );
     }
-    return InkWell(
+    return TvFocusable(
       onTap: () async {
         ApiService.addHistory(
           (_meta?['anime_id'] as num?)?.toInt() ?? 0,
@@ -521,36 +623,46 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
           ep,
         );
         setState(() => _watched.add(ep));
-        await Navigator.push(context, MaterialPageRoute(
-          builder: (_) => EpisodePage(
-            animeSlug: widget.slug,
-            episodeNumber: ep,
-            animeTitle:
-                (_meta?['title'] as String?) ?? widget.slug,
-            offlineLibrary: true,
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EpisodePage(
+              animeSlug: widget.slug,
+              episodeNumber: ep,
+              animeTitle: (_meta?['title'] as String?) ?? widget.slug,
+              offlineLibrary: true,
+            ),
           ),
-        ));
+        );
         _loadWatched();
       },
       onLongPress: () async {
         final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            backgroundColor: const Color(0xFF110e1a),
-            title: const Text('Eliminar descarga',
-                style: TextStyle(color: Color(0xFFe8e4f0))),
-            content: Text('¿Eliminar el episodio $ep descargado?',
-                style: const TextStyle(color: Color(0xFFa99fc0))),
+            backgroundColor: AppColors.surface,
+            title: const Text(
+              'Eliminar descarga',
+              style: TextStyle(color: AppColors.text),
+            ),
+            content: Text(
+              '¿Eliminar el episodio $ep descargado?',
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar',
-                    style: TextStyle(color: Color(0xFF6d6488))),
+                child: const Text(
+                  'Cancelar',
+                  style: TextStyle(color: AppColors.textMuted),
+                ),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Eliminar',
-                    style: TextStyle(color: Color(0xFFef4444))),
+                child: const Text(
+                  'Eliminar',
+                  style: TextStyle(color: AppColors.danger),
+                ),
               ),
             ],
           ),
@@ -560,29 +672,31 @@ class _OfflineAnimePageState extends State<OfflineAnimePage> {
       borderRadius: BorderRadius.circular(8),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF110e1a),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: watched ? const Color(0xFF22c55e) : const Color(0xFF1e1832),
+            color: watched ? AppColors.success : AppColors.outline,
             width: watched ? 2 : 1,
           ),
         ),
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Text('$ep',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: watched
-                        ? const Color(0xFF22c55e)
-                        : const Color(0xFFe8e4f0))),
+            Text(
+              '$ep',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: watched ? AppColors.success : AppColors.text,
+              ),
+            ),
             Positioned(
-              bottom: 3, right: 3,
-              child: Icon(Icons.download_done_rounded,
-                  size: 13,
-                  color: watched
-                      ? const Color(0xFF22c55e)
-                      : const Color(0xFF4a4260)),
+              bottom: 3,
+              right: 3,
+              child: Icon(
+                Icons.download_done_rounded,
+                size: 13,
+                color: watched ? AppColors.success : AppColors.textDisabled,
+              ),
             ),
           ],
         ),

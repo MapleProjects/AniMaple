@@ -23,7 +23,11 @@ abstract class AppPlayer {
 
   bool get isDisposed;
 
-  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs});
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    int? startPositionMs,
+  });
   Future<void> play();
   Future<void> pause();
   Future<void> seekTo(int positionMs);
@@ -89,9 +93,15 @@ class MediaKitAppPlayer implements AppPlayer {
   static void _log(String msg) {
     try {
       final home = Platform.environment['HOME'] ?? '';
-      _logFile ??= File('$home/.local/share/com.mapleprojects.animaple/player.log');
+      _logFile ??= File(
+        '$home/.local/share/com.mapleprojects.animaple/player.log',
+      );
       _logFile!.parent.createSync(recursive: true);
-      _logFile!.writeAsStringSync('[${DateTime.now().toIso8601String()}] $msg\n', mode: FileMode.append, flush: true);
+      _logFile!.writeAsStringSync(
+        '[${DateTime.now().toIso8601String()}] $msg\n',
+        mode: FileMode.append,
+        flush: true,
+      );
     } catch (_) {}
   }
 
@@ -112,75 +122,104 @@ class MediaKitAppPlayer implements AppPlayer {
       ),
     );
 
-    _subscriptions.add(_player.stream.log.listen((event) {
-      if (event.level == 'warn' || event.level == 'error') {
-        _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
-      }
-    }));
+    _subscriptions.add(
+      _player.stream.log.listen((event) {
+        if (event.level == 'warn' || event.level == 'error') {
+          _log('[MPV][${event.prefix}][${event.level}] ${event.text}');
+        }
+      }),
+    );
 
-    _subscriptions.add(_player.stream.videoParams.listen((params) {
-      _log('[VIDEO_PARAMS] w=${params.w} h=${params.h} dw=${params.dw} dh=${params.dh} aspect=${params.aspect} pixelformat=${params.pixelformat}');
-    }));
+    _subscriptions.add(
+      _player.stream.videoParams.listen((params) {
+        _log(
+          '[VIDEO_PARAMS] w=${params.w} h=${params.h} dw=${params.dw} dh=${params.dh} aspect=${params.aspect} pixelformat=${params.pixelformat}',
+        );
+      }),
+    );
 
-    _subscriptions.add(_player.stream.width.listen((w) {
-      _log('[VIDEO_WIDTH] $w');
-    }));
+    _subscriptions.add(
+      _player.stream.width.listen((w) {
+        _log('[VIDEO_WIDTH] $w');
+      }),
+    );
 
-    _subscriptions.add(_player.stream.height.listen((h) {
-      _log('[VIDEO_HEIGHT] $h');
-    }));
+    _subscriptions.add(
+      _player.stream.height.listen((h) {
+        _log('[VIDEO_HEIGHT] $h');
+      }),
+    );
 
-    _subscriptions.add(_player.stream.playing.listen((playing) {
-      _log('[PLAYING] $playing');
-      if (!_disposed) _isPlaying.value = playing;
-    }));
+    _subscriptions.add(
+      _player.stream.playing.listen((playing) {
+        _log('[PLAYING] $playing');
+        if (!_disposed) _isPlaying.value = playing;
+      }),
+    );
 
-    _subscriptions.add(_player.stream.buffering.listen((buffering) {
-      _log('[BUFFERING] $buffering');
-      if (!_disposed) _isLoading.value = buffering;
-    }));
+    _subscriptions.add(
+      _player.stream.buffering.listen((buffering) {
+        _log('[BUFFERING] $buffering');
+        if (!_disposed) _isLoading.value = buffering;
+      }),
+    );
 
-    _subscriptions.add(_player.stream.position.listen((pos) {
-      if (_disposed) return;
-      final ms = pos.inMilliseconds;
-      // Durante un seek activo, mpv emite transitoriamente position = 0 mientras
-      // vacía los buffers del decodificador. Ignoramos 0 transitorio si acabamos de hacer seek.
-      if (ms == 0 && _lastSeekTime != null && DateTime.now().difference(_lastSeekTime!) < const Duration(milliseconds: 1200)) {
-        return;
-      }
-      _positionMs.value = ms;
-    }));
-
-    _subscriptions.add(_player.stream.duration.listen((dur) {
-      _log('[DURATION] ${dur.inMilliseconds} ms');
-      if (!_disposed) _durationMs.value = dur.inMilliseconds;
-    }));
-
-    _subscriptions.add(_player.stream.completed.listen((completed) {
-      _log('[COMPLETED] $completed');
-      if (!_disposed && completed) {
-        final dur = _durationMs.value;
-        final pos = _positionMs.value;
-        if (_lastSeekTime != null && DateTime.now().difference(_lastSeekTime!) < const Duration(seconds: 4)) {
-          debugPrint('MediaKit: completed ignorado inmediatamente tras seek');
-          _player.play();
+    _subscriptions.add(
+      _player.stream.position.listen((pos) {
+        if (_disposed) return;
+        final ms = pos.inMilliseconds;
+        // Durante un seek activo, mpv emite transitoriamente position = 0 mientras
+        // vacía los buffers del decodificador. Ignoramos 0 transitorio si acabamos de hacer seek.
+        if (ms == 0 &&
+            _lastSeekTime != null &&
+            DateTime.now().difference(_lastSeekTime!) <
+                const Duration(milliseconds: 1200)) {
           return;
         }
-        if (dur > 20000 && pos < (dur - 15000)) {
-          debugPrint('MediaKit: spurious completed/eof ignored at $pos ms / $dur ms');
-          _player.play();
-          return;
-        }
-        _finishedCount.value = _finishedCount.value + 1;
-      }
-    }));
+        _positionMs.value = ms;
+      }),
+    );
 
-    _subscriptions.add(_player.stream.error.listen((err) {
-      _log('[MPV_ERROR] $err');
-      if (!_disposed && err.isNotEmpty) {
-        _error.value = err;
-      }
-    }));
+    _subscriptions.add(
+      _player.stream.duration.listen((dur) {
+        _log('[DURATION] ${dur.inMilliseconds} ms');
+        if (!_disposed) _durationMs.value = dur.inMilliseconds;
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.completed.listen((completed) {
+        _log('[COMPLETED] $completed');
+        if (!_disposed && completed) {
+          final dur = _durationMs.value;
+          final pos = _positionMs.value;
+          if (_lastSeekTime != null &&
+              DateTime.now().difference(_lastSeekTime!) <
+                  const Duration(seconds: 4)) {
+            debugPrint('MediaKit: completed ignorado inmediatamente tras seek');
+            _player.play();
+            return;
+          }
+          if (dur > 20000 && pos < (dur - 15000)) {
+            debugPrint(
+              'MediaKit: spurious completed/eof ignored at $pos ms / $dur ms',
+            );
+            _player.play();
+            return;
+          }
+          _finishedCount.value = _finishedCount.value + 1;
+        }
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.error.listen((err) {
+        _log('[MPV_ERROR] $err');
+        if (!_disposed && err.isNotEmpty) {
+          _error.value = err;
+        }
+      }),
+    );
   }
 
   void _reset() {
@@ -219,17 +258,20 @@ class MediaKitAppPlayer implements AppPlayer {
   bool get isDisposed => _disposed;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    int? startPositionMs,
+  }) async {
     _disposed = false;
     _error.value = null;
     _isLoading.value = true;
 
-    final referer = headers?['Referer'] ??
+    final referer =
+        headers?['Referer'] ??
         (url.contains('zilla')
             ? 'https://player.zilla-networks.com/'
-            : (url.contains('mp4upload')
-                ? 'https://www.mp4upload.com/'
-                : ''));
+            : (url.contains('mp4upload') ? 'https://www.mp4upload.com/' : ''));
 
     final effectiveHeaders = <String, String>{
       'Sec-Fetch-Dest': 'empty',
@@ -239,7 +281,10 @@ class MediaKitAppPlayer implements AppPlayer {
       'Accept-Language': 'es-EC,es-419;q=0.9,es;q=0.8',
       'User-Agent': _defaultUserAgent,
       if (referer.isNotEmpty) 'Referer': referer,
-      if (referer.isNotEmpty) 'Origin': referer.endsWith('/') ? referer.substring(0, referer.length - 1) : referer,
+      if (referer.isNotEmpty)
+        'Origin': referer.endsWith('/')
+            ? referer.substring(0, referer.length - 1)
+            : referer,
       ...?headers,
     };
 
@@ -262,20 +307,34 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('cache-pause', 'no');
         await (platform as dynamic).setProperty('cache-pause-initial', 'no');
         await (platform as dynamic).setProperty('cache-secs', '120');
-        await (platform as dynamic).setProperty('demuxer-seekable-cache', 'auto');
+        await (platform as dynamic).setProperty(
+          'demuxer-seekable-cache',
+          'auto',
+        );
         await (platform as dynamic).setProperty('keep-open', 'yes');
         await (platform as dynamic).setProperty('hr-seek', 'default');
         await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
-        await (platform as dynamic).setProperty('demuxer-readahead-secs', '120');
-        await (platform as dynamic).setProperty('demuxer-max-bytes', '67108864'); // 64 MB RAM
-        await (platform as dynamic).setProperty('demuxer-max-back-bytes', '33554432'); // 32 MB RAM
+        await (platform as dynamic).setProperty(
+          'demuxer-readahead-secs',
+          '120',
+        );
+        await (platform as dynamic).setProperty(
+          'demuxer-max-bytes',
+          '67108864',
+        ); // 64 MB RAM
+        await (platform as dynamic).setProperty(
+          'demuxer-max-back-bytes',
+          '33554432',
+        ); // 32 MB RAM
         await (platform as dynamic).setProperty('network-timeout', '30');
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');
     }
 
-    _log('MediaKitAppPlayer.open: url=$url, startPositionMs=$startPositionMs, headers=$effectiveHeaders');
+    _log(
+      'MediaKitAppPlayer.open: url=$url, startPositionMs=$startPositionMs, headers=$effectiveHeaders',
+    );
     final media = mk.Media(
       url,
       httpHeaders: effectiveHeaders,
@@ -369,7 +428,9 @@ class MediaKitAppPlayer implements AppPlayer {
 
   @override
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    _log('MediaKitAppPlayer.buildView: fit=$fit, textureId=${_videoController.id.value}, rect=${_videoController.rect.value}');
+    _log(
+      'MediaKitAppPlayer.buildView: fit=$fit, textureId=${_videoController.id.value}, rect=${_videoController.rect.value}',
+    );
     return mkv.Video(
       key: _videoWidgetKey,
       controller: _videoController,
@@ -417,7 +478,8 @@ class VideoViewAppPlayer implements AppPlayer {
   void _onState() {
     if (_disposed) return;
     _isPlaying.value =
-        _vvController.playbackState.value == vv.VideoControllerPlaybackState.playing;
+        _vvController.playbackState.value ==
+        vv.VideoControllerPlaybackState.playing;
   }
 
   void _onLoading() {
@@ -463,15 +525,18 @@ class VideoViewAppPlayer implements AppPlayer {
   bool get isDisposed => _disposed;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, int? startPositionMs}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    int? startPositionMs,
+  }) async {
     if (_disposed) return;
     _error.value = null;
-    final referer = headers?['Referer'] ??
+    final referer =
+        headers?['Referer'] ??
         (url.contains('zilla')
             ? 'https://player.zilla-networks.com/'
-            : (url.contains('mp4upload')
-                ? 'https://www.mp4upload.com/'
-                : ''));
+            : (url.contains('mp4upload') ? 'https://www.mp4upload.com/' : ''));
     final effectiveHeaders = <String, String>{
       if (referer.isNotEmpty) 'Referer': referer,
       ...?headers,
@@ -548,4 +613,3 @@ class VideoViewAppPlayer implements AppPlayer {
     );
   }
 }
-

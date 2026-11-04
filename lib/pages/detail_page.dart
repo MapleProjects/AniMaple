@@ -1,10 +1,16 @@
-import 'dart:ui';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
 import '../services/tv_service.dart';
+import '../ui/tokens.dart';
+import '../ui/widgets/ambient_backdrop.dart';
+import '../ui/widgets/cover_palette.dart';
+import '../ui/widgets/pill_badge.dart';
+import '../ui/widgets/section_header.dart';
+import '../ui/widgets/skeletons.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/error_dialog.dart';
 import '../widgets/tv_focusable.dart';
@@ -20,6 +26,7 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   AnimeDetail? _anime;
+  CoverPalette _palette = CoverPalette.fallback;
   bool _loading = true;
   bool _followed = false;
   Set<int> _watchedEpisodes = {};
@@ -46,61 +53,146 @@ class _DetailPageState extends State<DetailPage> {
   Future<void> _load() async {
     const maxRetries = 10;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
-    try {
-      debugPrint('DETAIL LOAD attempt=$attempt slug=${widget.slug}');
-      final anime = await ApiService.fetchAnimeDetail(widget.slug);
-      debugPrint('DETAIL LOAD fetchAnimeDetail OK: ${anime.title}');
-      final followed = await ApiService.fetchFollowed();
-      debugPrint('DETAIL LOAD fetchFollowed OK: ${followed.length} entries');
-      final history = await ApiService.fetchHistory();
-      debugPrint('DETAIL LOAD fetchHistory OK: ${history.length} entries');
-      final animeHistory = history
-          .where((h) => h.animeSlug == widget.slug)
-          .toList();
-      final watched = animeHistory.map((h) => h.episodeNumber).toSet();
-      int? lastWatched;
-      if (animeHistory.isNotEmpty) {
-        animeHistory.sort((a, b) {
-          final da = DateTime.tryParse(a.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final db = DateTime.tryParse(b.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return db.compareTo(da);
-        });
-        lastWatched = animeHistory.first.episodeNumber;
+      try {
+        debugPrint('DETAIL LOAD attempt=$attempt slug=${widget.slug}');
+        final anime = await ApiService.fetchAnimeDetail(widget.slug);
+        debugPrint('DETAIL LOAD fetchAnimeDetail OK: ${anime.title}');
+        final followed = await ApiService.fetchFollowed();
+        debugPrint('DETAIL LOAD fetchFollowed OK: ${followed.length} entries');
+        final history = await ApiService.fetchHistory();
+        debugPrint('DETAIL LOAD fetchHistory OK: ${history.length} entries');
+        final animeHistory = history
+            .where((h) => h.animeSlug == widget.slug)
+            .toList();
+        final watched = animeHistory.map((h) => h.episodeNumber).toSet();
+        int? lastWatched;
+        if (animeHistory.isNotEmpty) {
+          animeHistory.sort((a, b) {
+            final da =
+                DateTime.tryParse(a.watchedAt) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final db =
+                DateTime.tryParse(b.watchedAt) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            return db.compareTo(da);
+          });
+          lastWatched = animeHistory.first.episodeNumber;
+        }
+        if (mounted) {
+          setState(() {
+            _anime = anime;
+            _followed = followed.any((f) => f.animeId == anime.id);
+            _watchedEpisodes = watched;
+            _lastWatchedEpisode = lastWatched;
+            _loading = false;
+          });
+          // Paleta para el fundido del banner; no bloquea la carga.
+          CoverPaletteStore.of(anime.poster).then((p) {
+            if (mounted) setState(() => _palette = p);
+          });
+        }
+        return;
+      } catch (e, st) {
+        debugPrint(
+          'DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e',
+        );
+        debugPrint('DETAIL STACKTRACE: $st');
+        if (attempt == 0 && mounted && !isConnectivityError(e)) {
+          showErrorSheet(context, e, st, slug: widget.slug);
+        }
+        await Future.delayed(const Duration(seconds: 3));
       }
-      if (mounted) {
+    }
+    if (mounted) {
       setState(() {
-        _anime = anime;
-        _followed = followed.any((f) => f.animeId == anime.id);
-        _watchedEpisodes = watched;
-        _lastWatchedEpisode = lastWatched;
         _loading = false;
       });
-      }
-      return;
-    } catch (e, st) {
-      debugPrint('DETAIL RETRY attempt=$attempt slug=${widget.slug} ERROR: $e');
-      debugPrint('DETAIL STACKTRACE: $st');
-      if (attempt == 0 &&
-          mounted &&
-          !isConnectivityError(e)) {
-        showErrorSheet(context, e, st, slug: widget.slug);
-      }
-      await Future.delayed(const Duration(seconds: 3));
     }
-    }
-    if (mounted) setState(() { _loading = false; });
   }
 
   Future<void> _toggleFollow() async {
     if (_anime == null) return;
-    final result = await ApiService.toggleFollow(_anime!.id, _anime!.title, _anime!.slug);
-    setState(() => _followed = result);
+    final wasFollowing = _followed;
+    // Actualización optimista: el botón responde al instante.
+    setState(() => _followed = !wasFollowing);
+    try {
+      final result = await ApiService.toggleFollow(
+        _anime!.id,
+        _anime!.title,
+        _anime!.slug,
+      );
+      if (!mounted) return;
+      setState(() => _followed = result);
+    } catch (_) {
+      if (mounted) setState(() => _followed = wasFollowing);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))));
+      return Scaffold(
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpace.page),
+            child: SkeletonScope(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SkeletonBox(
+                        width: 104,
+                        height: 156,
+                        radius: AppRadius.sm,
+                      ),
+                      const SizedBox(width: AppSpace.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            SkeletonBox(height: 22, radius: AppRadius.xs),
+                            SizedBox(height: AppSpace.sm),
+                            SkeletonBox(width: 140, height: 12),
+                            SizedBox(height: AppSpace.lg),
+                            SkeletonBox(height: 12),
+                            SizedBox(height: AppSpace.sm),
+                            SkeletonBox(height: 12),
+                            SizedBox(height: AppSpace.sm),
+                            SkeletonBox(width: 200, height: 12),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpace.xl),
+                  const SkeletonBox(
+                    width: 150,
+                    height: 18,
+                    radius: AppRadius.xs,
+                  ),
+                  const SizedBox(height: AppSpace.md),
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 72,
+                          childAspectRatio: 1,
+                          crossAxisSpacing: AppSpace.sm,
+                          mainAxisSpacing: AppSpace.sm,
+                        ),
+                    itemCount: 12,
+                    itemBuilder: (_, __) =>
+                        const SkeletonBox(radius: AppRadius.sm),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
     }
     final anime = _anime;
     if (anime == null) {
@@ -110,17 +202,42 @@ class _DetailPageState extends State<DetailPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Color(0xFFef4444), size: 48),
+              const Icon(
+                Icons.error_outline,
+                color: AppColors.danger,
+                size: 48,
+              ),
               const SizedBox(height: 16),
-              const Text('No se pudo cargar el anime', style: TextStyle(color: Color(0xFFe8e4f0), fontSize: 16, fontWeight: FontWeight.w600)),
+              const Text(
+                'No se pudo cargar el anime',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text('Slug: ${widget.slug}', style: const TextStyle(color: Color(0xFF6d6488), fontSize: 12)),
+              Text(
+                'Slug: ${widget.slug}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
               const SizedBox(height: 20),
               ElevatedButton.icon(
-                onPressed: () { setState(() { _loading = true; }); _load(); },
+                onPressed: () {
+                  setState(() {
+                    _loading = true;
+                  });
+                  _load();
+                },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Reintentar'),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8b5cf6), foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
               ),
             ],
           ),
@@ -131,78 +248,74 @@ class _DetailPageState extends State<DetailPage> {
     final isWide = TvService.isTvMode || MediaQuery.sizeOf(context).width > 760;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0a0812),
+      backgroundColor: AppColors.bg,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Fondo ambiental decorativo: póster desenfocado como base garantizada
-          if (anime.poster != null)
-            Opacity(
-              opacity: 0.18,
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 45, sigmaY: 45),
-                child: Image.network(
-                  anime.poster!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
-                ),
-              ),
-            ),
-          // Capa de cabecera si existe y carga sin errores
-          if (anime.backdrop != null)
-            Opacity(
-              opacity: 0.22,
-              child: Image.network(
-                anime.backdrop!,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(),
-              ),
-            ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x990a0812),
-                  Color(0xCC0a0812),
-                  Color(0xFF0a0812),
-                ],
-              ),
-            ),
+          // Fondo ambiental: portada decodificada a baja resolución, sin blur GPU.
+          AmbientBackdrop(
+            imageUrl: anime.backdrop ?? anime.poster,
+            fallbackUrl: anime.poster,
+            opacity: 0.85,
           ),
           CustomScrollView(
             slivers: [
               if (!isWide && (anime.backdrop != null || anime.poster != null))
                 SliverAppBar(
-                  expandedHeight: 220,
+                  expandedHeight: 300,
                   pinned: true,
-                  backgroundColor: const Color(0xFF0a0812),
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
                   flexibleSpace: FlexibleSpaceBar(
+                    collapseMode: CollapseMode.parallax,
                     background: Stack(
                       fit: StackFit.expand,
                       children: [
-                        if (anime.poster != null)
-                          ImageFiltered(
-                            imageFilter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-                            child: Image.network(
-                              anime.poster!,
+                        CachedNetworkImage(
+                          imageUrl: (anime.backdrop ?? anime.poster)!,
+                          fit: BoxFit.cover,
+                          memCacheWidth: 1080,
+                          filterQuality: FilterQuality.medium,
+                          fadeInDuration: AppMotion.slow,
+                          placeholder: (_, __) =>
+                              const ColoredBox(color: AppColors.surfaceHigh),
+                          errorWidget: (_, __, ___) {
+                            final poster = anime.poster;
+                            if (poster == null || poster == anime.backdrop) {
+                              return const ColoredBox(
+                                color: AppColors.surfaceHigh,
+                              );
+                            }
+                            return CachedNetworkImage(
+                              imageUrl: poster,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const SizedBox(),
-                            ),
-                          ),
-                        if (anime.backdrop != null)
-                          Image.network(
-                            anime.backdrop!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const SizedBox(),
-                          ),
-                        const DecoratedBox(
+                              memCacheWidth: 1080,
+                              filterQuality: FilterQuality.medium,
+                              placeholder: (_, __) => const ColoredBox(
+                                color: AppColors.surfaceHigh,
+                              ),
+                              errorWidget: (_, __, ___) => const ColoredBox(
+                                color: AppColors.surfaceHigh,
+                              ),
+                            );
+                          },
+                        ),
+                        // Fundido hacia el color ambiental: evita el corte recto
+                        // entre el banner y el cuerpo sin usar ShaderMask.
+                        DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Color(0xFF0a0812)],
+                              colors: [
+                                AppColors.bg.withValues(alpha: 0.50),
+                                AppColors.bg.withValues(alpha: 0.0),
+                                AppColors.bg.withValues(alpha: 0.0),
+                                _seamColor,
+                              ],
+                              stops: const [0.0, 0.16, 0.42, 1.0],
                             ),
                           ),
                         ),
@@ -215,7 +328,7 @@ class _DetailPageState extends State<DetailPage> {
                   pinned: false,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
-                  leading: const BackButton(color: Color(0xFFe8e4f0)),
+                  leading: const BackButton(color: AppColors.text),
                 ),
               SliverToBoxAdapter(
                 child: Padding(
@@ -229,20 +342,14 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    left: isWide ? 28 : 16,
-                    right: isWide ? 28 : 16,
-                    top: 12,
-                    bottom: 8,
-                  ),
-                  child: Text(
-                    'Episodios (${anime.episodesCount})',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFe8e4f0),
-                    ),
+                child: SectionHeader(
+                  title: 'Episodios',
+                  kicker: '${anime.episodesCount} capítulos',
+                  padding: EdgeInsets.fromLTRB(
+                    isWide ? AppSpace.xxl : AppSpace.page,
+                    AppSpace.lg,
+                    isWide ? AppSpace.xxl : AppSpace.page,
+                    AppSpace.sm,
                   ),
                 ),
               ),
@@ -255,83 +362,108 @@ class _DetailPageState extends State<DetailPage> {
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
                   ),
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) {
-                      final ep = anime.episodes[i];
-                      final isWatched = _watchedEpisodes.contains(ep.number);
-                      final isDownloaded = _dl.isDownloaded(anime.slug, ep.number);
-                      final isQueued = _dl.isQueued(anime.slug, ep.number);
-                      final epProgress =
-                          _dl.progress.value['${anime.slug}#${ep.number}'];
-                      return TvFocusable(
-                        onTap: () => _playEpisode(anime, ep.number),
-                        borderRadius: BorderRadius.circular(8),
-                        scaleOnFocus: 1.10,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF110e1a),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isQueued
-                                  ? const Color(0xFFf59e0b)
-                                  : isDownloaded
-                                      ? const Color(0xFF22c55e)
-                                      : isWatched
-                                          ? const Color(0xFF8b5cf6)
-                                          : const Color(0xFF1e1832),
-                              width: isWatched || isDownloaded || isQueued ? 2 : 1,
-                            ),
-                          ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Text('${ep.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isDownloaded ? const Color(0xFF22c55e) : const Color(0xFFe8e4f0))),
-                              if (isWatched && !isDownloaded)
-                                Positioned(
-                                  top: 2, right: 2,
-                                  child: Container(
-                                    width: 8, height: 8,
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF8b5cf6),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                ),
-                              if (isWatched && isDownloaded)
-                                Positioned(
-                                  top: 2, right: 2,
-                                  child: Container(width: 8, height: 8,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF8b5cf6),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: const Color(0xFF0a0812), width: 1.5),
-                                    ),
-                                  ),
-                                ),
-                              if (isDownloaded && !isQueued)
-                                Positioned(
-                                  bottom: 2, left: 2,
-                                  child: Icon(Icons.download_done_rounded,
-                                      size: 11, color: const Color(0xFF22c55e)),
-                                ),
-                              if (isQueued)
-                                Padding(
-                                  padding: const EdgeInsets.all(7),
-                                  child: CircularProgressIndicator(
-                                    value: (epProgress != null && epProgress > 0 && epProgress <= 1)
-                                        ? epProgress
-                                        : null,
-                                    strokeWidth: 2,
-                                    color: const Color(0xFFf59e0b),
-                                  ),
-                                ),
-                            ],
+                  delegate: SliverChildBuilderDelegate((ctx, i) {
+                    final ep = anime.episodes[i];
+                    final isWatched = _watchedEpisodes.contains(ep.number);
+                    final isDownloaded = _dl.isDownloaded(
+                      anime.slug,
+                      ep.number,
+                    );
+                    final isQueued = _dl.isQueued(anime.slug, ep.number);
+                    final epProgress =
+                        _dl.progress.value['${anime.slug}#${ep.number}'];
+                    return TvFocusable(
+                      onTap: () => _playEpisode(anime, ep.number),
+                      borderRadius: BorderRadius.circular(8),
+                      scaleOnFocus: 1.10,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isQueued
+                                ? AppColors.warning
+                                : isDownloaded
+                                ? AppColors.success
+                                : isWatched
+                                ? AppColors.primary
+                                : AppColors.outline,
+                            width: isWatched || isDownloaded || isQueued
+                                ? 2
+                                : 1,
                           ),
                         ),
-                      );
-                    },
-                    childCount: anime.episodes.length,
-                  ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Text(
+                              '${ep.number}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: isDownloaded
+                                    ? AppColors.success
+                                    : AppColors.text,
+                              ),
+                            ),
+                            if (isWatched && !isDownloaded)
+                              Positioned(
+                                top: 2,
+                                right: 2,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            if (isWatched && isDownloaded)
+                              Positioned(
+                                top: 2,
+                                right: 2,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppColors.bg,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (isDownloaded && !isQueued)
+                              Positioned(
+                                bottom: 2,
+                                left: 2,
+                                child: Icon(
+                                  Icons.download_done_rounded,
+                                  size: 11,
+                                  color: AppColors.success,
+                                ),
+                              ),
+                            if (isQueued)
+                              Padding(
+                                padding: const EdgeInsets.all(7),
+                                child: CircularProgressIndicator(
+                                  value:
+                                      (epProgress != null &&
+                                          epProgress > 0 &&
+                                          epProgress <= 1)
+                                      ? epProgress
+                                      : null,
+                                  strokeWidth: 2,
+                                  color: AppColors.warning,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }, childCount: anime.episodes.length),
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 80)),
@@ -344,7 +476,8 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildWideHeader(AnimeDetail anime) {
     final hasEpisodes = anime.episodes.isNotEmpty;
-    final hasHistory = _lastWatchedEpisode != null &&
+    final hasHistory =
+        _lastWatchedEpisode != null &&
         anime.episodes.any((e) => e.number == _lastWatchedEpisode);
     final targetEpisode = hasHistory
         ? _lastWatchedEpisode!
@@ -361,15 +494,19 @@ class _DetailPageState extends State<DetailPage> {
             borderRadius: BorderRadius.circular(12),
             child: Container(
               decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF2a2240)),
+                border: Border.all(color: AppColors.surfaceHighest),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Image.network(
-                anime.poster!,
+              child: CachedNetworkImage(
+                imageUrl: anime.poster!,
                 width: 150,
                 height: 225,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(),
+                memCacheWidth: 450,
+                fadeInDuration: AppMotion.slow,
+                placeholder: (_, __) =>
+                    const ColoredBox(color: AppColors.surfaceHigh),
+                errorWidget: (_, __, ___) => const SizedBox(),
               ),
             ),
           ),
@@ -383,7 +520,7 @@ class _DetailPageState extends State<DetailPage> {
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
-                  color: Color(0xFFe8e4f0),
+                  color: AppColors.text,
                 ),
               ),
               if (anime.aka != null) ...[
@@ -392,7 +529,7 @@ class _DetailPageState extends State<DetailPage> {
                   anime.aka!,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF8b82a3),
+                    color: AppColors.textMuted,
                   ),
                 ),
               ],
@@ -401,15 +538,15 @@ class _DetailPageState extends State<DetailPage> {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  _chip(anime.category, const Color(0xFF8b5cf6)),
+                  _chip(anime.category, AppColors.primary),
                   _chip(
                     anime.status,
                     anime.status.contains('Finalizado')
-                        ? const Color(0xFF22c55e)
-                        : const Color(0xFFf59e0b),
+                        ? AppColors.success
+                        : AppColors.warning,
                   ),
-                  _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
-                  ...anime.genres.map((g) => _chip(g.name, const Color(0xFF6366f1))),
+                  _chip('${anime.episodesCount} eps', AppColors.info),
+                  ...anime.genres.map((g) => _chip(g.name, AppColors.primary)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -419,7 +556,7 @@ class _DetailPageState extends State<DetailPage> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 13.5,
-                  color: Color(0xFFb4abc9),
+                  color: AppColors.textSecondary,
                   height: 1.45,
                 ),
               ),
@@ -440,7 +577,7 @@ class _DetailPageState extends State<DetailPage> {
                         vertical: 11,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF8b5cf6),
+                        color: AppColors.primary,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -474,12 +611,12 @@ class _DetailPageState extends State<DetailPage> {
                         vertical: 11,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF131022),
+                        color: AppColors.surface,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: _followed
-                              ? const Color(0xFFef4444)
-                              : const Color(0xFF2a2240),
+                              ? AppColors.danger
+                              : AppColors.surfaceHighest,
                         ),
                       ),
                       child: Row(
@@ -490,8 +627,8 @@ class _DetailPageState extends State<DetailPage> {
                                 ? Icons.favorite_rounded
                                 : Icons.favorite_border_rounded,
                             color: _followed
-                                ? const Color(0xFFef4444)
-                                : const Color(0xFFa78bfa),
+                                ? AppColors.danger
+                                : AppColors.primaryBright,
                             size: 18,
                           ),
                           const SizedBox(width: 6),
@@ -499,8 +636,8 @@ class _DetailPageState extends State<DetailPage> {
                             _followed ? 'Siguiendo' : 'Mi lista',
                             style: TextStyle(
                               color: _followed
-                                  ? const Color(0xFFef4444)
-                                  : const Color(0xFFe8e4f0),
+                                  ? AppColors.danger
+                                  : AppColors.text,
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                             ),
@@ -519,23 +656,23 @@ class _DetailPageState extends State<DetailPage> {
                         vertical: 11,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF131022),
+                        color: AppColors.surface,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF2a2240)),
+                        border: Border.all(color: AppColors.surfaceHighest),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(
                             Icons.download_rounded,
-                            color: Color(0xFFa78bfa),
+                            color: AppColors.primaryBright,
                             size: 18,
                           ),
                           const SizedBox(width: 6),
                           Text(
                             _downloadLabel(anime.slug),
                             style: const TextStyle(
-                              color: Color(0xFFa78bfa),
+                              color: AppColors.primaryBright,
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                             ),
@@ -555,7 +692,8 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _buildMobileHeader(AnimeDetail anime) {
     final hasEpisodes = anime.episodes.isNotEmpty;
-    final hasHistory = _lastWatchedEpisode != null &&
+    final hasHistory =
+        _lastWatchedEpisode != null &&
         anime.episodes.any((e) => e.number == _lastWatchedEpisode);
     final targetEpisode = hasHistory
         ? _lastWatchedEpisode!
@@ -572,13 +710,17 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             if (anime.poster != null)
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  anime.poster!,
-                  width: 100,
-                  height: 150,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: CachedNetworkImage(
+                  imageUrl: anime.poster!,
+                  width: 104,
+                  height: 156,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
+                  memCacheWidth: 312,
+                  fadeInDuration: AppMotion.slow,
+                  placeholder: (_, __) =>
+                      const ColoredBox(color: AppColors.surfaceHigh),
+                  errorWidget: (_, __, ___) => const SizedBox(),
                 ),
               ),
             const SizedBox(width: 12),
@@ -591,7 +733,7 @@ class _DetailPageState extends State<DetailPage> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w900,
-                      color: Color(0xFFe8e4f0),
+                      color: AppColors.text,
                     ),
                   ),
                   if (anime.aka != null) ...[
@@ -600,7 +742,7 @@ class _DetailPageState extends State<DetailPage> {
                       anime.aka!,
                       style: const TextStyle(
                         fontSize: 13,
-                        color: Color(0xFF6d6488),
+                        color: AppColors.textMuted,
                       ),
                     ),
                   ],
@@ -609,14 +751,14 @@ class _DetailPageState extends State<DetailPage> {
                     spacing: 6,
                     runSpacing: 4,
                     children: [
-                      _chip(anime.category, const Color(0xFF8b5cf6)),
+                      _chip(anime.category, AppColors.primary),
                       _chip(
                         anime.status,
                         anime.status.contains('Finalizado')
-                            ? const Color(0xFF22c55e)
-                            : const Color(0xFFf59e0b),
+                            ? AppColors.success
+                            : AppColors.warning,
                       ),
-                      _chip('${anime.episodesCount} eps', const Color(0xFF3b82f6)),
+                      _chip('${anime.episodesCount} eps', AppColors.info),
                     ],
                   ),
                 ],
@@ -637,7 +779,7 @@ class _DetailPageState extends State<DetailPage> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8b5cf6),
+                    color: AppColors.primary,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -663,13 +805,16 @@ class _DetailPageState extends State<DetailPage> {
               borderRadius: BorderRadius.circular(8),
               scaleOnFocus: 1.05,
               child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 16,
+                ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF131022),
+                  color: AppColors.surface,
                   border: Border.all(
                     color: _followed
-                        ? const Color(0xFFef4444)
-                        : const Color(0xFF2a2240),
+                        ? AppColors.danger
+                        : AppColors.surfaceHighest,
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -680,17 +825,15 @@ class _DetailPageState extends State<DetailPage> {
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
                       color: _followed
-                          ? const Color(0xFFef4444)
-                          : const Color(0xFFa78bfa),
+                          ? AppColors.danger
+                          : AppColors.primaryBright,
                       size: 18,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       _followed ? 'Siguiendo' : 'Mi lista',
                       style: TextStyle(
-                        color: _followed
-                            ? const Color(0xFFef4444)
-                            : const Color(0xFFe8e4f0),
+                        color: _followed ? AppColors.danger : AppColors.text,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -709,8 +852,8 @@ class _DetailPageState extends State<DetailPage> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 11),
             decoration: BoxDecoration(
-              color: const Color(0xFF131022),
-              border: Border.all(color: const Color(0xFF2a2240)),
+              color: AppColors.surface,
+              border: Border.all(color: AppColors.surfaceHighest),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -718,14 +861,14 @@ class _DetailPageState extends State<DetailPage> {
               children: [
                 const Icon(
                   Icons.download_rounded,
-                  color: Color(0xFFa78bfa),
+                  color: AppColors.primaryBright,
                   size: 18,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   _downloadLabel(anime.slug),
                   style: const TextStyle(
-                    color: Color(0xFFa78bfa),
+                    color: AppColors.primaryBright,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -738,14 +881,16 @@ class _DetailPageState extends State<DetailPage> {
           Wrap(
             spacing: 6,
             runSpacing: 4,
-            children: anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))).toList(),
+            children: anime.genres
+                .map((g) => _chip(g.name, AppColors.info))
+                .toList(),
           ),
         const SizedBox(height: 14),
         Text(
           anime.synopsis,
           style: const TextStyle(
             fontSize: 14,
-            color: Color(0xFFa99fc0),
+            color: AppColors.textSecondary,
             height: 1.5,
           ),
         ),
@@ -753,10 +898,14 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  /// Color final del degradado del banner: igual al fondo ambiental.
+  Color get _seamColor => Color.lerp(AppColors.bg, _palette.base, 0.72)!;
+
   /// Etiqueta del botón de descargas según estado del anime.
   String _downloadLabel(String slug) {
     final n = _dl.downloadedEpisodes(slug).length;
-    if (_dl.isQueued(slug, -1) || _dl.progress.value.keys.any((k) => k.startsWith('$slug#'))) {
+    if (_dl.isQueued(slug, -1) ||
+        _dl.progress.value.keys.any((k) => k.startsWith('$slug#'))) {
       if (n == 0) return 'Descargando…';
     }
     if (n > 0) return 'Descargas ($n)';
@@ -765,13 +914,16 @@ class _DetailPageState extends State<DetailPage> {
 
   void _playEpisode(AnimeDetail anime, int episodeNumber) {
     ApiService.addHistory(anime.id, anime.slug, anime.title, episodeNumber);
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => EpisodePage(
-        animeSlug: anime.slug,
-        episodeNumber: episodeNumber,
-        animeTitle: anime.title,
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EpisodePage(
+          animeSlug: anime.slug,
+          episodeNumber: episodeNumber,
+          animeTitle: anime.title,
+        ),
       ),
-    )).then((_) => _refreshWatched());
+    ).then((_) => _refreshWatched());
   }
 
   Future<void> _refreshWatched() async {
@@ -784,8 +936,12 @@ class _DetailPageState extends State<DetailPage> {
       int? lastWatched;
       if (animeHistory.isNotEmpty) {
         animeHistory.sort((a, b) {
-          final da = DateTime.tryParse(a.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final db = DateTime.tryParse(b.watchedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final da =
+              DateTime.tryParse(a.watchedAt) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final db =
+              DateTime.tryParse(b.watchedAt) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
           return db.compareTo(da);
         });
         lastWatched = animeHistory.first.episodeNumber;
@@ -800,13 +956,6 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   static Widget _chip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-    );
+    return PillBadge(label: text, color: color);
   }
 }

@@ -19,8 +19,7 @@ class SyncService {
   static const _fileName = 'animaple_sync.json';
   static const _scopeDriveAppdata =
       'https://www.googleapis.com/auth/drive.appdata';
-  static const _scopeDriveFile =
-      'https://www.googleapis.com/auth/drive.file';
+  static const _scopeDriveFile = 'https://www.googleapis.com/auth/drive.file';
   static const _driveApiBase = 'https://www.googleapis.com/drive/v3';
   static const _driveUploadBase = 'https://www.googleapis.com/upload/drive/v3';
 
@@ -126,7 +125,9 @@ class SyncService {
     }
     if (googleSignInSupported) {
       try {
-        final restored = await _getGoogleSignIn().signInSilently(reAuthenticate: false);
+        final restored = await _getGoogleSignIn().signInSilently(
+          reAuthenticate: false,
+        );
         if (restored != null) {
           _account = restored;
           _lastRemoteVersion = null;
@@ -183,7 +184,9 @@ class SyncService {
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(
-              _rememberedAccountKey, accountEmail ?? 'signed-in');
+            _rememberedAccountKey,
+            accountEmail ?? 'signed-in',
+          );
         } catch (_) {}
         startAutoSync();
         _notifySessionChanged();
@@ -206,7 +209,9 @@ class SyncService {
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(
-              _rememberedAccountKey, accountEmail ?? 'signed-in');
+            _rememberedAccountKey,
+            accountEmail ?? 'signed-in',
+          );
         } catch (_) {}
         startAutoSync();
         _notifySessionChanged();
@@ -238,13 +243,17 @@ class SyncService {
       // recurrir al Device Flow seguro sin cerrar la app
       if (context != null && !context.mounted) return false;
       try {
-        final deviceOk = await DesktopGoogleAuth.signInDeviceFlow(context: context);
+        final deviceOk = await DesktopGoogleAuth.signInDeviceFlow(
+          context: context,
+        );
         if (deviceOk) {
           _lastRemoteVersion = null;
           if (await _cacheAuthHeaders(prompt: false)) {
             startAutoSync();
             _notifySessionChanged();
-            debugPrint('Sync: signed in via Device Flow fallback as $accountEmail');
+            debugPrint(
+              'Sync: signed in via Device Flow fallback as $accountEmail',
+            );
             return true;
           }
         }
@@ -337,6 +346,9 @@ class SyncService {
     // Hay cambios locales que publicar. Se marca aunque la sesión no esté
     // lista todavía: el poll reintentará cuando vuelva la red/sesión.
     _localDirty = true;
+    // Notifica a la UI de inmediato: seguir, dejar de seguir y borrar deben
+    // reflejarse sin esperar al push ni recargar la pantalla.
+    stateVersion.value++;
     if (!isSignedIn) return;
     if (!await _ensureAuthHeaders()) return;
     _debounce?.cancel();
@@ -418,7 +430,9 @@ class SyncService {
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
-            _rememberedAccountKey, accountEmail ?? 'signed-in');
+          _rememberedAccountKey,
+          accountEmail ?? 'signed-in',
+        );
       } catch (_) {}
       sync(forcePush: true);
     }
@@ -849,9 +863,7 @@ class SyncService {
         'POST',
         '/files',
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': _fileName,
-        }),
+        body: jsonEncode({'name': _fileName}),
       );
       final id = res?['id'] as String?;
       if (id != null) _fileId = id;
@@ -899,12 +911,19 @@ class SyncService {
             'GET',
             '/files?spaces=appDataFolder&q=$q&fields=files(id,name,size)',
           );
-          final appDataFiles = (res?['files'] as List? ?? []).cast<Map>().toList();
+          final appDataFiles = (res?['files'] as List? ?? [])
+              .cast<Map>()
+              .toList();
           if (appDataFiles.isNotEmpty) {
             final appDataId = appDataFiles.first['id'] as String?;
             if (appDataId != null) {
-              debugPrint('Sync: migrando archivo desde appDataFolder ($appDataId) a raíz de Drive...');
-              final oldContent = await _driveRequest('GET', '/files/$appDataId?alt=media');
+              debugPrint(
+                'Sync: migrando archivo desde appDataFolder ($appDataId) a raíz de Drive...',
+              );
+              final oldContent = await _driveRequest(
+                'GET',
+                '/files/$appDataId?alt=media',
+              );
               if (oldContent != null) {
                 final createRes = await _driveRequest(
                   'POST',
@@ -920,8 +939,16 @@ class SyncService {
                     headers: {'Content-Type': 'application/json'},
                     body: jsonEncode(oldContent),
                   );
-                  debugPrint('Sync: migración completada exitosamente a raíz id=$newId');
-                  files = [{'id': newId, 'name': _fileName, 'size': utf8.encode(jsonEncode(oldContent)).length}];
+                  debugPrint(
+                    'Sync: migración completada exitosamente a raíz id=$newId',
+                  );
+                  files = [
+                    {
+                      'id': newId,
+                      'name': _fileName,
+                      'size': utf8.encode(jsonEncode(oldContent)).length,
+                    },
+                  ];
                 }
               }
             }
@@ -934,7 +961,11 @@ class SyncService {
       if (files.isEmpty) return null;
 
       // Ordenar por tamaño descendente para priorizar el archivo con datos reales
-      files.sort((a, b) => (int.tryParse('${b['size'] ?? 0}') ?? 0).compareTo(int.tryParse('${a['size'] ?? 0}') ?? 0));
+      files.sort(
+        (a, b) => (int.tryParse('${b['size'] ?? 0}') ?? 0).compareTo(
+          int.tryParse('${a['size'] ?? 0}') ?? 0,
+        ),
+      );
 
       final first = files.first['id'] as String?;
       // Eliminar duplicados (mismo nombre) para mantener una sola fuente.
@@ -1002,7 +1033,8 @@ class SyncService {
 
   static void _handleInsufficientScopes() {
     _authHeaders = null;
-    lastError = 'Tu sesión requiere volver a vincularse para sincronizar con Google Drive.';
+    lastError =
+        'Tu sesión requiere volver a vincularse para sincronizar con Google Drive.';
     if (!googleSignInSupported) {
       DesktopGoogleAuth.signOut();
     } else {

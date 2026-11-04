@@ -16,8 +16,11 @@ import '../widgets/tv_focusable.dart';
 import '../services/tv_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import '../ui/tokens.dart';
 
-bool get _isDesktop => !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+bool get _isDesktop =>
+    !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+
 class EpisodePage extends StatefulWidget {
   final String animeSlug;
   final int episodeNumber;
@@ -60,20 +63,21 @@ class _ServerQualityCandidate {
   });
 }
 
-enum _PlayerTvFocus {
-  none,
-  backButton,
-  playPause,
-  fullscreen,
-  pageContent,
-}
+enum _PlayerTvFocus { none, backButton, playPause, fullscreen, pageContent }
 
-class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin {
+class _EpisodePageState extends State<EpisodePage>
+    with TickerProviderStateMixin {
   _PlayerTvFocus _tvFocus = _PlayerTvFocus.none;
   final FocusNode _playerFocusNode = FocusNode();
   final FocusNode _pageContentFocusNode = FocusNode();
-  final FocusNode _prevBtnFocusNode = FocusNode(canRequestFocus: false, skipTraversal: true);
-  final FocusNode _nextBtnFocusNode = FocusNode(canRequestFocus: false, skipTraversal: true);
+  final FocusNode _prevBtnFocusNode = FocusNode(
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+  final FocusNode _nextBtnFocusNode = FocusNode(
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
   EpisodeDetail? _episode;
   AnimeDetail? _animeDetail;
   bool _loading = true;
@@ -116,7 +120,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   Set<int> _watchedEpisodes = {};
 
-  static const _mediaChannel = MethodChannel('com.mapleprojects.animaple/media_session');
+  static const _mediaChannel = MethodChannel(
+    'com.mapleprojects.animaple/media_session',
+  );
 
   bool _showCountdown = false;
   int _countdownSeconds = 5;
@@ -160,9 +166,20 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
     _currentEp = widget.episodeNumber;
     _player = AppPlayer.create();
-    _controlsAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1.0);
-    _seekAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
-    _seekFadeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300), value: 1.0);
+    _controlsAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: 1.0,
+    );
+    _seekAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _seekFadeAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+      value: 1.0,
+    );
     _player.isPlaying.addListener(_onStateChanged);
     _player.finishedCount.addListener(_onFinished);
     _player.error.addListener(_onError);
@@ -240,7 +257,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (!isDown && !isRepeat) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
-    final isSeekKey = key == LogicalKeyboardKey.arrowLeft ||
+    final isSeekKey =
+        key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.arrowRight ||
         key == LogicalKeyboardKey.mediaRewind ||
         key == LogicalKeyboardKey.mediaFastForward;
@@ -250,7 +268,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     }
 
     if (TvService.isTvMode) {
-      if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.backspace) {
+      if (key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.backspace) {
         if (_controlsVisible) {
           _hideTimer?.cancel();
           setState(() {
@@ -282,12 +301,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       }
 
       // Salto de 10s con izquierda o derecha de una pulsación o continuo por repetición.
-      final isNavigatingButtons = _controlsVisible &&
-          ((_tvFocus == _PlayerTvFocus.playPause && key == LogicalKeyboardKey.arrowRight) ||
-              (_tvFocus == _PlayerTvFocus.fullscreen && key == LogicalKeyboardKey.arrowLeft));
+      final isNavigatingButtons =
+          _controlsVisible &&
+          ((_tvFocus == _PlayerTvFocus.playPause &&
+                  key == LogicalKeyboardKey.arrowRight) ||
+              (_tvFocus == _PlayerTvFocus.fullscreen &&
+                  key == LogicalKeyboardKey.arrowLeft));
 
       if (!isNavigatingButtons && isSeekKey) {
-        final delta = (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind)
+        final delta =
+            (key == LogicalKeyboardKey.arrowLeft ||
+                key == LogicalKeyboardKey.mediaRewind)
             ? -10000
             : 10000;
         _seekRelative(delta);
@@ -563,7 +587,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   /// ocultos y el puntero está sobre el área de video (o en pantalla completa).
   void _updateCursor() {
     if (!_isDesktop) return;
-    final shouldHide = !_isPipMode &&
+    final shouldHide =
+        !_isPipMode &&
         !_controlsVisible &&
         !_isDragging &&
         !_showCountdown &&
@@ -588,7 +613,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           // Guarda el estado real antes de compactar la ventana. Capturar el
           // tamaño después de des-maximizar devolvía el tamaño restaurado
           // (reducido) al salir del PiP.
-          _savedFullscreen = _isFullscreen || await windowManager.isFullScreen();
+          _savedFullscreen =
+              _isFullscreen || await windowManager.isFullScreen();
           _savedMaximized = await windowManager.isMaximized();
           _savedWindowSize = await windowManager.getSize();
           _savedWindowPosition = await windowManager.getPosition();
@@ -601,7 +627,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             await windowManager.unmaximize();
           }
 
-          await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+          await windowManager.setTitleBarStyle(
+            TitleBarStyle.hidden,
+            windowButtonVisibility: false,
+          );
           await windowManager.setAlwaysOnTop(true);
           await windowManager.setAspectRatio(16 / 9);
           await windowManager.setMinimumSize(const Size(280, 158));
@@ -609,7 +638,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           await windowManager.setMaximizable(false);
           await windowManager.setResizable(true);
 
-          final targetSize = (_lastPipSize.width <= 500 && _lastPipSize.height <= 300)
+          final targetSize =
+              (_lastPipSize.width <= 500 && _lastPipSize.height <= 300)
               ? _lastPipSize
               : const Size(380, 214);
           await windowManager.setSize(targetSize);
@@ -655,17 +685,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       await windowManager.setMaximizable(true);
       await windowManager.setResizable(true);
       await windowManager.setAlwaysOnTop(false);
-      await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.normal,
+        windowButtonVisibility: true,
+      );
 
       if (restoreState && _savedFullscreen) {
         await windowManager.setFullScreen(true);
-        await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+        await windowManager.setTitleBarStyle(
+          TitleBarStyle.hidden,
+          windowButtonVisibility: false,
+        );
         if (mounted) setState(() => _isFullscreen = true);
       } else {
-        final targetW = (_savedWindowSize != null && _savedWindowSize!.width >= 900)
+        final targetW =
+            (_savedWindowSize != null && _savedWindowSize!.width >= 900)
             ? _savedWindowSize!.width
             : 1280.0;
-        final targetH = (_savedWindowSize != null && _savedWindowSize!.height >= 600)
+        final targetH =
+            (_savedWindowSize != null && _savedWindowSize!.height >= 600)
             ? _savedWindowSize!.height
             : 720.0;
         await windowManager.setSize(Size(targetW, targetH));
@@ -698,7 +736,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (_isDesktop) {
       if (_isFullscreen) {
         windowManager.setFullScreen(false);
-        windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+        windowManager.setTitleBarStyle(
+          TitleBarStyle.normal,
+          windowButtonVisibility: true,
+        );
       }
       if (_isPipMode) {
         _exitPipDesktop(restoreState: false);
@@ -739,7 +780,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _stopReconnectIfPlaying() {
-    if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
+    if (_reconnecting &&
+        (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _reconnecting = false;
       _reconnectAttempts = 0;
       _stallTicks = 0;
@@ -784,12 +826,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     _mediaLogChecked = true;
     await Future<void>.delayed(const Duration(seconds: 2));
     try {
-      final log = await _mediaChannel
-          .invokeMethod<String>('getMediaNotificationLog');
+      final log = await _mediaChannel.invokeMethod<String>(
+        'getMediaNotificationLog',
+      );
       if (mounted && log != null) {
         if (log.contains('FAIL')) {
           _videoErrorShown = true;
-          showErrorSheet(context, log, null, title: 'Notificación de reproducción');
+          showErrorSheet(
+            context,
+            log,
+            null,
+            title: 'Notificación de reproducción',
+          );
         }
       }
     } catch (_) {}
@@ -806,13 +854,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final pos = _player.positionMs.value;
     final dur = _player.durationMs.value;
     if (dur > 20000 && pos > 0 && pos < (dur - 15000)) {
-      debugPrint('EpisodePage: Ignored premature onFinished at $pos ms / $dur ms');
+      debugPrint(
+        'EpisodePage: Ignored premature onFinished at $pos ms / $dur ms',
+      );
       _player.play();
       return;
     }
     if (_player.finishedCount.value > 0 && mounted && !_autoPlayedNext) {
       _autoPlayedNext = true;
-      final has = _animeDetail != null && _currentEp < _animeDetail!.episodes.length;
+      final has =
+          _animeDetail != null && _currentEp < _animeDetail!.episodes.length;
       if (has) {
         _startCountdown();
       }
@@ -820,10 +871,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   }
 
   void _startCountdown() {
-    setState(() { _showCountdown = true; _countdownSeconds = 5; });
+    setState(() {
+      _showCountdown = true;
+      _countdownSeconds = 5;
+    });
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() => _countdownSeconds--);
       if (_countdownSeconds <= 0) {
         t.cancel();
@@ -883,14 +940,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (ep == null) return false;
 
     final remaining = ep.embeds
-        .where((s) =>
-            s.variant == _activeVariant &&
-            !_failedServers.contains(s.server) &&
-            _isPlayableServer(s))
+        .where(
+          (s) =>
+              s.variant == _activeVariant &&
+              !_failedServers.contains(s.server) &&
+              _isPlayableServer(s),
+        )
         .toList();
     if (remaining.isEmpty) return false;
 
-    debugPrint('FAILOVER: $_activeServer falló, re-evaluando servidores restantes');
+    debugPrint(
+      'FAILOVER: $_activeServer falló, re-evaluando servidores restantes',
+    );
     _lastPositionMs = 0;
     _pendingSeek = -1;
     _lastVideoUrl = null;
@@ -927,7 +988,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       debugPrint('Reconnect intent: $url (resume ${_lastPositionMs}ms)');
       try {
         _pendingSeek = _lastPositionMs;
-        _player.open(url, headers: _lastVideoHeaders, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+        _player.open(
+          url,
+          headers: _lastVideoHeaders,
+          startPositionMs: _pendingSeek > 0 ? _pendingSeek : null,
+        );
         _player.play();
       } catch (e) {
         debugPrint('Reconnect open error: $e');
@@ -938,7 +1003,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     doReconnect();
 
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer.periodic(const Duration(seconds: 6), (_) => doReconnect());
+    _reconnectTimer = Timer.periodic(
+      const Duration(seconds: 6),
+      (_) => doReconnect(),
+    );
   }
 
   void _stopReconnect() {
@@ -968,7 +1036,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (isLoading) {
           _stallTicks++;
           if (_stallTicks >= 12) {
-            debugPrint('EpisodePage: Stall watchdog detectó estancamiento tras ${_stallTicks}s de buffer.');
+            debugPrint(
+              'EpisodePage: Stall watchdog detectó estancamiento tras ${_stallTicks}s de buffer.',
+            );
             _stallTicks = 0;
             _onStallDetected();
           }
@@ -984,14 +1054,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _onStallDetected() {
     _reconnectAttempts++;
     if (_reconnectAttempts >= 2) {
-      debugPrint('EpisodePage: Servidor $_activeServer colapsó 2 veces. Ejecutando failover a siguiente servidor.');
+      debugPrint(
+        'EpisodePage: Servidor $_activeServer colapsó 2 veces. Ejecutando failover a siguiente servidor.',
+      );
       _reconnectAttempts = 0;
       _stopReconnect();
       if (!_failoverToNextServer()) {
         _startReconnect();
       }
     } else {
-      debugPrint('EpisodePage: Intentando reconexión tras stall de stream (intento $_reconnectAttempts)...');
+      debugPrint(
+        'EpisodePage: Intentando reconexión tras stall de stream (intento $_reconnectAttempts)...',
+      );
       _startReconnect();
     }
   }
@@ -1000,39 +1074,47 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<_ServerQualityCandidate?> _probeServer(ServerMirror s) async {
     final sw = Stopwatch()..start();
     try {
-      if (s.server.toLowerCase().contains('byse') && !ApiService.isByseCached(s.url)) {
+      if (s.server.toLowerCase().contains('byse') &&
+          !ApiService.isByseCached(s.url)) {
         return null;
       }
-      final data = await ApiService.fetchVideoUrl(s.url)
-          .timeout(const Duration(milliseconds: 3500));
+      final data = await ApiService.fetchVideoUrl(
+        s.url,
+      ).timeout(const Duration(milliseconds: 3500));
       final videoUrl = data['url'] as String?;
       final videoType = data['type'] as String? ?? 'mp4';
       if (videoUrl == null || videoUrl.isEmpty || videoType == 'embed') {
         return null;
       }
 
-      final customHeaders = (data['headers'] as Map<String, dynamic>?)
-          ?.map((k, v) => MapEntry(k, v.toString()));
-      final headers = customHeaders ??
+      final customHeaders = (data['headers'] as Map<String, dynamic>?)?.map(
+        (k, v) => MapEntry(k, v.toString()),
+      );
+      final headers =
+          customHeaders ??
           (videoType == 'hls'
               ? <String, String>{
-                  'Referer': s.url.contains('zilla') ? s.url : 'https://player.zilla-networks.com/',
+                  'Referer': s.url.contains('zilla')
+                      ? s.url
+                      : 'https://player.zilla-networks.com/',
                   'Origin': 'https://player.zilla-networks.com',
                   'Sec-Fetch-Dest': 'empty',
                   'Sec-Fetch-Mode': 'cors',
                   'Sec-Fetch-Site': 'same-origin',
                 }
               : videoType == 'mp4'
-                  ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
-                  : null);
+              ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
+              : null);
 
       var effectiveUrl = videoUrl;
       int height = 720;
       int bandwidth = 0;
 
       if (videoType == 'hls') {
-        final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers)
-            .timeout(const Duration(milliseconds: 2500));
+        final q = await ApiService.resolveHighestQualityHls(
+          videoUrl,
+          headers: headers,
+        ).timeout(const Duration(milliseconds: 2500));
         effectiveUrl = q['url'] as String? ?? videoUrl;
         height = q['height'] as int? ?? 720;
         bandwidth = q['bandwidth'] as int? ?? 0;
@@ -1056,7 +1138,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         final req = await client.getUrl(Uri.parse(effectiveUrl));
         headers?.forEach((k, v) => req.headers.set(k, v));
         req.headers.set('Range', 'bytes=0-0');
-        final resp = await req.close().timeout(const Duration(milliseconds: 1500));
+        final resp = await req.close().timeout(
+          const Duration(milliseconds: 1500),
+        );
         reachable = resp.statusCode == 200 || resp.statusCode == 206;
         await resp.drain<void>();
         client.close();
@@ -1090,27 +1174,65 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (name.contains('mp4upload')) return true;
     if (name.contains('upnshare') || url.contains('uns.bio')) return true;
     if (name.contains('voe') || url.contains('voe.sx')) return true;
-    if (name.contains('byse') || url.contains('byselapuix.com') || url.contains('n1mwq.org')) return true;
+    if (name.contains('byse') ||
+        url.contains('byselapuix.com') ||
+        url.contains('n1mwq.org')) {
+      return true;
+    }
     if (url.contains('.m3u8') || url.contains('zilla-networks')) return true;
     if (url.contains('.mp4') || url.contains('mp4upload.com')) return true;
     return false;
   }
 
   /// Determina el orden de servidores a probar para [variant].
-  Future<List<ServerMirror>> _orderedServers(EpisodeDetail ep, String variant) async {
+  Future<List<ServerMirror>> _orderedServers(
+    EpisodeDetail ep,
+    String variant,
+  ) async {
     final filtered = ep.embeds
-        .where((s) =>
-            s.variant == variant &&
-            !_failedServers.contains(s.server) &&
-            _isPlayableServer(s))
+        .where(
+          (s) =>
+              s.variant == variant &&
+              !_failedServers.contains(s.server) &&
+              _isPlayableServer(s),
+        )
         .toList();
-    final upn = filtered.where((s) => s.server.toLowerCase().contains('upnshare') || s.url.toLowerCase().contains('uns.bio')).toList();
-    final hls = filtered.where((s) => s.server.toLowerCase().contains('hls')).toList();
-    final voe = filtered.where((s) => s.server.toLowerCase().contains('voe') || s.url.toLowerCase().contains('voe.sx')).toList();
-    final mp4 = filtered.where((s) => s.server.toLowerCase().contains('mp4upload')).toList();
-    final byse = filtered.where((s) => s.server.toLowerCase().contains('byse') || s.url.toLowerCase().contains('byselapuix.com')).toList();
+    final upn = filtered
+        .where(
+          (s) =>
+              s.server.toLowerCase().contains('upnshare') ||
+              s.url.toLowerCase().contains('uns.bio'),
+        )
+        .toList();
+    final hls = filtered
+        .where((s) => s.server.toLowerCase().contains('hls'))
+        .toList();
+    final voe = filtered
+        .where(
+          (s) =>
+              s.server.toLowerCase().contains('voe') ||
+              s.url.toLowerCase().contains('voe.sx'),
+        )
+        .toList();
+    final mp4 = filtered
+        .where((s) => s.server.toLowerCase().contains('mp4upload'))
+        .toList();
+    final byse = filtered
+        .where(
+          (s) =>
+              s.server.toLowerCase().contains('byse') ||
+              s.url.toLowerCase().contains('byselapuix.com'),
+        )
+        .toList();
     final others = filtered
-        .where((s) => !hls.contains(s) && !upn.contains(s) && !voe.contains(s) && !mp4.contains(s) && !byse.contains(s))
+        .where(
+          (s) =>
+              !hls.contains(s) &&
+              !upn.contains(s) &&
+              !voe.contains(s) &&
+              !mp4.contains(s) &&
+              !byse.contains(s),
+        )
         .toList();
     final ordered = <ServerMirror>[];
     ordered.addAll(upn);
@@ -1131,7 +1253,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   void _onPositionChanged() {
     _stallTicks = 0;
-    if (_reconnecting && (_player.isPlaying.value || _player.positionMs.value > 0)) {
+    if (_reconnecting &&
+        (_player.isPlaying.value || _player.positionMs.value > 0)) {
       _stopReconnectIfPlaying();
     }
     if (_pendingSeek > 0 && _player.positionMs.value > 0) {
@@ -1178,7 +1301,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (_isDesktop) {
       if (_isFullscreen) {
         windowManager.setFullScreen(false);
-        windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+        windowManager.setTitleBarStyle(
+          TitleBarStyle.normal,
+          windowButtonVisibility: true,
+        );
       }
       if (_isPipMode) {
         _exitPipDesktop(restoreState: false);
@@ -1195,13 +1321,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Future<void> _load() async {
     if (_animeDetail == null) {
       try {
-        final local = await DownloadService.instance.animeDetailFor(widget.animeSlug);
+        final local = await DownloadService.instance.animeDetailFor(
+          widget.animeSlug,
+        );
         if (local != null) _animeDetail = local;
       } catch (_) {}
     }
 
-    final localPath = await DownloadService.instance
-        .videoPath(widget.animeSlug, _currentEp);
+    final localPath = await DownloadService.instance.videoPath(
+      widget.animeSlug,
+      _currentEp,
+    );
     if (localPath != null) {
       if (!mounted) return;
       setState(() {
@@ -1239,10 +1369,15 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     const maxRetries = 15;
     for (var attempt = 0; attempt < maxRetries && mounted; attempt++) {
       try {
-        final ep = await ApiService.fetchEpisodeDetail(widget.animeSlug, _currentEp);
+        final ep = await ApiService.fetchEpisodeDetail(
+          widget.animeSlug,
+          _currentEp,
+        );
         AnimeDetail? detail = _animeDetail;
         if (detail == null) {
-          try { detail = await ApiService.fetchAnimeDetail(widget.animeSlug); } catch (_) {}
+          try {
+            detail = await ApiService.fetchAnimeDetail(widget.animeSlug);
+          } catch (_) {}
         }
         if (mounted) {
           setState(() {
@@ -1250,7 +1385,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             _animeDetail = detail;
             _loading = false;
             _autoPlayedNext = false;
-            _activeVariant = ep.variants.contains('DUB') ? 'DUB' : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
+            _activeVariant = ep.variants.contains('DUB')
+                ? 'DUB'
+                : (ep.variants.isNotEmpty ? ep.variants.first : 'DUB');
           });
         }
         ApiService.addHistory(
@@ -1271,15 +1408,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         return;
       } catch (e, st) {
         debugPrint('EPISODE LOAD RETRY: $e');
-        if (attempt == 0 &&
-            mounted &&
-            !isConnectivityError(e)) {
+        if (attempt == 0 && mounted && !isConnectivityError(e)) {
           showErrorSheet(context, e, st, slug: widget.animeSlug);
         }
         await Future.delayed(const Duration(seconds: 3));
       }
     }
-    if (mounted) setState(() { _loading = false; });
+    if (mounted) {
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   void _autoPlay() {
@@ -1342,7 +1481,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       });
 
       final best = valid.first;
-      debugPrint('BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms)');
+      debugPrint(
+        'BEST SERVER PROBED: ${best.server.server} (${best.height}p, ${best.bandwidth}bps, ${best.responseTimeMs}ms)',
+      );
       if (mounted) {
         setState(() {
           _probeChosen = best.server.server;
@@ -1379,7 +1520,9 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       final videoType = candidate.videoType;
       final headers = candidate.headers;
 
-      debugPrint('PLAYING DIRECT: $videoUrl (type=$videoType, height=${candidate.height}p, bw=${candidate.bandwidth})');
+      debugPrint(
+        'PLAYING DIRECT: $videoUrl (type=$videoType, height=${candidate.height}p, bw=${candidate.bandwidth})',
+      );
 
       if (_lastPositionMs > 0) {
         _pendingSeek = _lastPositionMs;
@@ -1395,26 +1538,41 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       if (videoType == 'mp4') {
         if (mounted) setState(() => _prewarming = true);
         try {
-          await ApiService.prewarmVideo(videoUrl, headers: headers)
-              .timeout(const Duration(seconds: 32), onTimeout: () => false);
+          await ApiService.prewarmVideo(
+            videoUrl,
+            headers: headers,
+          ).timeout(const Duration(seconds: 32), onTimeout: () => false);
         } finally {
           if (mounted) setState(() => _prewarming = false);
         }
       }
 
       var streamUrl = videoUrl;
-      if (HlsProxy.instance.isRunning && !videoUrl.startsWith('http://127.0.0.1')) {
+      if (HlsProxy.instance.isRunning &&
+          !videoUrl.startsWith('http://127.0.0.1')) {
         if (videoType == 'hls') {
-          streamUrl = HlsProxy.instance.proxyM3U8(videoUrl, referer: headers?['Referer']);
+          streamUrl = HlsProxy.instance.proxyM3U8(
+            videoUrl,
+            referer: headers?['Referer'],
+          );
         } else if (videoType == 'mp4') {
-          streamUrl = HlsProxy.instance.proxyVideo(videoUrl, referer: headers?['Referer']);
+          streamUrl = HlsProxy.instance.proxyVideo(
+            videoUrl,
+            referer: headers?['Referer'],
+          );
         }
       }
 
-      await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+      await _player.open(
+        streamUrl,
+        headers: headers,
+        startPositionMs: _pendingSeek > 0 ? _pendingSeek : null,
+      );
     } catch (e, st) {
       debugPrint('PLAY CANDIDATE ERROR: $e');
-      if (mounted) showErrorSheet(context, e, st, title: 'Error de reproducción');
+      if (mounted) {
+        showErrorSheet(context, e, st, title: 'Error de reproducción');
+      }
     }
   }
 
@@ -1428,7 +1586,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       });
     }
     _videoErrorShown = false; // permitir mostrar un nuevo error
-    _sourceStarted = false;   // nuevo source: aún no ha reproducido
+    _sourceStarted = false; // nuevo source: aún no ha reproducido
 
     while (mounted) {
       try {
@@ -1463,21 +1621,26 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             _currentVideoType = videoType;
           });
         }
-        final customHeaders = (data['headers'] as Map<String, dynamic>?)
-            ?.map((k, v) => MapEntry(k, v.toString()));
+        final customHeaders = (data['headers'] as Map<String, dynamic>?)?.map(
+          (k, v) => MapEntry(k, v.toString()),
+        );
 
-        final headers = customHeaders ??
+        final headers =
+            customHeaders ??
             (videoType == 'hls'
                 ? <String, String>{
                     'Referer': 'https://player.zilla-networks.com/',
                   }
                 : videoType == 'mp4'
-                    ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
-                    : null);
+                ? <String, String>{'Referer': 'https://www.mp4upload.com/'}
+                : null);
 
         var effectiveUrl = videoUrl;
         if (videoType == 'hls') {
-          final q = await ApiService.resolveHighestQualityHls(videoUrl, headers: headers);
+          final q = await ApiService.resolveHighestQualityHls(
+            videoUrl,
+            headers: headers,
+          );
           effectiveUrl = q['url'] as String? ?? videoUrl;
         }
 
@@ -1495,28 +1658,42 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         if (videoType == 'mp4') {
           if (mounted) setState(() => _prewarming = true);
           try {
-            await ApiService.prewarmVideo(videoUrl, headers: headers)
-                .timeout(const Duration(seconds: 32),
-                    onTimeout: () => false);
+            await ApiService.prewarmVideo(
+              videoUrl,
+              headers: headers,
+            ).timeout(const Duration(seconds: 32), onTimeout: () => false);
           } finally {
             if (mounted) setState(() => _prewarming = false);
           }
         }
 
         var streamUrl = effectiveUrl;
-        if (HlsProxy.instance.isRunning && !effectiveUrl.startsWith('http://127.0.0.1')) {
+        if (HlsProxy.instance.isRunning &&
+            !effectiveUrl.startsWith('http://127.0.0.1')) {
           if (videoType == 'hls') {
-            streamUrl = HlsProxy.instance.proxyM3U8(effectiveUrl, referer: headers?['Referer']);
+            streamUrl = HlsProxy.instance.proxyM3U8(
+              effectiveUrl,
+              referer: headers?['Referer'],
+            );
           } else if (videoType == 'mp4') {
-            streamUrl = HlsProxy.instance.proxyVideo(effectiveUrl, referer: headers?['Referer']);
+            streamUrl = HlsProxy.instance.proxyVideo(
+              effectiveUrl,
+              referer: headers?['Referer'],
+            );
           }
         }
 
-        await _player.open(streamUrl, headers: headers, startPositionMs: _pendingSeek > 0 ? _pendingSeek : null);
+        await _player.open(
+          streamUrl,
+          headers: headers,
+          startPositionMs: _pendingSeek > 0 ? _pendingSeek : null,
+        );
         return;
       } catch (e, st) {
         debugPrint('PLAY RETRY: $e');
-        if (mounted) showErrorSheet(context, e, st, title: 'Error de reproducción');
+        if (mounted) {
+          showErrorSheet(context, e, st, title: 'Error de reproducción');
+        }
         return;
       }
     }
@@ -1577,11 +1754,17 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     if (_isDesktop) {
       try {
         if (nextFullscreen) {
-          await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+          await windowManager.setTitleBarStyle(
+            TitleBarStyle.hidden,
+            windowButtonVisibility: false,
+          );
           await windowManager.setFullScreen(true);
         } else {
           await windowManager.setFullScreen(false);
-          await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+          await windowManager.setTitleBarStyle(
+            TitleBarStyle.normal,
+            windowButtonVisibility: true,
+          );
         }
       } catch (e) {
         debugPrint('Windows fullscreen error: $e');
@@ -1602,62 +1785,86 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     if (_loading && _episode == null) {
       return const Scaffold(
-        backgroundColor: Color(0xFF0a0812),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6))),
+        backgroundColor: AppColors.bg,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
       );
     }
     final ep = _episode;
     if (ep == null) {
-      return Scaffold(appBar: AppBar(), body: const Center(child: Text('Error cargando episodio')));
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('Error cargando episodio')),
+      );
     }
 
-    final filteredEmbeds = ep.embeds.where((s) =>
-      s.variant == _activeVariant && _isPlayableServer(s)
-    ).toList();
+    final filteredEmbeds = ep.embeds
+        .where((s) => s.variant == _activeVariant && _isPlayableServer(s))
+        .toList();
     final anime = _animeDetail;
     final screenWidth = MediaQuery.of(context).size.width;
     final isWide = screenWidth > 900;
 
     final scaffold = Scaffold(
-      backgroundColor: const Color(0xFF0a0812),
-      appBar: (_isFullscreen || _isPipMode) ? null : AppBar(
-        backgroundColor: const Color(0xFF0a0812),
-        leading: Container(
-          margin: const EdgeInsets.all(6),
-          decoration: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.backButton)
-              ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFa78bfa), width: 2.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF8b5cf6).withValues(alpha: 0.55),
-                      blurRadius: 14,
-                      spreadRadius: 2,
+      backgroundColor: AppColors.bg,
+      appBar: (_isFullscreen || _isPipMode)
+          ? null
+          : AppBar(
+              backgroundColor: AppColors.bg,
+              leading: Container(
+                margin: const EdgeInsets.all(6),
+                decoration:
+                    (TvService.isTvMode &&
+                        _tvFocus == _PlayerTvFocus.backButton)
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.primaryBright,
+                          width: 2.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.55),
+                            blurRadius: 14,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      )
+                    : null,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: _closePlayback,
+                ),
+              ),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.animeTitle,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
                     ),
-                  ],
-                )
-              : null,
-          child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: _closePlayback,
-          ),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.animeTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0))),
-            Text('Episodio ${ep.number}', style: const TextStyle(fontSize: 12, color: Color(0xFF6d6488))),
-          ],
-        ),
-
-      ),
+                  ),
+                  Text(
+                    'Episodio ${ep.number}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
       body: _isPipMode
-        ? _buildVideoPlayer()
-        : _isFullscreen
+          ? _buildVideoPlayer()
+          : _isFullscreen
           ? SizedBox.expand(child: _buildVideoPlayer())
           : isWide
-            ? _buildWideLayout(ep, filteredEmbeds, anime)
-            : _buildNarrowLayout(ep, filteredEmbeds, anime),
+          ? _buildWideLayout(ep, filteredEmbeds, anime)
+          : _buildNarrowLayout(ep, filteredEmbeds, anime),
     );
 
     final wrapped = PopScope(
@@ -1674,7 +1881,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           _dismissMediaNotification();
           if (_isDesktop && _isFullscreen) {
             windowManager.setFullScreen(false);
-            windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
+            windowManager.setTitleBarStyle(
+              TitleBarStyle.normal,
+              windowButtonVisibility: true,
+            );
           }
         }
       },
@@ -1689,7 +1899,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildWideLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
+  Widget _buildWideLayout(
+    EpisodeDetail ep,
+    List<ServerMirror> filteredEmbeds,
+    AnimeDetail? anime,
+  ) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1714,7 +1928,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildNarrowLayout(EpisodeDetail ep, List<ServerMirror> filteredEmbeds, AnimeDetail? anime) {
+  Widget _buildNarrowLayout(
+    EpisodeDetail ep,
+    List<ServerMirror> filteredEmbeds,
+    AnimeDetail? anime,
+  ) {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1722,7 +1940,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           AspectRatio(aspectRatio: 16 / 9, child: _buildVideoPlayer()),
           _buildNavButtons(ep),
           _buildVariantAndServers(ep, filteredEmbeds),
-          Padding(padding: const EdgeInsets.all(16), child: _buildInfoSection(ep, anime)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: _buildInfoSection(ep, anime),
+          ),
         ],
       ),
     );
@@ -1760,7 +1981,13 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         }
       }
       _updateCursor();
-      if (!_controlsVisible && !_isDragging && !_showCountdown && _seekAccumulatorMs == 0 && !_seekAnimating) return;
+      if (!_controlsVisible &&
+          !_isDragging &&
+          !_showCountdown &&
+          _seekAccumulatorMs == 0 &&
+          !_seekAnimating) {
+        return;
+      }
       setState(() {});
     });
   }
@@ -1777,7 +2004,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   void _startHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(Duration(seconds: TvService.isTvMode ? 4 : 3), () {
-      if (mounted && !_isDragging && !_showCountdown && _player.isPlaying.value) {
+      if (mounted &&
+          !_isDragging &&
+          !_showCountdown &&
+          _player.isPlaying.value) {
         setState(() {
           _controlsVisible = false;
           _tvFocus = _PlayerTvFocus.none;
@@ -1818,7 +2048,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final now = DateTime.now();
     final dur = _player.durationMs.value;
 
-    if (_lastSeekTapTime != null && now.difference(_lastSeekTapTime!) < _seekAccumulationWindow) {
+    if (_lastSeekTapTime != null &&
+        now.difference(_lastSeekTapTime!) < _seekAccumulationWindow) {
       _seekAccumulatorMs += deltaMs;
     } else {
       _seekBasePosition = _player.positionMs.value;
@@ -1869,7 +2100,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     final isTv = TvService.isTvMode;
 
     final content = Container(
-      color: const Color(0xFF07050d).withValues(alpha: isTv ? 0.95 : 0.65),
+      color: AppColors.bgDeep.withValues(alpha: isTv ? 0.95 : 0.65),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: AnimatedSwitcher(
@@ -1900,9 +2131,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     return ClipRect(
       child: isTv
           ? content
-          : BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-              child: content,
+          : RepaintBoundary(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                child: content,
+              ),
             ),
     );
   }
@@ -1918,207 +2151,272 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         else
           _player.buildView(fit: _isPipMode ? BoxFit.cover : BoxFit.contain),
 
-        if (!_probeOverlayDismissed && (_probing || _probeChosen != null || !_sourceStarted || _prewarming || _loading))
+        if (!_probeOverlayDismissed &&
+            (_probing ||
+                _probeChosen != null ||
+                !_sourceStarted ||
+                _prewarming ||
+                _loading))
           _buildProbeOverlay(),
 
         if (!_isPipMode && !isEmbed) ...[
-
-        if (_sourceStarted && _reconnecting && !isPlaying)
-          const CircularProgressIndicator(color: Color(0xFFd8b4fe), strokeWidth: 2.5),
-
-        if (_reconnecting && !isPlaying)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 22),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF161324), Color(0xFF241b38)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF7c3aed).withValues(alpha: 0.55)),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF8b5cf6).withValues(alpha: 0.3),
-                  blurRadius: 28,
-                  spreadRadius: 2,
-                ),
-              ],
+          if (_sourceStarted && _reconnecting && !isPlaying)
+            const CircularProgressIndicator(
+              color: AppColors.text,
+              strokeWidth: 2.5,
             ),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Color(0xFF8b5cf6), strokeWidth: 2.5),
-                SizedBox(height: 14),
-                Text(
-                  'Reconectando…',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'Conexión perdida, restaurando reproducción',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
 
-        if (!isPlaying && !_player.isLoading.value && _sourceStarted)
-          GestureDetector(
-            onTap: _togglePlayPause,
-            child: Container(
-              width: 56, height: 56,
+          if (_reconnecting && !isPlaying)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 22),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
-            ),
-          ),
-
-        if (_seekAnimating && _seekDelta != null)
-          Positioned(
-            top: 0,
-            bottom: 0,
-            right: _seekDelta! > 0 ? 24 : null,
-            left: _seekDelta! < 0 ? 24 : null,
-            child: FadeTransition(
-              opacity: _seekFadeAnim!,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.75),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _seekDelta! < 0 ? Icons.replay_10_rounded : Icons.forward_10_rounded,
-                        color: Colors.white, size: 28,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_seekDelta! > 0 ? '+' : ''}${_formatSeekDelta(_seekDelta!)}',
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
+                gradient: const LinearGradient(
+                  colors: [AppColors.surface, AppColors.outline],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppColors.primaryDeep.withValues(alpha: 0.55),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
-            ),
-          ),
-
-        if (_showCountdown)
-          Container(
-            color: Colors.black.withValues(alpha: 0.85),
-            child: Center(
-              child: Column(
+              child: const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'Siguiente episodio en',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 14),
+                  CircularProgressIndicator(
+                    color: AppColors.primary,
+                    strokeWidth: 2.5,
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: 80, height: 80,
-                    child: Stack(
-                      alignment: Alignment.center,
+                  SizedBox(height: 14),
+                  Text(
+                    'Reconectando…',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Conexión perdida, restaurando reproducción',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+
+          if (!isPlaying && !_player.isLoading.value && _sourceStarted)
+            GestureDetector(
+              onTap: _togglePlayPause,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 36,
+                ),
+              ),
+            ),
+
+          if (_seekAnimating && _seekDelta != null)
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: _seekDelta! > 0 ? 24 : null,
+              left: _seekDelta! < 0 ? 24 : null,
+              child: FadeTransition(
+                opacity: _seekFadeAnim!,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.75),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
-                          width: 80, height: 80,
-                          child: CircularProgressIndicator(
-                            value: _countdownSeconds / 5,
-                            strokeWidth: 3,
-                            color: const Color(0xFF8b5cf6),
-                            backgroundColor: Colors.white24,
-                          ),
+                        Icon(
+                          _seekDelta! < 0
+                              ? Icons.replay_10_rounded
+                              : Icons.forward_10_rounded,
+                          color: Colors.white,
+                          size: 28,
                         ),
+                        const SizedBox(width: 8),
                         Text(
-                          '$_countdownSeconds',
-                          style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w700),
+                          '${_seekDelta! > 0 ? '+' : ''}${_formatSeekDelta(_seekDelta!)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Episodio ${_currentEp + 1}',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+
+          if (_showCountdown)
+            Container(
+              color: Colors.black.withValues(alpha: 0.85),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Siguiente episodio en',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: 80,
+                      height: 80,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 80,
+                            height: 80,
+                            child: CircularProgressIndicator(
+                              value: _countdownSeconds / 5,
+                              strokeWidth: 3,
+                              color: AppColors.primary,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                          Text(
+                            '$_countdownSeconds',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 32,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Episodio ${_currentEp + 1}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: _cancelCountdown,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white12,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Cancelar',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        GestureDetector(
+                          onTap: _skipCountdown,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Saltar',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: _showCountdown,
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 33,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _showCountdown ? null : _toggleControls,
+                      onDoubleTap: _showCountdown
+                          ? null
+                          : () => _seekRelative(-9900),
+                      child: Container(color: Colors.transparent),
+                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: _cancelCountdown,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white12,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text('Cancelar', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      GestureDetector(
-                        onTap: _skipCountdown,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF8b5cf6),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Text('Saltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                    ],
+                  Expanded(
+                    flex: 34,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _showCountdown ? null : _togglePlayPause,
+                      onDoubleTap: _showCountdown ? null : _togglePlayPause,
+                      child: Container(color: Colors.transparent),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 33,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _showCountdown ? null : _toggleControls,
+                      onDoubleTap: _showCountdown
+                          ? null
+                          : () => _seekRelative(9900),
+                      child: Container(color: Colors.transparent),
+                    ),
                   ),
                 ],
               ),
             ),
           ),
-
-        Positioned.fill(
-          child: IgnorePointer(
-            ignoring: _showCountdown,
-            child: Row(
-            children: [
-              Expanded(
-                flex: 33,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(-9900),
-                  child: Container(color: Colors.transparent),
-                ),
-              ),
-              Expanded(
-                flex: 34,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _showCountdown ? null : _togglePlayPause,
-                  onDoubleTap: _showCountdown ? null : _togglePlayPause,
-                  child: Container(color: Colors.transparent),
-                ),
-              ),
-              Expanded(
-                flex: 33,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _showCountdown ? null : _toggleControls,
-                  onDoubleTap: _showCountdown ? null : () => _seekRelative(9900),
-                  child: Container(color: Colors.transparent),
-                ),
-              ),
-            ],
-          ),
-          ),
-        ),
-
         ], // end if (!_isPipMode)
 
         if (_isPipMode && _isDesktop)
@@ -2145,7 +2443,11 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                             top: 4,
                             right: 4,
                             child: IconButton(
-                              icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 20),
+                              icon: const Icon(
+                                Icons.open_in_full_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                               tooltip: 'Restaurar ventana',
                               onPressed: _exitPipDesktop,
                             ),
@@ -2154,8 +2456,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                             child: IconButton(
                               iconSize: 44,
                               icon: Icon(
-                                _player.isPlaying.value ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                                color: const Color(0xFFa78bfa),
+                                _player.isPlaying.value
+                                    ? Icons.pause_circle_filled_rounded
+                                    : Icons.play_circle_fill_rounded,
+                                color: AppColors.primaryBright,
                               ),
                               onPressed: _togglePlayPause,
                             ),
@@ -2168,11 +2472,16 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                               valueListenable: _player.positionMs,
                               builder: (context, pos, _) {
                                 final dur = _player.durationMs.value;
-                                final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+                                final progress = dur > 0
+                                    ? (pos / dur).clamp(0.0, 1.0)
+                                    : 0.0;
                                 return LinearProgressIndicator(
                                   value: progress,
                                   backgroundColor: Colors.white24,
-                                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8b5cf6)),
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        AppColors.primary,
+                                      ),
                                   minHeight: 3,
                                 );
                               },
@@ -2188,251 +2497,369 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
           ),
 
         if (!_isPipMode && !isEmbed)
-        IgnorePointer(
-          ignoring: !_controlsVisible,
-          child: FadeTransition(
-            opacity: _controlsAnim!,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final dur = _player.durationMs.value;
-                final pos = _player.positionMs.value;
-                final dv = _dragValue != null ? _dragValue! : pos.clamp(0, dur).toDouble();
-                final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
-                final sliderWidth = constraints.maxWidth - 32;
-                final thumbX = 16 + (frac * sliderWidth);
-                final bubbleLeft = thumbX.clamp(30.0, constraints.maxWidth - 30.0);
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    if (_isDragging && _dragValue != null)
-                      Positioned(
-                        bottom: 110,
-                        left: bubbleLeft - 28,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.9),
-                                borderRadius: BorderRadius.circular(6),
-                                boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
-                              ),
-                              child: Text(
-                                _formatTime(dv.toInt()),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            CustomPaint(
-                              size: const Size(12, 6),
-                              painter: _BubbleArrowPainter(),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Positioned(
-                      left: 0, right: 0, bottom: 0,
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
-                          ),
-                        ),
-                        child: SafeArea(
-                          top: false,
+          IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: FadeTransition(
+              opacity: _controlsAnim!,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final dur = _player.durationMs.value;
+                  final pos = _player.positionMs.value;
+                  final dv = _dragValue != null
+                      ? _dragValue!
+                      : pos.clamp(0, dur).toDouble();
+                  final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
+                  final sliderWidth = constraints.maxWidth - 32;
+                  final thumbX = 16 + (frac * sliderWidth);
+                  final bubbleLeft = thumbX.clamp(
+                    30.0,
+                    constraints.maxWidth - 30.0,
+                  );
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (_isDragging && _dragValue != null)
+                        Positioned(
+                          bottom: 110,
+                          left: bubbleLeft - 28,
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (dur > 0)
-                                SizedBox(
-                                  height: 60,
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final trackW = constraints.maxWidth;
-                                      final trackH = 4.0;
-                                      final topY = (constraints.maxHeight - trackH) / 2;
-                                      final frac = dur > 0 ? (dv / dur).clamp(0.0, 1.0) : 0.0;
-
-                                      return GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTapDown: (details) {
-                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
-                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
-                                          final target = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble()).toInt();
-                                          _isDragging = false;
-                                          _dragValue = target.toDouble();
-                                          _player.seekTo(target);
-                                          _lastPositionMs = target;
-                                          setState(() {});
-                                          _startHideTimer();
-                                        },
-                                        onHorizontalDragStart: (details) {
-                                          _isDragging = true;
-                                          _hideTimer?.cancel();
-                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
-                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
-                                          final val = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble());
-                                          setState(() { _dragValue = val; });
-                                        },
-                                        onHorizontalDragUpdate: (details) {
-                                          final effectiveW = (trackW - 20).clamp(1.0, double.infinity);
-                                          final x = (details.localPosition.dx - 10).clamp(0.0, effectiveW);
-                                          final val = ((x / effectiveW) * dur).clamp(0.0, dur.toDouble());
-                                          setState(() { _dragValue = val; });
-                                        },
-                                        onHorizontalDragEnd: (details) {
-                                          if (_dragValue != null) {
-                                            final target = _dragValue!.toInt().clamp(0, dur);
-                                            _player.seekTo(target);
-                                            _lastPositionMs = target;
-                                          }
-                                          _isDragging = false;
-                                          _dragValue = null;
-                                          setState(() {});
-                                          _startHideTimer();
-                                        },
-                                        onHorizontalDragCancel: () {
-                                          _isDragging = false;
-                                          _dragValue = null;
-                                          setState(() {});
-                                          _startHideTimer();
-                                        },
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                                          child: Stack(
-                                            fit: StackFit.expand,
-                                            children: [
-                                              Positioned(
-                                                top: topY, left: 0, right: 0,
-                                                child: Container(
-                                                  height: trackH,
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white24,
-                                                    borderRadius: BorderRadius.circular(2),
-                                                  ),
-                                                ),
-                                              ),
-                                              Positioned(
-                                                top: topY, left: 0,
-                                                width: (trackW - 20).clamp(0.0, double.infinity) * frac,
-                                                child: Container(
-                                                  height: trackH,
-                                                  decoration: BoxDecoration(
-                                                    color: const Color(0xFF8b5cf6),
-                                                    borderRadius: BorderRadius.circular(2),
-                                                  ),
-                                                ),
-                                              ),
-                                              Positioned(
-                                                left: ((trackW - 20).clamp(0.0, double.infinity) * frac) - 7,
-                                                top: topY - 5,
-                                                child: Container(
-                                                  width: 14,
-                                                  height: 14,
-                                                  decoration: const BoxDecoration(
-                                                    color: Color(0xFF8b5cf6),
-                                                    shape: BoxShape.circle,
-                                                    boxShadow: [
-                                                      BoxShadow(
-                                                        color: Colors.black45,
-                                                        blurRadius: 4,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
                                 ),
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 2),
-                                child: Row(
-                                  children: [
-                                    GestureDetector(
-                                      onTap: _togglePlayPause,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
-                                              ? const Color(0xFF8b5cf6).withValues(alpha: 0.35)
-                                              : Colors.transparent,
-                                          border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
-                                              ? Border.all(color: const Color(0xFFa78bfa), width: 2)
-                                              : null,
-                                        ),
-                                        child: Icon(
-                                          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.playPause)
-                                              ? const Color(0xFFa78bfa)
-                                              : Colors.white,
-                                          size: 26,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      '${_formatTime(pos)} / ${_formatTime(dur)}',
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                                    ),
-                                    const Spacer(),
-                                    if (!TvService.isTvMode) ...[
-                                      GestureDetector(
-                                        onTap: _enterPip,
-                                        child: Container(
-                                          padding: const EdgeInsets.all(4),
-                                          child: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                    ],
-                                    GestureDetector(
-                                      onTap: _toggleFullscreen,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(6),
-                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
-                                              ? const Color(0xFF8b5cf6).withValues(alpha: 0.35)
-                                              : Colors.transparent,
-                                          border: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
-                                              ? Border.all(color: const Color(0xFFa78bfa), width: 2)
-                                              : null,
-                                        ),
-                                        child: Icon(
-                                          _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                                          color: (TvService.isTvMode && _tvFocus == _PlayerTvFocus.fullscreen)
-                                              ? const Color(0xFFa78bfa)
-                                              : Colors.white,
-                                          size: 22,
-                                        ),
-                                      ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.9),
+                                  borderRadius: BorderRadius.circular(6),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black45,
+                                      blurRadius: 4,
                                     ),
                                   ],
                                 ),
+                                child: Text(
+                                  _formatTime(dv.toInt()),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              CustomPaint(
+                                size: const Size(12, 6),
+                                painter: _BubbleArrowPainter(),
                               ),
                             ],
                           ),
                         ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.85),
+                              ],
+                            ),
+                          ),
+                          child: SafeArea(
+                            top: false,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (dur > 0)
+                                  SizedBox(
+                                    height: 60,
+                                    child: LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        final trackW = constraints.maxWidth;
+                                        final trackH = 4.0;
+                                        final topY =
+                                            (constraints.maxHeight - trackH) /
+                                            2;
+                                        final frac = dur > 0
+                                            ? (dv / dur).clamp(0.0, 1.0)
+                                            : 0.0;
+
+                                        return GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTapDown: (details) {
+                                            final effectiveW = (trackW - 20)
+                                                .clamp(1.0, double.infinity);
+                                            final x =
+                                                (details.localPosition.dx - 10)
+                                                    .clamp(0.0, effectiveW);
+                                            final target =
+                                                ((x / effectiveW) * dur)
+                                                    .clamp(0.0, dur.toDouble())
+                                                    .toInt();
+                                            _isDragging = false;
+                                            _dragValue = target.toDouble();
+                                            _player.seekTo(target);
+                                            _lastPositionMs = target;
+                                            setState(() {});
+                                            _startHideTimer();
+                                          },
+                                          onHorizontalDragStart: (details) {
+                                            _isDragging = true;
+                                            _hideTimer?.cancel();
+                                            final effectiveW = (trackW - 20)
+                                                .clamp(1.0, double.infinity);
+                                            final x =
+                                                (details.localPosition.dx - 10)
+                                                    .clamp(0.0, effectiveW);
+                                            final val = ((x / effectiveW) * dur)
+                                                .clamp(0.0, dur.toDouble());
+                                            setState(() {
+                                              _dragValue = val;
+                                            });
+                                          },
+                                          onHorizontalDragUpdate: (details) {
+                                            final effectiveW = (trackW - 20)
+                                                .clamp(1.0, double.infinity);
+                                            final x =
+                                                (details.localPosition.dx - 10)
+                                                    .clamp(0.0, effectiveW);
+                                            final val = ((x / effectiveW) * dur)
+                                                .clamp(0.0, dur.toDouble());
+                                            setState(() {
+                                              _dragValue = val;
+                                            });
+                                          },
+                                          onHorizontalDragEnd: (details) {
+                                            if (_dragValue != null) {
+                                              final target = _dragValue!
+                                                  .toInt()
+                                                  .clamp(0, dur);
+                                              _player.seekTo(target);
+                                              _lastPositionMs = target;
+                                            }
+                                            _isDragging = false;
+                                            _dragValue = null;
+                                            setState(() {});
+                                            _startHideTimer();
+                                          },
+                                          onHorizontalDragCancel: () {
+                                            _isDragging = false;
+                                            _dragValue = null;
+                                            setState(() {});
+                                            _startHideTimer();
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                            ),
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                Positioned(
+                                                  top: topY,
+                                                  left: 0,
+                                                  right: 0,
+                                                  child: Container(
+                                                    height: trackH,
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white24,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            2,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Positioned(
+                                                  top: topY,
+                                                  left: 0,
+                                                  width:
+                                                      (trackW - 20).clamp(
+                                                        0.0,
+                                                        double.infinity,
+                                                      ) *
+                                                      frac,
+                                                  child: Container(
+                                                    height: trackH,
+                                                    decoration: BoxDecoration(
+                                                      color: AppColors.primary,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            2,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Positioned(
+                                                  left:
+                                                      ((trackW - 20).clamp(
+                                                            0.0,
+                                                            double.infinity,
+                                                          ) *
+                                                          frac) -
+                                                      7,
+                                                  top: topY - 5,
+                                                  child: Container(
+                                                    width: 14,
+                                                    height: 14,
+                                                    decoration:
+                                                        const BoxDecoration(
+                                                          color:
+                                                              AppColors.primary,
+                                                          shape:
+                                                              BoxShape.circle,
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: Colors
+                                                                  .black45,
+                                                              blurRadius: 4,
+                                                            ),
+                                                          ],
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Row(
+                                    children: [
+                                      GestureDetector(
+                                        onTap: _togglePlayPause,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .playPause)
+                                                ? AppColors.primary.withValues(
+                                                    alpha: 0.35,
+                                                  )
+                                                : Colors.transparent,
+                                            border:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .playPause)
+                                                ? Border.all(
+                                                    color:
+                                                        AppColors.primaryBright,
+                                                    width: 2,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: Icon(
+                                            isPlaying
+                                                ? Icons.pause_rounded
+                                                : Icons.play_arrow_rounded,
+                                            color:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .playPause)
+                                                ? AppColors.primaryBright
+                                                : Colors.white,
+                                            size: 26,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        '${_formatTime(pos)} / ${_formatTime(dur)}',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      if (!TvService.isTvMode) ...[
+                                        GestureDetector(
+                                          onTap: _enterPip,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(4),
+                                            child: const Icon(
+                                              Icons
+                                                  .picture_in_picture_alt_rounded,
+                                              color: Colors.white70,
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                      ],
+                                      GestureDetector(
+                                        onTap: _toggleFullscreen,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              6,
+                                            ),
+                                            color:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .fullscreen)
+                                                ? AppColors.primary.withValues(
+                                                    alpha: 0.35,
+                                                  )
+                                                : Colors.transparent,
+                                            border:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .fullscreen)
+                                                ? Border.all(
+                                                    color:
+                                                        AppColors.primaryBright,
+                                                    width: 2,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: Icon(
+                                            _isFullscreen
+                                                ? Icons.fullscreen_exit_rounded
+                                                : Icons.fullscreen_rounded,
+                                            color:
+                                                (TvService.isTvMode &&
+                                                    _tvFocus ==
+                                                        _PlayerTvFocus
+                                                            .fullscreen)
+                                                ? AppColors.primaryBright
+                                                : Colors.white,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
           ),
-        ),
       ],
     );
 
@@ -2441,9 +2868,7 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         onEnter: _onMouseEnter,
         onHover: _onMouseMove,
         onExit: _onMouseExit,
-        cursor: _cursorHidden
-            ? SystemMouseCursors.none
-            : MouseCursor.defer,
+        cursor: _cursorHidden ? SystemMouseCursors.none : MouseCursor.defer,
         child: playerWidget,
       );
     }
@@ -2469,7 +2894,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
 
   Widget _buildNavButtons(EpisodeDetail ep) {
     final hasPrev = ep.number > 1;
-    final hasNext = _animeDetail != null && ep.number < _animeDetail!.episodes.length;
+    final hasNext =
+        _animeDetail != null && ep.number < _animeDetail!.episodes.length;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -2487,12 +2913,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   focusNode: _prevBtnFocusNode,
                   onPressed: hasPrev ? _goPrev : null,
                   icon: const Icon(Icons.skip_previous_rounded, size: 20),
-                  label: const Text('Anterior', style: TextStyle(fontWeight: FontWeight.w600)),
+                  label: const Text(
+                    'Anterior',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: hasPrev ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
-                    foregroundColor: hasPrev ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    side: BorderSide(color: hasPrev ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                    backgroundColor: hasPrev
+                        ? AppColors.surfaceHigh
+                        : AppColors.surface,
+                    foregroundColor: hasPrev
+                        ? AppColors.primaryBright
+                        : AppColors.textDisabled,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    side: BorderSide(
+                      color: hasPrev
+                          ? AppColors.surfaceHighest
+                          : AppColors.outline,
+                    ),
                     elevation: 0,
                   ),
                 ),
@@ -2512,12 +2951,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                   focusNode: _nextBtnFocusNode,
                   onPressed: hasNext ? _goNext : null,
                   icon: const Icon(Icons.skip_next_rounded, size: 20),
-                  label: const Text('Siguiente', style: TextStyle(fontWeight: FontWeight.w600)),
+                  label: const Text(
+                    'Siguiente',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: hasNext ? const Color(0xFF1a1530) : const Color(0xFF110e1a),
-                    foregroundColor: hasNext ? const Color(0xFFa78bfa) : const Color(0xFF4a4260),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    side: BorderSide(color: hasNext ? const Color(0xFF2a2240) : const Color(0xFF1e1832)),
+                    backgroundColor: hasNext
+                        ? AppColors.surfaceHigh
+                        : AppColors.surface,
+                    foregroundColor: hasNext
+                        ? AppColors.primaryBright
+                        : AppColors.textDisabled,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    side: BorderSide(
+                      color: hasNext
+                          ? AppColors.surfaceHighest
+                          : AppColors.outline,
+                    ),
                     elevation: 0,
                   ),
                 ),
@@ -2529,7 +2981,10 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildVariantAndServers(EpisodeDetail ep, List<ServerMirror> filteredEmbeds) {
+  Widget _buildVariantAndServers(
+    EpisodeDetail ep,
+    List<ServerMirror> filteredEmbeds,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Wrap(
@@ -2538,22 +2993,25 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           if (ep.variants.length > 1) ...[
-            const Icon(Icons.language, color: Color(0xFF6d6488), size: 18),
+            const Icon(Icons.language, color: AppColors.textMuted, size: 18),
             ...ep.variants.map((v) {
               final isActive = v == _activeVariant;
               final label = v == 'DUB' ? 'Doblaje' : 'Subtitulado';
               return ChoiceChip(
                 label: Text(label),
                 selected: isActive,
-                onSelected: (_) { setState(() => _activeVariant = v); _autoPlay(); },
-                selectedColor: const Color(0xFF8b5cf6),
-                backgroundColor: const Color(0xFF110e1a),
+                onSelected: (_) {
+                  setState(() => _activeVariant = v);
+                  _autoPlay();
+                },
+                selectedColor: AppColors.primary,
+                backgroundColor: AppColors.surface,
                 labelStyle: TextStyle(
-                  color: isActive ? Colors.white : const Color(0xFFa99fc0),
+                  color: isActive ? Colors.white : AppColors.textSecondary,
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
                 ),
-                side: const BorderSide(color: Color(0xFF1e1832)),
+                side: const BorderSide(color: AppColors.outline),
               );
             }),
           ],
@@ -2568,33 +3026,62 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
       children: [
         GestureDetector(
           onTap: _closePlayback,
-          child: Text(widget.animeTitle, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFFe8e4f0))),
+          child: Text(
+            widget.animeTitle,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: AppColors.text,
+            ),
+          ),
         ),
         const SizedBox(height: 4),
-        Text('Episodio ${ep.number}', style: const TextStyle(fontSize: 14, color: Color(0xFF6d6488))),
+        Text(
+          'Episodio ${ep.number}',
+          style: const TextStyle(fontSize: 14, color: AppColors.textMuted),
+        ),
         if (anime != null) ...[
           const SizedBox(height: 10),
-          Wrap(spacing: 6, runSpacing: 4, children: [
-            _chip(anime.category, const Color(0xFF8b5cf6)),
-            if (anime.status.isNotEmpty && anime.status != 'unknown')
-              _chip(anime.status, anime.status.contains('Finalizado') ? const Color(0xFF22c55e) : const Color(0xFFf59e0b)),
-            ...anime.genres.map((g) => _chip(g.name, const Color(0xFF3b82f6))),
-          ]),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _chip(anime.category, AppColors.primary),
+              if (anime.status.isNotEmpty && anime.status != 'unknown')
+                _chip(
+                  anime.status,
+                  anime.status.contains('Finalizado')
+                      ? AppColors.success
+                      : AppColors.warning,
+                ),
+              ...anime.genres.map((g) => _chip(g.name, AppColors.info)),
+            ],
+          ),
         ],
         if (anime != null && anime.synopsis.isNotEmpty) ...[
           const SizedBox(height: 14),
-          Text(anime.synopsis, style: const TextStyle(fontSize: 14, color: Color(0xFFa99fc0), height: 1.5)),
+          Text(
+            anime.synopsis,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.textSecondary,
+              height: 1.5,
+            ),
+          ),
         ],
         if (anime != null && anime.episodes.isNotEmpty) ...[
           const SizedBox(height: 20),
           Row(
             children: [
               const Expanded(
-                child: Text('Episodios',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFe8e4f0))),
+                child: Text(
+                  'Episodios',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text,
+                  ),
+                ),
               ),
               ValueListenableBuilder<Map<String, double>>(
                 valueListenable: DownloadService.instance.progress,
@@ -2616,8 +3103,8 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                           : Icons.downloading_rounded,
                       size: 20,
                       color: isDownloaded
-                          ? const Color(0xFF22c55e)
-                          : const Color(0xFFf59e0b),
+                          ? AppColors.success
+                          : AppColors.warning,
                     );
                   }
 
@@ -2637,10 +3124,12 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
                       icon: const Icon(Icons.download_rounded, size: 17),
                       label: const Text('Descargar'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFa78bfa),
-                        side: const BorderSide(color: Color(0xFF3b2f5c)),
+                        foregroundColor: AppColors.primaryBright,
+                        side: const BorderSide(color: AppColors.outlineStrong),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                         minimumSize: const Size(0, 34),
                       ),
                     ),
@@ -2650,57 +3139,80 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
             ],
           ),
           const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: anime.episodes
-              .where((e) =>
-                  !widget.offlineLibrary ||
-                  DownloadService.instance.isDownloaded(
-                      widget.animeSlug, e.number))
-              .map((e) {
-            final isCurrent = e.number == ep.number;
-            final isWatched = _watchedEpisodes.contains(e.number) && !isCurrent;
-            final isDownloaded =
-                DownloadService.instance.isDownloaded(widget.animeSlug, e.number);
-            return TvFocusable(
-              onTap: () {
-                if (!isCurrent) _switchEpisode(e.number);
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(
-                  color: isCurrent ? const Color(0xFF8b5cf6) : const Color(0xFF110e1a),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isCurrent
-                        ? const Color(0xFF8b5cf6)
-                        : isDownloaded
-                            ? const Color(0xFF22c55e)
-                            : isWatched
-                                ? const Color(0xFF8b5cf6)
-                                : const Color(0xFF1e1832),
-                    width: isWatched || isDownloaded ? 2 : 1,
-                  ),
-                ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Text('${e.number}', style: TextStyle(fontWeight: FontWeight.w700, color: isCurrent ? Colors.white : const Color(0xFFe8e4f0))),
-                    if (isWatched)
-                      Positioned(
-                        top: 2, right: 2,
-                        child: Container(
-                          width: 6, height: 6,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF8b5cf6),
-                            shape: BoxShape.circle,
-                          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: anime.episodes
+                .where(
+                  (e) =>
+                      !widget.offlineLibrary ||
+                      DownloadService.instance.isDownloaded(
+                        widget.animeSlug,
+                        e.number,
+                      ),
+                )
+                .map((e) {
+                  final isCurrent = e.number == ep.number;
+                  final isWatched =
+                      _watchedEpisodes.contains(e.number) && !isCurrent;
+                  final isDownloaded = DownloadService.instance.isDownloaded(
+                    widget.animeSlug,
+                    e.number,
+                  );
+                  return TvFocusable(
+                    onTap: () {
+                      if (!isCurrent) _switchEpisode(e.number);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: isCurrent
+                            ? AppColors.primary
+                            : AppColors.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isCurrent
+                              ? AppColors.primary
+                              : isDownloaded
+                              ? AppColors.success
+                              : isWatched
+                              ? AppColors.primary
+                              : AppColors.outline,
+                          width: isWatched || isDownloaded ? 2 : 1,
                         ),
                       ),
-                  ],
-                ),
-              ),
-            );
-          }).toList()),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Text(
+                            '${e.number}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: isCurrent ? Colors.white : AppColors.text,
+                            ),
+                          ),
+                          if (isWatched)
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                })
+                .toList(),
+          ),
         ],
         const SizedBox(height: 80),
       ],
@@ -2710,8 +3222,18 @@ class _EpisodePageState extends State<EpisodePage> with TickerProviderStateMixin
   static Widget _chip(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -2755,17 +3277,22 @@ class _GlassCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: gradientColors ??
+          colors:
+              gradientColors ??
               [
-                const Color(0xFF18122c).withValues(alpha: TvService.isTvMode ? 0.95 : 0.85),
-                const Color(0xFF0e0a1a).withValues(alpha: TvService.isTvMode ? 0.98 : 0.90),
+                AppColors.surfaceHigh.withValues(
+                  alpha: TvService.isTvMode ? 0.95 : 0.85,
+                ),
+                AppColors.surface.withValues(
+                  alpha: TvService.isTvMode ? 0.98 : 0.90,
+                ),
               ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(
-          color: borderColor ?? const Color(0xFF8b5cf6).withValues(alpha: 0.22),
+          color: borderColor ?? AppColors.primary.withValues(alpha: 0.22),
           width: 1.0,
         ),
       ),
@@ -2781,9 +3308,11 @@ class _GlassCard extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: container,
+      child: RepaintBoundary(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: container,
+        ),
       ),
     );
   }
@@ -2792,7 +3321,11 @@ class _GlassCard extends StatelessWidget {
 class _ProbeScanPanel extends StatefulWidget {
   final Map<String, double> speeds;
   final bool started;
-  const _ProbeScanPanel({super.key, required this.speeds, required this.started});
+  const _ProbeScanPanel({
+    super.key,
+    required this.speeds,
+    required this.started,
+  });
 
   @override
   State<_ProbeScanPanel> createState() => _ProbeScanPanelState();
@@ -2810,10 +3343,10 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
           _GlassCard(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             borderRadius: 10,
-            borderColor: const Color(0xFF8b5cf6).withValues(alpha: 0.30),
+            borderColor: AppColors.primary.withValues(alpha: 0.30),
             gradientColors: [
-              const Color(0xFF22173d).withValues(alpha: 0.88),
-              const Color(0xFF110d1e).withValues(alpha: 0.92),
+              AppColors.surfaceHighest.withValues(alpha: 0.88),
+              AppColors.surface.withValues(alpha: 0.92),
             ],
             child: Row(
               children: [
@@ -2821,7 +3354,7 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
                   width: 3.5,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8b5cf6),
+                    color: AppColors.primary,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -2834,7 +3367,7 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
                       const Text(
                         'Seleccionando servidor',
                         style: TextStyle(
-                          color: Color(0xFFe8e4f0),
+                          color: AppColors.text,
                           fontSize: 13.5,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.2,
@@ -2846,7 +3379,7 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
                             ? 'Midiendo velocidad en tiempo real…'
                             : 'Buscando las mejores fuentes…',
                         style: const TextStyle(
-                          color: Color(0xFF8b5cf6),
+                          color: AppColors.primary,
                           fontSize: 11.5,
                           fontWeight: FontWeight.w500,
                         ),
@@ -2876,22 +3409,22 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
     final label = name.length > 24 ? '${name.substring(0, 24)}…' : name;
 
     final accent = probing
-        ? const Color(0xFFa78bfa)
+        ? AppColors.primaryBright
         : isEmbed
-            ? const Color(0xFFc084fc)
-            : ok
-                ? const Color(0xFF22c55e)
-                : meh
-                ? const Color(0xFFf59e0b)
-                : const Color(0xFFef4444);
+        ? AppColors.primaryBright
+        : ok
+        ? AppColors.success
+        : meh
+        ? AppColors.warning
+        : AppColors.danger;
 
     return _GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       borderRadius: 10,
       borderColor: accent.withValues(alpha: 0.22),
       gradientColors: [
-        const Color(0xFF18122c).withValues(alpha: 0.80),
-        const Color(0xFF0e0a1a).withValues(alpha: 0.88),
+        AppColors.surfaceHigh.withValues(alpha: 0.80),
+        AppColors.surface.withValues(alpha: 0.88),
       ],
       child: Row(
         children: [
@@ -2908,45 +3441,52 @@ class _ProbeScanPanelState extends State<_ProbeScanPanel> {
             child: Text(
               label,
               style: const TextStyle(
-                color: Color(0xFFe8e4f0),
+                color: AppColors.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.1,
               ),
             ),
           ),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: accent.withValues(alpha: 0.28), width: 0.8),
-          ),
-          child: Text(
-            probing
-                ? 'Midiendo…'
-                : isEmbed
-                    ? 'Web embed'
-                    : '${mbps.toStringAsFixed(1)} Mbps',
-            style: TextStyle(
-              color: accent,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.1,
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: accent.withValues(alpha: 0.28),
+                width: 0.8,
+              ),
+            ),
+            child: Text(
+              probing
+                  ? 'Midiendo…'
+                  : isEmbed
+                  ? 'Web embed'
+                  : '${mbps.toStringAsFixed(1)} Mbps',
+              style: TextStyle(
+                color: accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
   }
 }
 
 class _ProbeChosenCard extends StatefulWidget {
   final String server;
   final bool prewarming;
-  const _ProbeChosenCard({super.key, required this.server, this.prewarming = false});
+  const _ProbeChosenCard({
+    super.key,
+    required this.server,
+    this.prewarming = false,
+  });
 
   @override
   State<_ProbeChosenCard> createState() => _ProbeChosenCardState();
@@ -2967,16 +3507,18 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = widget.prewarming ? const Color(0xFFa78bfa) : const Color(0xFF22c55e);
+    final statusColor = widget.prewarming
+        ? AppColors.primaryBright
+        : AppColors.success;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 340),
       child: _GlassCard(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         borderRadius: 12,
-        borderColor: const Color(0xFF8b5cf6).withValues(alpha: 0.32),
+        borderColor: AppColors.primary.withValues(alpha: 0.32),
         gradientColors: [
-          const Color(0xFF20163b).withValues(alpha: 0.90),
-          const Color(0xFF0e0a1a).withValues(alpha: 0.94),
+          AppColors.outline.withValues(alpha: 0.90),
+          AppColors.surface.withValues(alpha: 0.94),
         ],
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2985,17 +3527,19 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFF8b5cf6).withValues(alpha: 0.16),
+                color: AppColors.primary.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color: const Color(0xFF8b5cf6).withValues(alpha: 0.30),
+                  color: AppColors.primary.withValues(alpha: 0.30),
                   width: 0.8,
                 ),
               ),
               child: Text(
-                widget.prewarming ? 'OPTIMIZANDO FUENTE' : 'SERVIDOR SELECCIONADO',
+                widget.prewarming
+                    ? 'OPTIMIZANDO FUENTE'
+                    : 'SERVIDOR SELECCIONADO',
                 style: const TextStyle(
-                  color: Color(0xFFc4b5fd),
+                  color: AppColors.primaryBright,
                   fontSize: 10.5,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.6,
@@ -3008,7 +3552,7 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Color(0xFFe8e4f0),
+                color: AppColors.text,
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.2,
@@ -3020,7 +3564,7 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
                   ? 'Preparando transmisión fluida…'
                   : 'Conectando con el servidor…',
               style: const TextStyle(
-                color: Color(0xFF8b5cf6),
+                color: AppColors.primary,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
@@ -3032,8 +3576,8 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
                 child: const SizedBox(
                   height: 3,
                   child: LinearProgressIndicator(
-                    color: Color(0xFF8b5cf6),
-                    backgroundColor: Color(0xFF22173d),
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.surfaceHighest,
                   ),
                 ),
               ),
@@ -3053,9 +3597,11 @@ class _ProbeChosenCardState extends State<_ProbeChosenCard>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    widget.prewarming ? 'Cargando datos iniciales…' : 'Iniciando reproducción…',
+                    widget.prewarming
+                        ? 'Cargando datos iniciales…'
+                        : 'Iniciando reproducción…',
                     style: const TextStyle(
-                      color: Color(0xFFa99fc0),
+                      color: AppColors.textSecondary,
                       fontSize: 11.5,
                       fontWeight: FontWeight.w500,
                     ),

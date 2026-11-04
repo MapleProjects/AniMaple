@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
+
 import '../models/anime.dart';
 import '../services/api_service.dart';
+import '../services/sync_service.dart';
+import '../ui/tokens.dart';
+import '../ui/widgets/ambient_page.dart';
+import '../ui/widgets/empty_state.dart';
+import '../ui/widgets/overlay_icon_button.dart';
+import '../ui/widgets/poster_card.dart';
+import '../ui/widgets/skeletons.dart';
 import '../widgets/error_dialog.dart';
-import '../widgets/tv_focusable.dart';
 import 'episode_page.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -20,6 +27,13 @@ class HistoryPageState extends State<HistoryPage> {
   void initState() {
     super.initState();
     _load();
+    SyncService.stateVersion.addListener(_load);
+  }
+
+  @override
+  void dispose() {
+    SyncService.stateVersion.removeListener(_load);
+    super.dispose();
   }
 
   void refresh() => _load();
@@ -27,13 +41,17 @@ class HistoryPageState extends State<HistoryPage> {
   Future<void> _load() async {
     try {
       final h = await ApiService.fetchHistory();
-      setState(() { _history = h; _loading = false; });
+      if (!mounted) return;
+      setState(() {
+        _history = h;
+        _loading = false;
+      });
     } catch (e, st) {
       debugPrint('HISTORY ERROR: $e');
       if (mounted && !isConnectivityError(e)) {
         showErrorSheet(context, e, st);
       }
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -41,22 +59,31 @@ class HistoryPageState extends State<HistoryPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF110e1a),
-        title: const Text('Eliminar del historial', style: TextStyle(color: Color(0xFFe8e4f0))),
-        content: Text('¿Eliminar el capítulo ${h.episodeNumber} de "${h.animeTitle}" del historial?', style: const TextStyle(color: Color(0xFFa99fc0))),
+        title: const Text('Eliminar del historial'),
+        content: Text(
+          '¿Eliminar el capítulo ${h.episodeNumber} de "${h.animeTitle}" del historial?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488))),
+            child: const Text('Cancelar'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Eliminar', style: TextStyle(color: Color(0xFFef4444))),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
     );
     if (confirm == true) {
+      // Actualización optimista: la tarjeta desaparece al instante.
+      setState(
+        () => _history.removeWhere(
+          (x) =>
+              x.animeSlug == h.animeSlug && x.episodeNumber == h.episodeNumber,
+        ),
+      );
       await ApiService.deleteHistory(h.animeSlug, h.episodeNumber);
       _load();
     }
@@ -64,85 +91,112 @@ class HistoryPageState extends State<HistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Historial')),
-      body: _loading
-        ? const Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6)))
-        : _history.isEmpty
-          ? const Center(child: Text('Sin historial', style: TextStyle(color: Color(0xFF6d6488))))
-          : GridView.builder(
-              padding: const EdgeInsets.all(12),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 200,
-                childAspectRatio: 0.6,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemCount: _history.length,
-              itemBuilder: (ctx, i) {
-                final h = _history[i];
-                return TvFocusable(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => EpisodePage(
-                      animeSlug: h.animeSlug,
-                      episodeNumber: h.episodeNumber,
-                      animeTitle: h.animeTitle,
-                    ),
-                  )),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF110e1a),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.network(h.posterUrl, fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.play_circle_outline, color: Color(0xFF4a4260), size: 40))),
-                              Positioned(
-                                top: 6, left: 6,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                  decoration: BoxDecoration(color: const Color(0xFF8b5cf6).withValues(alpha: 0.9), borderRadius: BorderRadius.circular(5)),
-                                  child: Text('Ep ${h.episodeNumber}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
-                                ),
-                              ),
-                              Positioned(
-                                top: 4, right: 4,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(20),
-                                    onTap: () => _deleteWithConfirm(h),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.6),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(Icons.close, color: Colors.white, size: 16),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+    return AmbientPage(
+      imageUrl: _history.isNotEmpty ? _history.first.posterUrl : null,
+      opacity: 0.50,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: RefreshIndicator(
+          onRefresh: _load,
+          color: AppColors.primary,
+          backgroundColor: AppColors.surface,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            slivers: [
+              SliverAppBar(
+                pinned: true,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                backgroundColor: AppColors.bg.withValues(alpha: 0.62),
+                surfaceTintColor: Colors.transparent,
+                title: const Text('Historial'),
+                actions: [
+                  if (_history.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: AppSpace.md),
+                      child: Center(
+                        child: Text(
+                          '${_history.length} títulos',
+                          style: Theme.of(context).textTheme.labelSmall,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(h.animeTitle, maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFFe8e4f0), height: 1.3)),
-                    ],
+                    ),
+                ],
+              ),
+              if (_loading)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: AppSpace.md),
+                    child: SkeletonPosterGrid(),
                   ),
-                );
-              },
-            ),
+                )
+              else if (_history.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.history,
+                    title: 'Sin historial',
+                    message:
+                        'Los capítulos que veas aparecerán aquí para retomarlos.',
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpace.page,
+                    AppSpace.md,
+                    AppSpace.page,
+                    AppLayout.bottomGutter,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: AppLayout.posterExtentFor(context),
+                      childAspectRatio: AppLayout.posterAspect,
+                      crossAxisSpacing: AppSpace.md,
+                      mainAxisSpacing: AppSpace.lg,
+                    ),
+                    delegate: SliverChildBuilderDelegate((ctx, i) {
+                      final h = _history[i];
+                      return PosterCard(
+                        title: h.animeTitle,
+                        imageUrl: h.posterUrl,
+                        badge: 'Ep ${h.episodeNumber}',
+                        subtitle: _relativeDate(h.watchedAt),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => EpisodePage(
+                              animeSlug: h.animeSlug,
+                              episodeNumber: h.episodeNumber,
+                              animeTitle: h.animeTitle,
+                            ),
+                          ),
+                        ),
+                        action: OverlayIconButton(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Quitar del historial',
+                          onPressed: () => _deleteWithConfirm(h),
+                        ),
+                      );
+                    }, childCount: _history.length),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
+  }
+
+  static String _relativeDate(String iso) {
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return '';
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return 'hace ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'hace ${diff.inHours} h';
+    if (diff.inDays < 30) return 'hace ${diff.inDays} d';
+    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 }

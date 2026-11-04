@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../ui/tokens.dart';
 
 /// Selector modal de episodios para descarga con soporte de variantes.
 class DownloadSheet extends StatefulWidget {
@@ -11,7 +12,11 @@ class DownloadSheet extends StatefulWidget {
   /// Episodios preseleccionados al abrir la hoja.
   final Set<int> preselected;
 
-  const DownloadSheet({super.key, required this.anime, this.preselected = const {}});
+  const DownloadSheet({
+    super.key,
+    required this.anime,
+    this.preselected = const {},
+  });
 
   static Future<void> show(
     BuildContext context,
@@ -20,7 +25,7 @@ class DownloadSheet extends StatefulWidget {
   }) {
     return showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF110e1a),
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -49,9 +54,11 @@ class _DownloadSheetState extends State<DownloadSheet> {
     super.initState();
     _dl = DownloadService.instance;
     _selected = widget.preselected
-        .where((n) =>
-            !_dl.isDownloaded(widget.anime.slug, n) &&
-            !_dl.isQueued(widget.anime.slug, n))
+        .where(
+          (n) =>
+              !_dl.isDownloaded(widget.anime.slug, n) &&
+              !_dl.isQueued(widget.anime.slug, n),
+        )
         .toSet();
     _loadWatched();
     _probeDub();
@@ -83,8 +90,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
     final candidates = List<int>.generate(
       widget.anime.episodes.length,
       (i) => widget.anime.episodes[i].number,
-    ).where((n) => !_dl.isDownloaded(slug, n)).toList()
-      ..sort();
+    ).where((n) => !_dl.isDownloaded(slug, n)).toList()..sort();
     if (candidates.isEmpty) return;
     if (!mounted) return;
     setState(() => _probingDub = true);
@@ -137,21 +143,29 @@ class _DownloadSheetState extends State<DownloadSheet> {
     final res = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF110e1a),
-        title: const Text('Eliminar descarga',
-            style: TextStyle(color: Color(0xFFe8e4f0))),
-        content: Text('¿Eliminar el episodio $ep descargado?',
-            style: const TextStyle(color: Color(0xFFa99fc0))),
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Eliminar descarga',
+          style: TextStyle(color: AppColors.text),
+        ),
+        content: Text(
+          '¿Eliminar el episodio $ep descargado?',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar',
-                style: TextStyle(color: Color(0xFF6d6488))),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Eliminar', style: TextStyle(color: Color(0xFFef4444))),
+            child: const Text(
+              'Eliminar',
+              style: TextStyle(color: AppColors.danger),
+            ),
           ),
         ],
       ),
@@ -160,14 +174,16 @@ class _DownloadSheetState extends State<DownloadSheet> {
   }
 
   static Widget _miniStat(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(text,
-            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -176,8 +192,10 @@ class _DownloadSheetState extends State<DownloadSheet> {
     final downloaded = _dl.downloadedEpisodes(slug);
     final failures = _dl.failures.value;
     final pendingCount = eps
-        .where((e) =>
-            !downloaded.contains(e.number) && !_dl.isQueued(slug, e.number))
+        .where(
+          (e) =>
+              !downloaded.contains(e.number) && !_dl.isQueued(slug, e.number),
+        )
         .length;
     final showDubToggle = _dubAvailable || _dubEpCached != null;
 
@@ -197,36 +215,45 @@ class _DownloadSheetState extends State<DownloadSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Descargar capítulos',
-                            style: TextStyle(
-                                color: Color(0xFFe8e4f0),
-                                fontWeight: FontWeight.w800,
-                                fontSize: 17)),
+                        Text(
+                          'Descargar capítulos',
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 17,
+                          ),
+                        ),
                         SizedBox(height: 2),
-                        Text(widget.anime.title,
-                            style: const TextStyle(
-                                color: Color(0xFF6d6488), fontSize: 13),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
+                        Text(
+                          widget.anime.title,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, color: Color(0xFF6d6488)),
+                    icon: const Icon(Icons.close, color: AppColors.textMuted),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
               ),
             ),
-            const Divider(color: Color(0xFF1e1832), height: 1),
+            const Divider(color: AppColors.outline, height: 1),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
-                  _miniStat('${downloaded.length} descargados',
-                      const Color(0xFF22c55e)),
+                  _miniStat(
+                    '${downloaded.length} descargados',
+                    AppColors.success,
+                  ),
                   const SizedBox(width: 8),
-                  _miniStat('$pendingCount disponibles', const Color(0xFF3b82f6)),
+                  _miniStat('$pendingCount disponibles', AppColors.info),
                   const Spacer(),
                   if (_probingDub)
                     const SizedBox(
@@ -245,8 +272,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
             Flexible(
               child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                gridDelegate:
-                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                   maxCrossAxisExtent: 84,
                   childAspectRatio: 1,
                   crossAxisSpacing: 8,
@@ -266,7 +292,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
             Container(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
               decoration: BoxDecoration(
-                color: Color(0xFF0a0812),
+                color: AppColors.bg,
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.4),
@@ -282,18 +308,18 @@ class _DownloadSheetState extends State<DownloadSheet> {
                       onPressed: pendingCount == 0
                           ? null
                           : () => setState(() {
-                                _selected = {
-                                  for (final e in eps)
-                                    if (!downloaded.contains(e.number) &&
-                                        !_dl.isQueued(slug, e.number))
-                                      e.number
-                                };
-                              }),
+                              _selected = {
+                                for (final e in eps)
+                                  if (!downloaded.contains(e.number) &&
+                                      !_dl.isQueued(slug, e.number))
+                                    e.number,
+                              };
+                            }),
                       icon: const Icon(Icons.select_all, size: 18),
                       label: const Text('Seleccionar todo'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFa78bfa),
-                        side: const BorderSide(color: Color(0xFF3b2f5c)),
+                        foregroundColor: AppColors.primaryBright,
+                        side: const BorderSide(color: AppColors.outlineStrong),
                       ),
                     ),
                   ),
@@ -301,23 +327,22 @@ class _DownloadSheetState extends State<DownloadSheet> {
                   Expanded(
                     flex: 2,
                     child: ElevatedButton.icon(
-                      onPressed:
-                          (_selected.isEmpty || _enqueued)
-                              ? null
-                              : () => _enqueue(_selected),
+                      onPressed: (_selected.isEmpty || _enqueued)
+                          ? null
+                          : () => _enqueue(_selected),
                       icon: Icon(_enqueued ? Icons.schedule : Icons.download),
                       label: Text(
                         _enqueued
                             ? 'En cola'
                             : _selected.isEmpty
-                                ? 'Selecciona capítulos'
-                                : 'Descargar ${_selected.length}',
+                            ? 'Selecciona capítulos'
+                            : 'Descargar ${_selected.length}',
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF8b5cf6),
+                        backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor: const Color(0xFF1e1832),
-                        disabledForegroundColor: const Color(0xFF4a4260),
+                        disabledBackgroundColor: AppColors.outline,
+                        disabledForegroundColor: AppColors.textDisabled,
                       ),
                     ),
                   ),
@@ -345,26 +370,30 @@ class _DubToggle extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
         decoration: BoxDecoration(
           color: value
-              ? const Color(0xFF8b5cf6).withValues(alpha: 0.18)
+              ? AppColors.primary.withValues(alpha: 0.18)
               : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: value ? const Color(0xFF8b5cf6) : const Color(0xFF3a3350),
+            color: value ? AppColors.primary : AppColors.outlineStrong,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.record_voice_over_rounded,
-                size: 13,
-                color: value ? const Color(0xFFa78bfa) : const Color(0xFF6d6488)),
+            Icon(
+              Icons.record_voice_over_rounded,
+              size: 13,
+              color: value ? AppColors.primaryBright : AppColors.textMuted,
+            ),
             const SizedBox(width: 4),
             Text(
               'Doblaje',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
-                color: value ? const Color(0xFFa78bfa) : const Color(0xFFa99fc0),
+                color: value
+                    ? AppColors.primaryBright
+                    : AppColors.textSecondary,
               ),
             ),
           ],
@@ -401,21 +430,24 @@ class _EpTile extends StatelessWidget {
         final selected = parent._selected.contains(ep);
         final watched = parent._watchedNumbers.contains(ep);
 
-        Color border = const Color(0xFF1e1832);
-        Color fill = const Color(0xFF110e1a);
+        Color border = AppColors.outline;
+        Color fill = AppColors.surface;
         Widget content;
 
         if (downloaded) {
-          border = const Color(0xFF2a2440);
-          fill = const Color(0xFF1a1626);
+          border = AppColors.surfaceHighest;
+          fill = AppColors.surfaceHigh;
           content = Stack(
             alignment: Alignment.center,
             children: [
-              Text('$ep',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF4a4260))),
+              Text(
+                '$ep',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textDisabled,
+                ),
+              ),
               Positioned(
                 top: 2,
                 right: 2,
@@ -425,15 +457,18 @@ class _EpTile extends StatelessWidget {
                       await parent._deleteEpisode(ep);
                     }
                   },
-                  child: const Icon(Icons.close_rounded,
-                      size: 13, color: Color(0xFFef4444)),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: AppColors.danger,
+                  ),
                 ),
               ),
             ],
           );
         } else if (queued) {
-          border = const Color(0xFFf59e0b);
-          fill = const Color(0xFF1a1530);
+          border = AppColors.warning;
+          fill = AppColors.surfaceHigh;
           content = Stack(
             alignment: Alignment.center,
             children: [
@@ -441,7 +476,7 @@ class _EpTile extends StatelessWidget {
                 CircularProgressIndicator(
                   value: progress >= 0 && progress <= 1 ? progress : null,
                   strokeWidth: 2.4,
-                  color: const Color(0xFFf59e0b),
+                  color: AppColors.warning,
                 )
               else
                 SizedBox(
@@ -449,7 +484,7 @@ class _EpTile extends StatelessWidget {
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.4,
-                    color: const Color(0xFFf59e0b),
+                    color: AppColors.warning,
                   ),
                 ),
               Positioned(
@@ -457,20 +492,25 @@ class _EpTile extends StatelessWidget {
                 right: 2,
                 child: GestureDetector(
                   onTap: () => dl.cancelQueued(widget.anime.slug, episode: ep),
-                  child: const Icon(Icons.close_rounded,
-                      size: 13, color: Color(0xFFef4444)),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: AppColors.danger,
+                  ),
                 ),
               ),
             ],
           );
         } else if (failure != null) {
-          border = const Color(0xFFef4444);
+          border = AppColors.danger;
           content = Stack(
             alignment: Alignment.center,
             children: [
-              Text('$ep',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(
+                '$ep',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
               Positioned(
                 bottom: 2,
                 right: 2,
@@ -487,26 +527,31 @@ class _EpTile extends StatelessWidget {
                       detail: widget.anime,
                     );
                   },
-                  child: const Icon(Icons.refresh_rounded,
-                      size: 13, color: Color(0xFFf59e0b)),
+                  child: const Icon(
+                    Icons.refresh_rounded,
+                    size: 13,
+                    color: AppColors.warning,
+                  ),
                 ),
               ),
             ],
           );
         } else {
           if (selected) {
-            border = const Color(0xFF8b5cf6);
-            fill = const Color(0xFF241b45);
+            border = AppColors.primary;
+            fill = AppColors.surfaceHighest;
           }
           content = Stack(
             alignment: Alignment.center,
             children: [
-              Text('$ep',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color:
-                          selected ? Colors.white : const Color(0xFFa99fc0))),
+              Text(
+                '$ep',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: selected ? Colors.white : AppColors.textSecondary,
+                ),
+              ),
               if (watched)
                 Positioned(
                   top: 4,
@@ -515,7 +560,7 @@ class _EpTile extends StatelessWidget {
                     width: 7,
                     height: 7,
                     decoration: const BoxDecoration(
-                      color: Color(0xFF3b82f6),
+                      color: AppColors.info,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -529,8 +574,8 @@ class _EpTile extends StatelessWidget {
                       : Icons.check_box_outline_blank_rounded,
                   size: 14,
                   color: selected
-                      ? const Color(0xFFa78bfa)
-                      : const Color(0xFF4a4260),
+                      ? AppColors.primaryBright
+                      : AppColors.textDisabled,
                 ),
               ),
             ],
@@ -538,15 +583,15 @@ class _EpTile extends StatelessWidget {
         }
 
         return GestureDetector(
-          onTap: downloaded || queued
-              ? null
-              : () => parent._toggleSelect(ep),
+          onTap: downloaded || queued ? null : () => parent._toggleSelect(ep),
           child: Container(
             decoration: BoxDecoration(
               color: fill,
               borderRadius: BorderRadius.circular(9),
-              border:
-                  Border.all(color: border, width: downloaded || queued ? 2 : 1.4),
+              border: Border.all(
+                color: border,
+                width: downloaded || queued ? 2 : 1.4,
+              ),
             ),
             padding: const EdgeInsets.all(4),
             child: content,

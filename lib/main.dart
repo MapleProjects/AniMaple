@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io' show Platform, File, FileMode;
+import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 import 'services/api_service.dart';
@@ -24,6 +24,10 @@ import 'package:path_provider/path_provider.dart';
 import 'widgets/downloads_fab.dart';
 import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
+import 'ui/theme.dart';
+import 'ui/tokens.dart';
+import 'ui/widgets/glass_navigation_bar.dart';
+import 'ui/widgets/ambient_backdrop.dart';
 
 void _setupCrashLogger() {
   FlutterError.onError = (details) {
@@ -42,7 +46,8 @@ void _writeCrashLog(String source, String error, StackTrace? stack) {
     getApplicationSupportDirectory().then((dir) {
       final file = File('${dir.path}/crash.log');
       final now = DateTime.now().toIso8601String();
-      final content = '[$now] [$source]\nError: $error\nStack trace:\n${stack ?? ''}\n----------------------------------------\n';
+      final content =
+          '[$now] [$source]\nError: $error\nStack trace:\n${stack ?? ''}\n----------------------------------------\n';
       file.writeAsStringSync(content, mode: FileMode.append);
     });
   } catch (_) {}
@@ -55,9 +60,15 @@ void _setupFileLogger() {
     if (message != null) {
       try {
         final home = Platform.environment['HOME'] ?? '';
-        final file = File('$home/.local/share/com.mapleprojects.animaple/player.log');
+        final file = File(
+          '$home/.local/share/com.mapleprojects.animaple/player.log',
+        );
         file.parent.createSync(recursive: true);
-        file.writeAsStringSync('[${DateTime.now().toIso8601String()}][DEBUG] $message\n', mode: FileMode.append, flush: true);
+        file.writeAsStringSync(
+          '[${DateTime.now().toIso8601String()}][DEBUG] $message\n',
+          mode: FileMode.append,
+          flush: true,
+        );
       } catch (_) {}
     }
   };
@@ -120,7 +131,8 @@ void main() async {
       });
 
       Future.delayed(const Duration(milliseconds: 2400), () async {
-        final ignored = await NotificationService.isBatteryOptimizationIgnored();
+        final ignored =
+            await NotificationService.isBatteryOptimizationIgnored();
         if (ignored) return;
         final prefs = await SharedPreferences.getInstance();
         if (prefs.getBool('battery_prompt_done') ?? false) return;
@@ -162,7 +174,8 @@ void main() async {
         if (update == true &&
             AniMapleApp.navigatorKey.currentContext?.mounted == true) {
           await UpdateService.downloadAndInstall(
-              AniMapleApp.navigatorKey.currentContext!);
+            AniMapleApp.navigatorKey.currentContext!,
+          );
         }
       });
     });
@@ -191,25 +204,15 @@ class AniMapleApp extends StatelessWidget {
       title: 'AniMaple',
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0a0812),
-        colorScheme: const ColorScheme.dark(
-          surface: Color(0xFF0a0812),
-          primary: Color(0xFF8b5cf6),
-          secondary: Color(0xFFa78bfa),
-          onSurface: Color(0xFFe8e4f0),
-        ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-        cardTheme: CardThemeData(
-          color: const Color(0xFF110e1a),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0a0812),
-          elevation: 0,
-          surfaceTintColor: Colors.transparent,
-        ),
+      theme: AppTheme.dark,
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        dragDevices: {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.trackpad,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.invertedStylus,
+        },
       ),
       home: const ErrorBoundary(child: MainShell()),
     );
@@ -263,65 +266,81 @@ class _MainShellState extends State<MainShell> {
       valueListenable: TvService.isTv,
       builder: (context, isTv, _) {
         final screenWidth = MediaQuery.of(context).size.width;
-        final isWideLayout = isTv || Platform.isLinux || Platform.isWindows || screenWidth > 800;
+        final isWideLayout = isTv || screenWidth > 800;
 
         if (isWideLayout) {
+          final railWidth = isTv ? 108.0 : 96.0;
           return Scaffold(
-            body: Row(
+            backgroundColor: Colors.transparent,
+            body: Stack(
+              fit: StackFit.expand,
               children: [
-                Container(
-                  width: 96,
-                  color: const Color(0xFF0e0b18),
-                  child: SafeArea(
-                    right: false,
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 24, bottom: 16),
-                          child: ShaderMask(
-                            shaderCallback: (bounds) => const LinearGradient(
-                              colors: [Color(0xFF8b5cf6), Color(0xFFec4899)],
-                            ).createShader(bounds),
-                            child: const Text(
-                              'AniMaple',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 17,
-                                color: Colors.white,
-                                letterSpacing: 0.5,
-                              ),
+                const AmbientBackdrop(opacity: 0.85),
+                Row(
+                  children: [
+                    Container(
+                      width: railWidth,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            AppColors.surface.withValues(alpha: 0.38),
+                            AppColors.bg.withValues(alpha: 0.55),
+                          ],
+                        ),
+                        border: Border(
+                          right: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.05),
+                          ),
+                        ),
+                      ),
+                      child: SafeArea(
+                        right: false,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _buildRailItem(
+                              0,
+                              'Inicio',
+                              Icons.home_outlined,
+                              Icons.home,
                             ),
-                          ),
+                            _buildRailItem(
+                              1,
+                              'Catálogo',
+                              Icons.search_outlined,
+                              Icons.search,
+                            ),
+                            _buildRailItem(
+                              2,
+                              'Horario',
+                              Icons.calendar_today_outlined,
+                              Icons.calendar_today,
+                            ),
+                            _buildRailItem(
+                              3,
+                              'Historial',
+                              Icons.history_outlined,
+                              Icons.history,
+                            ),
+                            _buildRailItem(
+                              4,
+                              'Mi lista',
+                              Icons.favorite_outline,
+                              Icons.favorite,
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildRailItem(0, 'Inicio', Icons.home_outlined, Icons.home),
-                              _buildRailItem(1, 'Catálogo', Icons.search_outlined, Icons.search),
-                              _buildRailItem(2, 'Horario', Icons.calendar_today_outlined, Icons.calendar_today),
-                              _buildRailItem(3, 'Historial', Icons.history_outlined, Icons.history),
-                              _buildRailItem(4, 'Mi lista', Icons.favorite_outline, Icons.favorite),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                const VerticalDivider(thickness: 1, width: 1, color: Color(0xFF1e1832)),
-                Expanded(
-                  child: IndexedStack(
-                    index: _currentIndex,
-                    children: [
-                      const HomePage(),
-                      const SearchPage(),
-                      const CalendarPage(),
-                      HistoryPage(key: _historyKey),
-                      FollowingPage(key: _followingKey),
-                    ],
-                  ),
+                    Expanded(
+                      child: IndexedStack(
+                        index: _currentIndex,
+                        children: _pages(),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -330,46 +349,35 @@ class _MainShellState extends State<MainShell> {
         }
 
         return Scaffold(
-          body: IndexedStack(
-            index: _currentIndex,
-            children: [
-              const HomePage(),
-              const SearchPage(),
-              const CalendarPage(),
-              HistoryPage(key: _historyKey),
-              FollowingPage(key: _followingKey),
-            ],
-          ),
-          bottomNavigationBar: NavigationBar(
+          extendBody: true,
+          body: IndexedStack(index: _currentIndex, children: _pages()),
+          bottomNavigationBar: GlassNavigationBar(
             selectedIndex: _currentIndex,
             onDestinationSelected: _onTabChanged,
-            backgroundColor: const Color(0xFF0a0812).withValues(alpha: 0.95),
-            surfaceTintColor: Colors.transparent,
-            indicatorColor: const Color(0xFF8b5cf6).withValues(alpha: 0.15),
             destinations: const [
               NavigationDestination(
                 icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home, color: Color(0xFFa78bfa)),
+                selectedIcon: Icon(Icons.home),
                 label: 'Inicio',
               ),
               NavigationDestination(
                 icon: Icon(Icons.search_outlined),
-                selectedIcon: Icon(Icons.search, color: Color(0xFFa78bfa)),
+                selectedIcon: Icon(Icons.search),
                 label: 'Catálogo',
               ),
               NavigationDestination(
                 icon: Icon(Icons.calendar_today_outlined),
-                selectedIcon: Icon(Icons.calendar_today, color: Color(0xFFa78bfa)),
+                selectedIcon: Icon(Icons.calendar_today),
                 label: 'Horario',
               ),
               NavigationDestination(
                 icon: Icon(Icons.history_outlined),
-                selectedIcon: Icon(Icons.history, color: Color(0xFFa78bfa)),
+                selectedIcon: Icon(Icons.history),
                 label: 'Historial',
               ),
               NavigationDestination(
                 icon: Icon(Icons.favorite_outline),
-                selectedIcon: Icon(Icons.favorite, color: Color(0xFFa78bfa)),
+                selectedIcon: Icon(Icons.favorite),
                 label: 'Mi lista',
               ),
             ],
@@ -379,6 +387,22 @@ class _MainShellState extends State<MainShell> {
       },
     );
   }
+
+  /// Páginas del shell. `TickerMode` detiene las animaciones de las pestañas
+  /// ocultas: sin esto, los fondos animados siguen produciendo frames.
+  List<Widget> _pages() => [
+    TickerMode(enabled: _currentIndex == 0, child: const HomePage()),
+    TickerMode(enabled: _currentIndex == 1, child: const SearchPage()),
+    TickerMode(enabled: _currentIndex == 2, child: const CalendarPage()),
+    TickerMode(
+      enabled: _currentIndex == 3,
+      child: HistoryPage(key: _historyKey),
+    ),
+    TickerMode(
+      enabled: _currentIndex == 4,
+      child: FollowingPage(key: _followingKey),
+    ),
+  ];
 
   Widget _buildRailItem(
     int index,
@@ -425,7 +449,7 @@ class _RailNavItemState extends State<_RailNavItem> {
     final highlight = _isFocused || _isHovered;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
       child: FocusableActionDetector(
         onShowFocusHighlight: (f) => setState(() => _isFocused = f),
         onShowHoverHighlight: (h) => setState(() => _isHovered = h),
@@ -436,37 +460,41 @@ class _RailNavItemState extends State<_RailNavItem> {
         },
         child: InkWell(
           onTap: widget.onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.md),
           focusColor: Colors.transparent,
           hoverColor: Colors.transparent,
-          splashColor: const Color(0xFF8b5cf6).withValues(alpha: 0.2),
+          splashColor: AppColors.primary.withValues(alpha: 0.2),
           highlightColor: Colors.transparent,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: AppMotion.base,
+            curve: AppMotion.curve,
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            padding: const EdgeInsets.symmetric(
+              vertical: AppSpace.sm + 2,
+              horizontal: AppSpace.xs,
+            ),
             decoration: BoxDecoration(
               color: active
-                  ? const Color(0xFF8b5cf6).withValues(alpha: 0.25)
+                  ? AppColors.primary.withValues(alpha: 0.16)
                   : (highlight
-                      ? const Color(0xFF8b5cf6).withValues(alpha: 0.12)
-                      : Colors.transparent),
-              borderRadius: BorderRadius.circular(16),
+                        ? AppColors.primary.withValues(alpha: 0.10)
+                        : Colors.transparent),
+              borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(
                 color: _isFocused
-                    ? const Color(0xFFa78bfa)
+                    ? AppColors.primaryBright
                     : (active
-                        ? const Color(0xFF8b5cf6).withValues(alpha: 0.4)
-                        : Colors.transparent),
+                          ? AppColors.primary.withValues(alpha: 0.4)
+                          : Colors.transparent),
                 width: _isFocused ? 2 : 1,
               ),
               boxShadow: _isFocused
                   ? [
                       BoxShadow(
-                        color: const Color(0xFF8b5cf6).withValues(alpha: 0.35),
-                        blurRadius: 10,
+                        color: AppColors.primary.withValues(alpha: 0.30),
+                        blurRadius: 12,
                         spreadRadius: 1,
-                      )
+                      ),
                     ]
                   : null,
             ),
@@ -476,20 +504,19 @@ class _RailNavItemState extends State<_RailNavItem> {
                 Icon(
                   active ? widget.selectedIcon : widget.unselectedIcon,
                   color: active || highlight
-                      ? const Color(0xFFa78bfa)
-                      : const Color(0xFF6d6488),
-                  size: 26,
+                      ? AppColors.primaryBright
+                      : AppColors.textMuted,
+                  size: 25,
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: AppSpace.xs + 1),
                 Text(
                   widget.label,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: active || highlight
-                        ? const Color(0xFFf3f0fa)
-                        : const Color(0xFF6d6488),
-                    fontSize: 12,
-                    fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                        ? AppColors.textStrong
+                        : AppColors.textMuted,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ],

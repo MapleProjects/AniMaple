@@ -38,10 +38,15 @@ class DownloadService {
   static const _queueFile = 'queue.json';
   static const _partSuffix = '.part';
 
-  static const MethodChannel _downloadChannel =
-      MethodChannel('com.mapleprojects.animaple/downloads');
+  static const MethodChannel _downloadChannel = MethodChannel(
+    'com.mapleprojects.animaple/downloads',
+  );
 
-  static Future<void> _startNativeForeground(String title, int episode, String slug) async {
+  static Future<void> _startNativeForeground(
+    String title,
+    int episode,
+    String slug,
+  ) async {
     if (kIsWeb || !Platform.isAndroid) return;
     try {
       await _downloadChannel.invokeMethod('startDownloadService', {
@@ -85,7 +90,10 @@ class DownloadService {
     } catch (_) {}
   }
 
-  static Future<void> _stopNativeForeground({String? completedTitle, int? completedEp}) async {
+  static Future<void> _stopNativeForeground({
+    String? completedTitle,
+    int? completedEp,
+  }) async {
     if (kIsWeb || !Platform.isAndroid) return;
     _lastNativeUpdate = null;
     _lastNativeProgress = null;
@@ -225,7 +233,9 @@ class DownloadService {
       if (await target.exists()) await target.delete();
       await tmp.rename(target.path);
     } finally {
-      if (await tmp.exists()) { await tmp.delete().catchError((_) => tmp); }
+      if (await tmp.exists()) {
+        await tmp.delete().catchError((_) => tmp);
+      }
     }
   }
 
@@ -259,7 +269,9 @@ class DownloadService {
     try {
       final raw = await f.readAsString();
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      _index = decoded.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map)));
+      _index = decoded.map(
+        (k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map)),
+      );
     } catch (_) {
       _index = {};
     }
@@ -402,8 +414,7 @@ class DownloadService {
   }
 
   /// Título de anime desde el índice (para listas del gestor).
-  String titleFor(String slug) =>
-      ((_index[slug]?['title'] as String?) ?? slug);
+  String titleFor(String slug) => ((_index[slug]?['title'] as String?) ?? slug);
 
   /// Ruta absoluta del póster local de un anime, o null si no hay.
   /// Fallback en memoria para descargas en curso: el índice del anime solo
@@ -482,8 +493,11 @@ class DownloadService {
   /// Resultado cacheado por slug para no repetir la sonda al reabrir.
   final Map<String, bool> _dubProbeCache = {};
 
-  Future<bool> probeAnyDub(String slug, List<int> episodes,
-      {void Function(int probed, int total)? onProgress}) async {
+  Future<bool> probeAnyDub(
+    String slug,
+    List<int> episodes, {
+    void Function(int probed, int total)? onProgress,
+  }) async {
     if (_dubProbeCache.containsKey(slug)) return _dubProbeCache[slug]!;
     var any = false;
     for (var i = 0; i < episodes.length; i++) {
@@ -521,16 +535,19 @@ class DownloadService {
     var eps = <EpisodeBasic>[];
     for (final e in (meta['episodes'] as List? ?? [])) {
       final m = e as Map;
-      eps.add(EpisodeBasic(
-        id: ((m['id'] as num?) ?? 0).toInt(),
-        number: ((m['number'] as num?) ?? 0).toInt(),
-      ));
+      eps.add(
+        EpisodeBasic(
+          id: ((m['id'] as num?) ?? 0).toInt(),
+          number: ((m['number'] as num?) ?? 0).toInt(),
+        ),
+      );
     }
     if (eps.isEmpty) {
-      eps = downloadedEpisodes(slug)
-          .map((n) => EpisodeBasic(id: 0, number: n))
-          .toList()
-        ..sort((a, b) => a.number.compareTo(b.number));
+      eps =
+          downloadedEpisodes(
+              slug,
+            ).map((n) => EpisodeBasic(id: 0, number: n)).toList()
+            ..sort((a, b) => a.number.compareTo(b.number));
     }
 
     final posterFile = File('${root.path}/$slug/poster.jpg');
@@ -566,8 +583,15 @@ class DownloadService {
     // Guardar/actualizar metadatos del anime + poster en la primera pasada.
     // Con [detail] se persiste además status/categoría/géneros/lista de
     // capítulos para reconstruir el detalle completo en modo offline.
-    await _saveMeta(root, animeId, slug, title, synopsis, posterUrl,
-        detail: detail);
+    await _saveMeta(
+      root,
+      animeId,
+      slug,
+      title,
+      synopsis,
+      posterUrl,
+      detail: detail,
+    );
     // Póster inmediato para el FAB/gestor aunque el índice aún no exista.
     if (posterUrl != null && posterUrl.isNotEmpty) {
       final f = File('${root.path}/$slug/poster.jpg');
@@ -579,7 +603,15 @@ class DownloadService {
       if (isDownloaded(slug, ep)) continue;
       if (isQueued(slug, ep)) continue;
       _clearFailure(key);
-      _queue.add(_Job(key: key, slug: slug, episode: ep, preferDub: preferDub, title: title));
+      _queue.add(
+        _Job(
+          key: key,
+          slug: slug,
+          episode: ep,
+          preferDub: preferDub,
+          title: title,
+        ),
+      );
     }
     _saveQueue();
     _notify();
@@ -718,7 +750,9 @@ class DownloadService {
       m[key] = value;
       if (_current != null && _current!.key == key) {
         final pct = (value * 100).clamp(0, 100).toInt();
-        final title = _current!.title.isNotEmpty ? _current!.title : _current!.slug;
+        final title = _current!.title.isNotEmpty
+            ? _current!.title
+            : _current!.slug;
         _updateNativeForeground(title, _current!.episode, pct, '$pct%');
       }
     }
@@ -759,15 +793,12 @@ class DownloadService {
 
       // Preferencia del usuario: DUB si el capítulo lo tiene; si no,
       // cae automáticamente al subtitulado. Con preferDub=false siempre SUB.
-      final hasDub =
-          detail.variants.any((v) => v.toUpperCase() == 'DUB');
+      final hasDub = detail.variants.any((v) => v.toUpperCase() == 'DUB');
       final variant = job.preferDub && hasDub
           ? 'DUB'
           : detail.variants.where((v) => v.toUpperCase() != 'DUB').isNotEmpty
-              ? detail.variants
-                  .where((v) => v.toUpperCase() != 'DUB')
-                  .first
-              : (detail.variants.isNotEmpty ? detail.variants.first : 'SUB');
+          ? detail.variants.where((v) => v.toUpperCase() != 'DUB').first
+          : (detail.variants.isNotEmpty ? detail.variants.first : 'SUB');
       // Candidatos reproducibles: HLS, UPNShare, Voe, MP4Upload, Byse
       bool isDownloadable(ServerMirror s) {
         final name = s.server.toLowerCase();
@@ -776,8 +807,16 @@ class DownloadService {
         if (name.contains('mp4upload')) return true;
         if (name.contains('upnshare') || url.contains('uns.bio')) return true;
         if (name.contains('voe') || url.contains('voe.sx')) return true;
-        if (name.contains('byse') || url.contains('byselapuix.com') || url.contains('n1mwq.org')) return true;
-        if (url.contains('.m3u8') || url.contains('mp4upload.com') || url.contains('.mp4')) return true;
+        if (name.contains('byse') ||
+            url.contains('byselapuix.com') ||
+            url.contains('n1mwq.org')) {
+          return true;
+        }
+        if (url.contains('.m3u8') ||
+            url.contains('mp4upload.com') ||
+            url.contains('.mp4')) {
+          return true;
+        }
         return false;
       }
 
@@ -806,8 +845,9 @@ class DownloadService {
       Future<_DownloadCandidate?> probeCandidate(ServerMirror s) async {
         final swProbe = Stopwatch()..start();
         try {
-          final resolved = await ApiService.fetchVideoUrl(s.url)
-              .timeout(const Duration(seconds: 10));
+          final resolved = await ApiService.fetchVideoUrl(
+            s.url,
+          ).timeout(const Duration(seconds: 10));
           final url = resolved['url'] as String?;
           final type = resolved['type'] as String? ?? '';
           if (url == null || url.isEmpty || type == 'embed') return null;
@@ -819,7 +859,9 @@ class DownloadService {
           if (type == 'hls') {
             final q = await ApiService.resolveHighestQualityHls(
               url,
-              headers: customHeaders ?? (s.url.contains('zilla') ? _zillaHeaders() : null),
+              headers:
+                  customHeaders ??
+                  (s.url.contains('zilla') ? _zillaHeaders() : null),
             ).timeout(const Duration(seconds: 5));
             height = q['height'] as int? ?? 720;
           } else if (type == 'mp4') {
@@ -846,9 +888,9 @@ class DownloadService {
         }
       }
 
-      final probedList = (await Future.wait(playable.map(probeCandidate)))
-          .whereType<_DownloadCandidate>()
-          .toList();
+      final probedList = (await Future.wait(
+        playable.map(probeCandidate),
+      )).whereType<_DownloadCandidate>().toList();
 
       // Ordenar: mayor resolución (1080 > 720 > 480), luego menor tiempo de respuesta
       probedList.sort((a, b) {
@@ -857,7 +899,8 @@ class DownloadService {
       });
 
       // Lista ordenada de intentos: probados primero, luego cualquier resto como fallback
-      final attemptList = <({ServerMirror mirror, _DownloadCandidate? candidate})>[];
+      final attemptList =
+          <({ServerMirror mirror, _DownloadCandidate? candidate})>[];
       for (final p in probedList) {
         attemptList.add((mirror: p.mirror, candidate: p));
       }
@@ -880,13 +923,18 @@ class DownloadService {
             .toList();
         if (mp4candidate.isEmpty) return;
         try {
-          final resolved = await ApiService.fetchVideoUrl(mp4candidate.first.url);
+          final resolved = await ApiService.fetchVideoUrl(
+            mp4candidate.first.url,
+          );
           final u = resolved['url'] as String?;
           if (u == null || u.isEmpty) return;
-          await ApiService.prewarmVideo(u,
-              headers: {'Referer': 'https://www.mp4upload.com/'});
+          await ApiService.prewarmVideo(
+            u,
+            headers: {'Referer': 'https://www.mp4upload.com/'},
+          );
         } catch (_) {}
       }
+
       final earlyWarm = prewarmMp4();
 
       for (final attempt in attemptList) {
@@ -910,17 +958,26 @@ class DownloadService {
             url = resolved['url'] as String? ?? '';
             type = resolved['type'] as String? ?? '';
             if (url.isEmpty || type == 'embed') {
-              throw Exception('URL no descargable directamente para ep ${job.episode} ($type)');
+              throw Exception(
+                'URL no descargable directamente para ep ${job.episode} ($type)',
+              );
             }
-            customHeaders = (resolved['headers'] as Map<String, dynamic>?)
-                ?.map((k, v) => MapEntry(k, v.toString()));
+            customHeaders = (resolved['headers'] as Map<String, dynamic>?)?.map(
+              (k, v) => MapEntry(k, v.toString()),
+            );
           }
 
           if (_cancelRequested) return;
 
           if (type == 'hls') {
-            await _downloadHls(url, tmpPlaylist, segsTmpDir, job.key,
-                () => _cancelRequested, headers: customHeaders);
+            await _downloadHls(
+              url,
+              tmpPlaylist,
+              segsTmpDir,
+              job.key,
+              () => _cancelRequested,
+              headers: customHeaders,
+            );
           } else {
             try {
               await earlyWarm.timeout(const Duration(seconds: 32));
@@ -929,7 +986,8 @@ class DownloadService {
               url,
               videoTmp,
               job.key,
-              referer: customHeaders?['Referer'] ?? 'https://www.mp4upload.com/',
+              referer:
+                  customHeaders?['Referer'] ?? 'https://www.mp4upload.com/',
             );
           }
 
@@ -945,7 +1003,8 @@ class DownloadService {
             final size = await videoTmp.length();
             if (size < 1024 * 1024) {
               throw Exception(
-                  'Archivo demasiado pequeño ($size B), probablemente inválido');
+                'Archivo demasiado pequeño ($size B), probablemente inválido',
+              );
             }
             if (!_looksLikeMp4(videoTmp)) {
               throw Exception('El archivo descargado no parece video MP4');
@@ -980,7 +1039,9 @@ class DownloadService {
       if (lastError != null &&
           !(await videoTmp.exists()) &&
           !(await tmpPlaylist.exists())) {
-        throw Exception('Todas las fuentes fallaron para ep ${job.episode}: $lastError');
+        throw Exception(
+          'Todas las fuentes fallaron para ep ${job.episode}: $lastError',
+        );
       }
       if (_cancelRequested) return;
 
@@ -998,7 +1059,9 @@ class DownloadService {
         final segsDir = Directory('${dir.path}/segs');
         await segsDir.create();
         await for (final f in segsTmpDir.list()) {
-          await (f as File).rename('${segsDir.path}/${f.uri.pathSegments.last}');
+          await (f as File).rename(
+            '${segsDir.path}/${f.uri.pathSegments.last}',
+          );
         }
         try {
           await segsTmpDir.delete(recursive: true);
@@ -1014,15 +1077,17 @@ class DownloadService {
       // 6. Sidecar con metadatos del episodio.
       await _atomicWrite(
         _sidecarFile(root, job.slug, job.episode),
-        utf8.encode(jsonEncode({
-          'episode': job.episode,
-          'size': size,
-          'variant': chosen.variant.isEmpty ? variant : chosen.variant,
-          'dub': job.preferDub && hasDub,
-          'server': chosen.server,
-          'seconds': sw.elapsedMilliseconds / 1000.0,
-          'saved_at': DateTime.now().toUtc().toIso8601String(),
-        })),
+        utf8.encode(
+          jsonEncode({
+            'episode': job.episode,
+            'size': size,
+            'variant': chosen.variant.isEmpty ? variant : chosen.variant,
+            'dub': job.preferDub && hasDub,
+            'server': chosen.server,
+            'seconds': sw.elapsedMilliseconds / 1000.0,
+            'saved_at': DateTime.now().toUtc().toIso8601String(),
+          }),
+        ),
       );
 
       // 7. Actualizar índice.
@@ -1116,28 +1181,30 @@ class DownloadService {
     }
     await _atomicWrite(
       _metaFile(root, slug),
-      utf8.encode(jsonEncode({
-        'anime_id': animeId,
-        'title': title,
-        'synopsis': synopsis,
-        'poster': posterPath ?? (meta?['poster'] as String? ?? ''),
-        'saved_at': DateTime.now().toUtc().toIso8601String(),
-        if (detail != null) ...{
-          'status': detail.status,
-          'category': detail.category,
-          'episodes_count': detail.episodesCount,
-          'genres': detail.genres.map((g) => g.name).toList(),
-          'episodes': detail.episodes
-              .map((e) => {'id': e.id, 'number': e.number})
-              .toList(),
-        } else ...{
-          // Preservar etiquetas de un meta previo si no llega detalle.
-          'status': meta?['status'] ?? '',
-          'category': meta?['category'] ?? '',
-          'genres': meta?['genres'] ?? <String>[],
-          'episodes': meta?['episodes'] ?? <Map>[],
-        },
-      })),
+      utf8.encode(
+        jsonEncode({
+          'anime_id': animeId,
+          'title': title,
+          'synopsis': synopsis,
+          'poster': posterPath ?? (meta?['poster'] as String? ?? ''),
+          'saved_at': DateTime.now().toUtc().toIso8601String(),
+          if (detail != null) ...{
+            'status': detail.status,
+            'category': detail.category,
+            'episodes_count': detail.episodesCount,
+            'genres': detail.genres.map((g) => g.name).toList(),
+            'episodes': detail.episodes
+                .map((e) => {'id': e.id, 'number': e.number})
+                .toList(),
+          } else ...{
+            // Preservar etiquetas de un meta previo si no llega detalle.
+            'status': meta?['status'] ?? '',
+            'category': meta?['category'] ?? '',
+            'genres': meta?['genres'] ?? <String>[],
+            'episodes': meta?['episodes'] ?? <Map>[],
+          },
+        }),
+      ),
     );
   }
 
@@ -1145,7 +1212,8 @@ class DownloadService {
     String url, {
     Map<String, String> headers = const {},
   }) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
     try {
       final req = await client.getUrl(Uri.parse(url));
       headers.forEach((k, v) => req.headers.set(k, v));
@@ -1185,12 +1253,15 @@ class DownloadService {
     String? referer,
     Map<String, String> extraHeaders = const {},
   }) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
     IOSink? sink;
     try {
       final req = await client.getUrl(Uri.parse(url));
-      req.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+      req.headers.set(
+        HttpHeaders.userAgentHeader,
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      );
       if (referer != null) req.headers.set(HttpHeaders.refererHeader, referer);
       extraHeaders.forEach((k, v) => req.headers.set(k, v));
       final resp = await req.close();
@@ -1256,7 +1327,10 @@ class DownloadService {
 
     // 1. Obtener el playlist de medios (resuelve master multi-variante a máxima calidad).
     var mediaUrl = masterUrl;
-    final q = await ApiService.resolveHighestQualityHls(masterUrl, headers: reqHeaders);
+    final q = await ApiService.resolveHighestQualityHls(
+      masterUrl,
+      headers: reqHeaders,
+    );
     mediaUrl = q['url'] as String? ?? masterUrl;
 
     final masterBytes = await _fetchBytes(mediaUrl, headers: reqHeaders);
@@ -1285,7 +1359,8 @@ class DownloadService {
         if (m != null) initSeg = m.group(1);
       } else if (line.startsWith('#EXTINF:')) {
         final v = double.tryParse(
-            line.substring(8).replaceAll(RegExp(r'[,\s].*$'), ''));
+          line.substring(8).replaceAll(RegExp(r'[,\s].*$'), ''),
+        );
         pendingInf = v ?? -1.0;
       } else if (line.startsWith('#')) {
         // Conserva TARGETDURATION, VERSION, etc. Descarta ENDLIST propio.
@@ -1294,10 +1369,7 @@ class DownloadService {
           headTags.add(line);
         }
       } else {
-        entries.add((
-          ref: line,
-          seconds: pendingInf >= 0 ? pendingInf : null,
-        ));
+        entries.add((ref: line, seconds: pendingInf >= 0 ? pendingInf : null));
         pendingInf = -1.0;
       }
     }
@@ -1421,14 +1493,14 @@ class DownloadService {
   static bool segsLinesTooMany(int n) => n > 100000;
 
   static Map<String, String> _zillaHeaders() => {
-        HttpHeaders.userAgentHeader:
-            'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        HttpHeaders.acceptHeader: '*/*',
-        HttpHeaders.refererHeader: 'https://player.zilla-networks.com/',
-      };
+    HttpHeaders.userAgentHeader:
+        'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    HttpHeaders.acceptHeader: '*/*',
+    HttpHeaders.refererHeader: 'https://player.zilla-networks.com/',
+  };
 }
 
 class _Job {
@@ -1447,20 +1519,20 @@ class _Job {
   });
 
   Map<String, dynamic> toJson() => {
-        'key': key,
-        'slug': slug,
-        'episode': episode,
-        'preferDub': preferDub,
-        'title': title,
-      };
+    'key': key,
+    'slug': slug,
+    'episode': episode,
+    'preferDub': preferDub,
+    'title': title,
+  };
 
   factory _Job.fromJson(Map<String, dynamic> json) => _Job(
-        key: json['key'] as String? ?? '${json['slug']}#${json['episode']}',
-        slug: json['slug'] as String? ?? '',
-        episode: (json['episode'] as num?)?.toInt() ?? 1,
-        preferDub: json['preferDub'] as bool? ?? false,
-        title: json['title'] as String? ?? '',
-      );
+    key: json['key'] as String? ?? '${json['slug']}#${json['episode']}',
+    slug: json['slug'] as String? ?? '',
+    episode: (json['episode'] as num?)?.toInt() ?? 1,
+    preferDub: json['preferDub'] as bool? ?? false,
+    title: json['title'] as String? ?? '',
+  );
 }
 
 class _DownloadCandidate {

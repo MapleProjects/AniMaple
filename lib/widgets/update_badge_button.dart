@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/update_service.dart';
+import '../ui/tokens.dart';
 
 /// Botón con indicador visual de actualización pendiente.
 class UpdateBadgeButton extends StatelessWidget {
@@ -26,15 +27,11 @@ class UpdateBadgeButton extends StatelessWidget {
                 child: const Icon(
                   Icons.system_update_alt,
                   size: 24,
-                  color: Color(0xFFa78bfa),
+                  color: AppColors.primaryBright,
                 ),
               ),
             ),
-            const Positioned(
-              top: 0,
-              right: 0,
-              child: _Dot(),
-            ),
+            const Positioned(top: 0, right: 0, child: _Dot()),
           ],
         );
       },
@@ -51,7 +48,7 @@ class _Dot extends StatelessWidget {
       width: 10,
       height: 10,
       decoration: const BoxDecoration(
-        color: Color(0xFF8b5cf6),
+        color: AppColors.primary,
         shape: BoxShape.circle,
       ),
     );

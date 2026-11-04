@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../ui/tokens.dart';
 
 /// Reproductor web para fuentes que requieren entorno de navegador.
 /// Embebe el reproductor en un iframe local manteniendo la cabecera referer.
@@ -28,7 +29,7 @@ class _WebviewPlayerState extends State<WebviewPlayer> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF0a0812))
+      ..setBackgroundColor(AppColors.bg)
       ..setUserAgent(
         'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
@@ -53,7 +54,8 @@ class _WebviewPlayerState extends State<WebviewPlayer> {
     final base = widget.referer ?? 'https://animeav1.com/';
 
     // Embebe el reproductor en un iframe local para conservar cabeceras.
-    final html = '''
+    final html =
+        '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -80,10 +82,7 @@ class _WebviewPlayerState extends State<WebviewPlayer> {
 </html>
 ''';
 
-    _controller.loadHtmlString(
-      html,
-      baseUrl: base,
-    );
+    _controller.loadHtmlString(html, baseUrl: base);
   }
 
   @override
@@ -91,16 +90,14 @@ class _WebviewPlayerState extends State<WebviewPlayer> {
     return Stack(
       children: [
         Positioned.fill(
-          child: ClipRect(
-            child: WebViewWidget(controller: _controller),
-          ),
+          child: ClipRect(child: WebViewWidget(controller: _controller)),
         ),
         if (_loading)
           const Positioned.fill(
             child: ColoredBox(
-              color: Color(0xFF0a0812),
+              color: AppColors.bg,
               child: Center(
-                child: CircularProgressIndicator(color: Color(0xFF8b5cf6)),
+                child: CircularProgressIndicator(color: AppColors.primary),
               ),
             ),
           ),

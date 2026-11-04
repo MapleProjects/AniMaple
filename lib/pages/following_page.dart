@@ -3,7 +3,13 @@ import 'package:flutter/material.dart';
 import '../models/anime.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
-import '../widgets/tv_focusable.dart';
+import '../services/sync_service.dart';
+import '../ui/tokens.dart';
+import '../ui/widgets/ambient_page.dart';
+import '../ui/widgets/empty_state.dart';
+import '../ui/widgets/overlay_icon_button.dart';
+import '../ui/widgets/poster_card.dart';
+import '../ui/widgets/skeletons.dart';
 import 'detail_page.dart';
 import 'downloads_page.dart';
 
@@ -14,7 +20,7 @@ class FollowingPage extends StatefulWidget {
   State<FollowingPage> createState() => FollowingPageState();
 }
 
-/// Vista de lista con pestañas de seguimiento y descargas locales.
+/// Lista de seguimiento con pestañas de favoritos y descargas locales.
 class FollowingPageState extends State<FollowingPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
@@ -26,10 +32,12 @@ class FollowingPageState extends State<FollowingPage>
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
     _load();
+    SyncService.stateVersion.addListener(_load);
   }
 
   @override
   void dispose() {
+    SyncService.stateVersion.removeListener(_load);
     _tabCtrl.dispose();
     super.dispose();
   }
@@ -39,10 +47,14 @@ class FollowingPageState extends State<FollowingPage>
   Future<void> _load() async {
     try {
       final f = await ApiService.fetchFollowed();
-      setState(() { _following = f; _loading = false; });
+      if (!mounted) return;
+      setState(() {
+        _following = f;
+        _loading = false;
+      });
     } catch (e) {
       debugPrint('FOLLOWING ERROR: $e');
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -50,22 +62,24 @@ class FollowingPageState extends State<FollowingPage>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF110e1a),
-        title: const Text('Eliminar de favoritos', style: TextStyle(color: Color(0xFFe8e4f0))),
-        content: Text('¿Eliminar "${f.animeTitle}" de tu lista?', style: const TextStyle(color: Color(0xFFa99fc0))),
+        title: const Text('Eliminar de favoritos'),
+        content: Text('¿Eliminar "${f.animeTitle}" de tu lista?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488))),
+            child: const Text('Cancelar'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Eliminar', style: TextStyle(color: Color(0xFFef4444))),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
     );
     if (confirm == true) {
+      // Actualización optimista: la tarjeta desaparece al instante.
+      setState(() => _following.removeWhere((x) => x.animeId == f.animeId));
       await ApiService.unfollow(f.animeId);
       _load();
     }
@@ -73,144 +87,146 @@ class FollowingPageState extends State<FollowingPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mi lista'),
-        bottom: TabBar(
-          controller: _tabCtrl,
-          indicatorColor: const Color(0xFF8b5cf6),
-          labelColor: const Color(0xFFa78bfa),
-          unselectedLabelColor: const Color(0xFF6d6488),
-          dividerColor: Colors.transparent,
-          tabs: const [
-            Tab(
-              height: 40,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.favorite, size: 16),
-                  SizedBox(width: 6),
-                  Text('Favoritos'),
-                ],
-              ),
-            ),
-            Tab(
-              height: 40,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.download_for_offline_outlined, size: 16),
-                  SizedBox(width: 6),
-                  Text('Descargas'),
-                ],
+    return AmbientPage(
+      imageUrl: _following.isNotEmpty ? _following.first.posterUrl : null,
+      opacity: 0.50,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            SliverOverlapAbsorber(
+              handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+              sliver: SliverAppBar(
+                pinned: true,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                backgroundColor: AppColors.bg.withValues(alpha: 0.62),
+                surfaceTintColor: Colors.transparent,
+                title: const Text('Mi lista'),
+                bottom: TabBar(
+                  controller: _tabCtrl,
+                  tabs: const [
+                    Tab(height: 44, child: Text('Favoritos')),
+                    Tab(height: 44, child: Text('Descargas')),
+                  ],
+                ),
               ),
             ),
           ],
+          body: TabBarView(
+            controller: _tabCtrl,
+            children: [_buildFavoritesTab(), _buildDownloadsTab()],
+          ),
         ),
-      ),
-      body: TabBarView(
-        controller: _tabCtrl,
-        children: [
-          _buildFollowingGrid(),
-          const DownloadsPage(),
-        ],
       ),
     );
   }
 
-  Widget _buildFollowingGrid() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF8b5cf6)));
-    }
-    if (_following.isEmpty) {
-      return const Center(child: Text('Sin animes seguidos', style: TextStyle(color: Color(0xFF6d6488))));
-    }
-    return RefreshIndicator(
-      onRefresh: _load,
-      color: const Color(0xFF8b5cf6),
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 200,
-          childAspectRatio: 0.6,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-        ),
-        itemCount: _following.length + _queuedCount(),
-        itemBuilder: (ctx, i) {
-          if (i >= _following.length) {
-            final slug = _queuedOnlySlugs()[i - _following.length];
-            return _queuedCard(slug);
-          }
-          final f = _following[i];
-          return TvFocusable(
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => DetailPage(slug: f.animeSlug),
-            )),
-            borderRadius: BorderRadius.circular(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF110e1a),
-                      borderRadius: BorderRadius.circular(10),
+  Widget _buildFavoritesTab() {
+    return Builder(
+      builder: (context) {
+        final queued = _queuedOnlySlugs();
+        return RefreshIndicator(
+          onRefresh: _load,
+          color: AppColors.primary,
+          backgroundColor: AppColors.surface,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            slivers: [
+              SliverOverlapInjector(
+                handle: NestedScrollView.sliverOverlapAbsorberHandleFor(
+                  context,
+                ),
+              ),
+              if (_loading)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: AppSpace.sm),
+                    child: SkeletonPosterGrid(),
+                  ),
+                )
+              else if (_following.isEmpty && queued.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.favorite_outline,
+                    title: 'Sin animes seguidos',
+                    message:
+                        'Marca un anime como favorito para verlo aquí y recibir avisos.',
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpace.page,
+                    AppSpace.md,
+                    AppSpace.page,
+                    AppLayout.bottomGutter,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: AppLayout.posterExtentFor(context),
+                      childAspectRatio: AppLayout.posterAspect,
+                      crossAxisSpacing: AppSpace.md,
+                      mainAxisSpacing: AppSpace.lg,
                     ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.network(f.posterUrl, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.favorite, color: Color(0xFFef4444), size: 40))),
-                        Positioned(
-                          top: 6, left: 6,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFef4444).withValues(alpha: 0.9),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.favorite, color: Colors.white, size: 14),
+                    delegate: SliverChildBuilderDelegate((ctx, i) {
+                      if (i >= _following.length) {
+                        return _QueuedCard(slug: queued[i - _following.length]);
+                      }
+                      final f = _following[i];
+                      return PosterCard(
+                        title: f.animeTitle,
+                        imageUrl: f.posterUrl,
+                        subtitle: 'En tu lista',
+                        favorite: true,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DetailPage(slug: f.animeSlug),
                           ),
                         ),
-                        Positioned(
-                          top: 4, right: 4,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () => _unfollowWithConfirm(f),
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.close, color: Colors.white, size: 16),
-                              ),
-                            ),
-                          ),
+                        action: OverlayIconButton(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Quitar de favoritos',
+                          onPressed: () => _unfollowWithConfirm(f),
                         ),
-                      ],
-                    ),
+                      );
+                    }, childCount: _following.length + queued.length),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(f.animeTitle, maxLines: 2, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFFe8e4f0), height: 1.3)),
-              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDownloadsTab() {
+    return Builder(
+      builder: (context) => CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        slivers: [
+          SliverOverlapInjector(
+            handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+          ),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(top: AppSpace.sm),
+              child: DownloadsPage(embedded: true),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 
   // Animes con descargas en progreso sin archivos locales completados.
   DownloadService get _dl => DownloadService.instance;
-
-  int _queuedCount() => _queuedOnlySlugs().length;
 
   List<String> _queuedOnlySlugs() {
     final out = <String>[];
@@ -222,30 +238,48 @@ class FollowingPageState extends State<FollowingPage>
     }
     return out;
   }
+}
 
-  Widget _queuedCard(String slug) {
+class _QueuedCard extends StatelessWidget {
+  const _QueuedCard({required this.slug});
+
+  final String slug;
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           child: Container(
             decoration: BoxDecoration(
-              color: const Color(0xFF110e1a),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFf59e0b).withValues(alpha: 0.5)),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: AppColors.warning.withValues(alpha: 0.5),
+              ),
             ),
             child: const Center(
               child: SizedBox(
-                width: 30,
-                height: 30,
-                child: CircularProgressIndicator(strokeWidth: 2.6, color: Color(0xFFf59e0b)),
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: AppColors.warning,
+                ),
               ),
             ),
           ),
         ),
-        const SizedBox(height: 6),
-        Text('Descargando…', maxLines: 2, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFFf59e0b), height: 1.3)),
+        const SizedBox(height: AppSpace.sm),
+        Text(
+          'Descargando…',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(color: AppColors.warning),
+        ),
       ],
     );
   }

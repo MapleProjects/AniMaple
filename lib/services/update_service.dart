@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:window_manager/window_manager.dart';
 import '../widgets/tv_focusable.dart';
 import 'app_player.dart';
+import '../ui/tokens.dart';
 
 /// Información de una actualización disponible.
 class UpdateInfo {
@@ -34,15 +35,16 @@ class UpdateInfo {
 class UpdateService {
   UpdateService._();
 
-  static const MethodChannel _channel =
-      MethodChannel('com.mapleprojects.animaple/updater');
+  static const MethodChannel _channel = MethodChannel(
+    'com.mapleprojects.animaple/updater',
+  );
 
   // Repo público de releases.
   static const _repoOwner = 'MapleProjects';
   static const _repoName = 'AniMaple';
 
   /// Versión de la app por defecto / compilada.
-  static const String appVersion = '2.0.14';
+  static const String appVersion = '2.1.0';
 
   /// Notifica a la UI cuando hay (o deja de haber) una actualización.
   static final ValueNotifier<bool> hasUpdate = ValueNotifier(false);
@@ -87,7 +89,8 @@ class UpdateService {
       final resp = await http
           .get(
             Uri.parse(
-                'https://api.github.com/repos/$_repoOwner/$_repoName/releases/latest'),
+              'https://api.github.com/repos/$_repoOwner/$_repoName/releases/latest',
+            ),
             headers: {
               'Accept': 'application/vnd.github+json',
               'User-Agent': 'AniMaple-$_repoName',
@@ -140,7 +143,8 @@ class UpdateService {
         if (downloadUrl == null) {
           for (final a in assets) {
             final name = (a as Map)['name'] as String? ?? '';
-            if (name.toLowerCase().endsWith('.tar.gz') && name.toLowerCase().contains('linux')) {
+            if (name.toLowerCase().endsWith('.tar.gz') &&
+                name.toLowerCase().contains('linux')) {
               downloadUrl = a['browser_download_url'] as String?;
               downloadFileName = name;
               break;
@@ -166,12 +170,15 @@ class UpdateService {
           latestVersion: latest,
           downloadUrl: downloadUrl,
           releaseUrl:
-              (data['html_url'] as String?) ?? 'https://github.com/$_repoOwner/$_repoName/releases',
+              (data['html_url'] as String?) ??
+              'https://github.com/$_repoOwner/$_repoName/releases',
           fileName: downloadFileName,
           notes: _extractNotes(data['body'] as String?, latest),
         );
         hasUpdate.value = true;
-        debugPrint('Update: disponible $latest ($downloadFileName, actual: $currentVersion)');
+        debugPrint(
+          'Update: disponible $latest ($downloadFileName, actual: $currentVersion)',
+        );
         return true;
       }
       debugPrint('Update: sin novedades ($latest == $currentVersion)');
@@ -241,7 +248,8 @@ class UpdateService {
     if (dir.isEmpty) {
       throw Exception('No se pudo preparar la carpeta de descarga');
     }
-    final name = fileName ??
+    final name =
+        fileName ??
         (Platform.isWindows ? 'animaple-setup.exe' : 'app-update.apk');
     final target = '$dir/$name';
 
@@ -277,15 +285,30 @@ class UpdateService {
   static Future<String> downloadApk({
     required String url,
     void Function(double)? onProgress,
-  }) =>
-      downloadFile(url: url, onProgress: onProgress);
+  }) => downloadFile(url: url, onProgress: onProgress);
 
   static bool _win32ShellExecute(String filePath, {String parameters = ''}) {
     try {
       final shell32 = DynamicLibrary.open('shell32.dll');
-      final shellExecute = shell32.lookupFunction<
-          IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Int32),
-          int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>, int)>('ShellExecuteW');
+      final shellExecute = shell32
+          .lookupFunction<
+            IntPtr Function(
+              IntPtr,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              Int32,
+            ),
+            int Function(
+              int,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              Pointer<Utf16>,
+              int,
+            )
+          >('ShellExecuteW');
 
       final op = 'runas'.toNativeUtf16();
       final file = filePath.toNativeUtf16();
@@ -319,16 +342,20 @@ class UpdateService {
           return false;
         }
         final exeName = filePath.split(Platform.pathSeparator).last;
-        debugPrint('Update: ejecutando instalador con elevacion administrativa en modo silencioso (/S): $filePath');
+        debugPrint(
+          'Update: ejecutando instalador con elevacion administrativa en modo silencioso (/S): $filePath',
+        );
         bool launched = _win32ShellExecute(filePath, parameters: '/S');
         if (!launched) {
           debugPrint('Update: fallback a cmd.exe start');
           try {
-            final proc = await Process.start(
-              'cmd.exe',
-              ['/c', 'start', '', filePath, '/S'],
-              mode: ProcessStartMode.detached,
-            );
+            final proc = await Process.start('cmd.exe', [
+              '/c',
+              'start',
+              '',
+              filePath,
+              '/S',
+            ], mode: ProcessStartMode.detached);
             launched = proc.pid > 0;
           } catch (e) {
             debugPrint('Update: fallback cmd fallo ($e)');
@@ -345,11 +372,18 @@ class UpdateService {
         for (int i = 0; i < 15; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
           try {
-            final check = await Process.run('tasklist', ['/FI', 'IMAGENAME eq $exeName', '/NH']);
+            final check = await Process.run('tasklist', [
+              '/FI',
+              'IMAGENAME eq $exeName',
+              '/NH',
+            ]);
             final stdout = check.stdout.toString().toLowerCase();
-            if (stdout.contains(exeName.toLowerCase()) || stdout.contains('setup')) {
+            if (stdout.contains(exeName.toLowerCase()) ||
+                stdout.contains('setup')) {
               isRunning = true;
-              debugPrint('Update: proceso de instalacion verificado en ejecucion: $exeName');
+              debugPrint(
+                'Update: proceso de instalacion verificado en ejecucion: $exeName',
+              );
               break;
             }
           } catch (e) {
@@ -358,7 +392,9 @@ class UpdateService {
         }
 
         if (!isRunning) {
-          debugPrint('Update: instalador no detectado en ejecucion tras invocacion');
+          debugPrint(
+            'Update: instalador no detectado en ejecucion tras invocacion',
+          );
           return false;
         }
 
@@ -389,8 +425,9 @@ class UpdateService {
       }
     } else if (Platform.isAndroid) {
       try {
-        final ok =
-            await _channel.invokeMethod<bool>('installApk', {'path': filePath});
+        final ok = await _channel.invokeMethod<bool>('installApk', {
+          'path': filePath,
+        });
         return ok ?? false;
       } catch (e) {
         debugPrint('Update install invoke error: $e');
@@ -408,11 +445,18 @@ class UpdateService {
           final whichPacman = await Process.run('which', ['pacman']);
           if (whichPkexec.exitCode == 0 && whichPacman.exitCode == 0) {
             debugPrint('Update Linux: ejecutando pkexec pacman -U $filePath');
-            final res = await Process.run('pkexec', ['pacman', '-U', '--noconfirm', filePath]);
+            final res = await Process.run('pkexec', [
+              'pacman',
+              '-U',
+              '--noconfirm',
+              filePath,
+            ]);
             if (res.exitCode == 0) {
               exit(0);
             } else {
-              debugPrint('Update Linux pkexec code ${res.exitCode}: ${res.stderr}');
+              debugPrint(
+                'Update Linux pkexec code ${res.exitCode}: ${res.stderr}',
+              );
               return false;
             }
           }
@@ -452,12 +496,20 @@ class UpdateService {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16121f),
+        backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        icon: const Icon(Icons.system_update_alt, color: Color(0xFFa78bfa), size: 34),
+        icon: const Icon(
+          Icons.system_update_alt,
+          color: AppColors.primaryBright,
+          size: 34,
+        ),
         title: const Text(
           'Nueva versión disponible',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0)),
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+          ),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -467,7 +519,10 @@ class UpdateService {
               info == null
                   ? 'Hay una nueva versión de AniMaple.'
                   : 'Estás usando $currentVersion. La versión ${info.latestVersion} ya está disponible.',
-              style: const TextStyle(fontSize: 13, color: Color(0xFFb8b0cd)),
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+              ),
             ),
             if (info?.notes != null)
               Padding(
@@ -475,11 +530,14 @@ class UpdateService {
                 child: Container(
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 220),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF110e1a),
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF2a2438)),
+                    border: Border.all(color: AppColors.surfaceHighest),
                   ),
                   child: SingleChildScrollView(
                     child: _MarkdownNotes(info!.notes!),
@@ -498,7 +556,10 @@ class UpdateService {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text(
                 'Posponer',
-                style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -508,11 +569,14 @@ class UpdateService {
             child: FilledButton(
               focusNode: FocusNode(canRequestFocus: false),
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF8b5cf6),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Actualizar', style: TextStyle(fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Actualizar',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -527,8 +591,8 @@ class UpdateService {
     if (!Platform.isAndroid) return true;
     bool canInstall;
     try {
-      canInstall = await _channel
-              .invokeMethod<bool>('canRequestPackageInstalls') ??
+      canInstall =
+          await _channel.invokeMethod<bool>('canRequestPackageInstalls') ??
           true;
     } catch (_) {
       // Plataforma sin permiso de instalación (desktop/web) → continuar.
@@ -542,17 +606,25 @@ class UpdateService {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16121f),
+        backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        icon: const Icon(Icons.security, color: Color(0xFFa78bfa), size: 30),
+        icon: const Icon(
+          Icons.security,
+          color: AppColors.primaryBright,
+          size: 30,
+        ),
         title: const Text(
           'Permiso para instalar',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0)),
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+          ),
         ),
         content: const Text(
           'Para instalar la actualización, AniMaple necesita permiso para '
           'instalar apps desconocidas. Se abrirá la configuración del sistema.',
-          style: TextStyle(fontSize: 13, color: Color(0xFFb8b0cd)),
+          style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
         actionsAlignment: MainAxisAlignment.spaceBetween,
         actions: [
@@ -562,7 +634,13 @@ class UpdateService {
             child: TextButton(
               focusNode: FocusNode(canRequestFocus: false),
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6d6488), fontWeight: FontWeight.w600)),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ),
           TvFocusable(
@@ -571,11 +649,14 @@ class UpdateService {
             child: FilledButton(
               focusNode: FocusNode(canRequestFocus: false),
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF8b5cf6),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Permitir', style: TextStyle(fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Permitir',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -598,8 +679,7 @@ class UpdateService {
     WidgetsBinding.instance.removeObserver(awaiter);
 
     try {
-      return await _channel
-              .invokeMethod<bool>('canRequestPackageInstalls') ??
+      return await _channel.invokeMethod<bool>('canRequestPackageInstalls') ??
           false;
     } catch (_) {
       return true;
@@ -631,16 +711,25 @@ class UpdateService {
           builder: (ctx, p, _) => ValueListenableBuilder<String?>(
             valueListenable: errorMsg,
             builder: (ctx, err, _) => AlertDialog(
-              backgroundColor: const Color(0xFF16121f),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               title: const Text(
                 'Descargando actualización…',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFFe8e4f0)),
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.text,
+                ),
               ),
               content: err != null
                   ? Text(
                       'No se pudo completar la actualización:\n$err',
-                      style: const TextStyle(fontSize: 13, color: Color(0xFFf87171)),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.dangerSoft,
+                      ),
                     )
                   : Column(
                       mainAxisSize: MainAxisSize.min,
@@ -648,13 +737,16 @@ class UpdateService {
                         LinearProgressIndicator(
                           value: p,
                           minHeight: 6,
-                          backgroundColor: const Color(0xFF2a2438),
-                          color: const Color(0xFF8b5cf6),
+                          backgroundColor: AppColors.surfaceHighest,
+                          color: AppColors.primary,
                         ),
                         const SizedBox(height: 10),
                         Text(
                           '${(p * 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(fontSize: 12, color: Color(0xFFb8b0cd)),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -672,7 +764,10 @@ class UpdateService {
                             done.value = true;
                             Navigator.pop(ctx);
                           },
-                          child: const Text('Cerrar', style: TextStyle(color: Color(0xFF6d6488))),
+                          child: const Text(
+                            'Cerrar',
+                            style: TextStyle(color: AppColors.textMuted),
+                          ),
                         ),
                       ),
                     ]
@@ -701,9 +796,11 @@ class UpdateService {
         if (Platform.isWindows) {
           errorMsg.value = 'No se pudo iniciar el instalador de actualización.';
         } else if (Platform.isLinux) {
-          errorMsg.value = 'No se pudo completar la instalación del paquete. Puedes actualizar con:\nparu -Syu animaple-bin';
+          errorMsg.value =
+              'No se pudo completar la instalación del paquete. Puedes actualizar con:\nparu -Syu animaple-bin';
         } else {
-          errorMsg.value = 'No se pudo iniciar la instalación. Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
+          errorMsg.value =
+              'No se pudo iniciar la instalación. Habilita permitir fuentes desconocidas e inténtalo de nuevo.';
         }
         await cleanupDownloaded();
       }
@@ -743,12 +840,19 @@ class _MarkdownNotes extends StatelessWidget {
 
   // Extrae los segmentos de una línea y estilo bold para los `**...**`.
   static List<TextSpan> _inlineSpans(String line) {
-    const bold = TextStyle(fontSize: 12, color: Color(0xFFe8e4f0), fontWeight: FontWeight.w700, height: 1.35);
+    const bold = TextStyle(
+      fontSize: 12,
+      color: AppColors.text,
+      fontWeight: FontWeight.w700,
+      height: 1.35,
+    );
     final spans = <TextSpan>[];
     final regex = RegExp(r'\*\*(.+?)\*\*');
     var last = 0;
     for (final m in regex.allMatches(line)) {
-      if (m.start > last) spans.add(TextSpan(text: line.substring(last, m.start)));
+      if (m.start > last) {
+        spans.add(TextSpan(text: line.substring(last, m.start)));
+      }
       spans.add(TextSpan(text: m.group(1), style: bold));
       last = m.end;
     }
@@ -770,46 +874,76 @@ class _MarkdownNotes extends StatelessWidget {
       }
       // Header nivel 2: "## Título"
       if (line.startsWith('## ')) {
-        children.add(Padding(
-          padding: const EdgeInsets.only(top: 6, bottom: 3),
-          child: Text(
-            line.substring(3).trim(),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFFe8e4f0)),
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 3),
+            child: Text(
+              line.substring(3).trim(),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: AppColors.text,
+              ),
+            ),
           ),
-        ));
+        );
         continue;
       }
       // Header nivel 3: "### Subtítulo"
       if (line.startsWith('### ')) {
-        children.add(Padding(
-          padding: const EdgeInsets.only(top: 6, bottom: 2),
-          child: Text(
-            line.substring(4).trim(),
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFa78bfa)),
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 2),
+            child: Text(
+              line.substring(4).trim(),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primaryBright,
+              ),
+            ),
           ),
-        ));
+        );
         continue;
       }
       // Lista: "- ítem"
       if (line.trimLeft().startsWith('- ')) {
-        children.add(RichText(
-          text: TextSpan(
-            style: const TextStyle(fontSize: 12, color: Color(0xFFb8b0cd), height: 1.35),
-            children: [
-              const TextSpan(text: '•  ', style: TextStyle(color: Color(0xFF8b5cf6), fontWeight: FontWeight.w900)),
-              ..._inlineSpans(line.trimLeft().substring(2)),
-            ],
+        children.add(
+          RichText(
+            text: TextSpan(
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                height: 1.35,
+              ),
+              children: [
+                const TextSpan(
+                  text: '•  ',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                ..._inlineSpans(line.trimLeft().substring(2)),
+              ],
+            ),
           ),
-        ));
+        );
         continue;
       }
       // Párrafo plano
-      children.add(RichText(
-        text: TextSpan(
-          style: const TextStyle(fontSize: 12, color: Color(0xFFb8b0cd), height: 1.35),
-          children: _inlineSpans(line),
+      children.add(
+        RichText(
+          text: TextSpan(
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              height: 1.35,
+            ),
+            children: _inlineSpans(line),
+          ),
         ),
-      ));
+      );
     }
 
     return Column(
