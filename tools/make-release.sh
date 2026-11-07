@@ -257,6 +257,14 @@ else:
     open('$NOTES_FILE', 'w', encoding='utf-8').write('Release v$TARGET_VERSION')
 "
 
+    # Checksums de los paquetes de Windows (el actualizador los verifica)
+    WIN_DIR="$REPO_DIR/build/windows-release"
+    if [ -f "$WIN_DIR/animaple-v$TARGET_VERSION-windows.zip" ]; then
+        (cd "$WIN_DIR" && sha256sum \
+            "animaple-v$TARGET_VERSION-windows.zip" \
+            "animaple-v$TARGET_VERSION-setup.exe" > SHA256SUMS.txt)
+    fi
+
     # Verificar existencia de release previa
     if gh release view "v$TARGET_VERSION" >/dev/null 2>&1; then
         echo "Actualizando release existente v$TARGET_VERSION..."
@@ -265,6 +273,8 @@ else:
             "$REPO_DIR/build/linux-release/animaple-v$TARGET_VERSION-linux-x86_64.tar.gz" \
             "$REPO_DIR/build/linux-release/animaple-bin-$TARGET_VERSION-1-x86_64.pkg.tar.zst" \
             "$REPO_DIR/build/windows-release/animaple-v$TARGET_VERSION-setup.exe" \
+            "$REPO_DIR/build/windows-release/animaple-v$TARGET_VERSION-windows.zip" \
+            "$REPO_DIR/build/windows-release/SHA256SUMS.txt" \
             --clobber
     else
         echo "Creando nueva release en GitHub v$TARGET_VERSION..."
@@ -273,6 +283,8 @@ else:
             "$REPO_DIR/build/linux-release/animaple-v$TARGET_VERSION-linux-x86_64.tar.gz" \
             "$REPO_DIR/build/linux-release/animaple-bin-$TARGET_VERSION-1-x86_64.pkg.tar.zst" \
             "$REPO_DIR/build/windows-release/animaple-v$TARGET_VERSION-setup.exe" \
+            "$REPO_DIR/build/windows-release/animaple-v$TARGET_VERSION-windows.zip" \
+            "$REPO_DIR/build/windows-release/SHA256SUMS.txt" \
             --title "v$TARGET_VERSION" \
             --notes-file "$NOTES_FILE"
     fi

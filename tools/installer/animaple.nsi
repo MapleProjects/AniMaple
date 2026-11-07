@@ -25,7 +25,9 @@ OutFile "${INSTALLER_DIR}\animaple-v${VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\AniMaple"
 InstallDirRegKey HKCU "Software\AniMaple" "InstallPath"
 
-RequestExecutionLevel admin
+; Instalación por usuario: sin UAC, requisito para que el actualizador
+; reemplace archivos en %LOCALAPPDATA% sin elevación.
+RequestExecutionLevel user
 SetCompressor /SOLID lzma
 
 Icon "${INSTALLER_DIR}\app_icon.ico"

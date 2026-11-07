@@ -1,5 +1,15 @@
 # AniMaple — Registro de cambios
 
+## v2.1.1
+
+### Novedades y mejoras
+• Actualizador independiente en Windows con ventana flotante y barra de progreso durante el reemplazo de archivos.
+• La actualización ya no requiere permisos de administrador ni cierra la aplicación sin aviso.
+• El actualizador espera el cierre de la aplicación, reemplaza los archivos y la vuelve a abrir por su cuenta.
+• Verificación de integridad del paquete antes de instalar.
+• Consumo de memoria acotado durante la reproducción en Windows, con límites explícitos de caché.
+• Registro de diagnóstico del consumo de memoria en el archivo de registro del reproductor.
+
 ## v2.1.0
 
 ### Novedades y mejoras

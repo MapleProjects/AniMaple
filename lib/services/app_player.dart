@@ -88,14 +88,23 @@ class MediaKitAppPlayer implements AppPlayer {
   final List<StreamSubscription> _subscriptions = [];
   bool _disposed = false;
   DateTime? _lastSeekTime;
+  Timer? _memoryTimer;
 
   static File? _logFile;
   static void _log(String msg) {
     try {
-      final home = Platform.environment['HOME'] ?? '';
-      _logFile ??= File(
-        '$home/.local/share/com.mapleprojects.animaple/player.log',
-      );
+      if (_logFile == null) {
+        final String dir;
+        if (Platform.isWindows) {
+          final base =
+              Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+          dir = '$base${Platform.pathSeparator}AniMaple';
+        } else {
+          final home = Platform.environment['HOME'] ?? '';
+          dir = '$home/.local/share/com.mapleprojects.animaple';
+        }
+        _logFile = File('$dir${Platform.pathSeparator}player.log');
+      }
       _logFile!.parent.createSync(recursive: true);
       _logFile!.writeAsStringSync(
         '[${DateTime.now().toIso8601String()}] $msg\n',
@@ -121,6 +130,13 @@ class MediaKitAppPlayer implements AppPlayer {
         hwdec: 'auto-safe',
       ),
     );
+
+    // Diagnóstico de consumo: una línea por minuto en player.log.
+    _memoryTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (_disposed) return;
+      final rss = ProcessInfo.currentRss ~/ (1024 * 1024);
+      _log('[MEMORY] rss=${rss}MB');
+    });
 
     _subscriptions.add(
       _player.stream.log.listen((event) {
@@ -306,7 +322,6 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('cache', 'yes');
         await (platform as dynamic).setProperty('cache-pause', 'no');
         await (platform as dynamic).setProperty('cache-pause-initial', 'no');
-        await (platform as dynamic).setProperty('cache-secs', '120');
         await (platform as dynamic).setProperty(
           'demuxer-seekable-cache',
           'auto',
@@ -314,19 +329,40 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('keep-open', 'yes');
         await (platform as dynamic).setProperty('hr-seek', 'default');
         await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
-        await (platform as dynamic).setProperty(
-          'demuxer-readahead-secs',
-          '120',
-        );
-        await (platform as dynamic).setProperty(
-          'demuxer-max-bytes',
-          '67108864',
-        ); // 64 MB RAM
-        await (platform as dynamic).setProperty(
-          'demuxer-max-back-bytes',
-          '33554432',
-        ); // 32 MB RAM
         await (platform as dynamic).setProperty('network-timeout', '30');
+
+        // En Windows el caché de mpv se disparaba con streams de alto bitrate.
+        // Se acota por tiempo y por bytes para que el consumo no crezca sin
+        // límite durante episodios largos.
+        if (Platform.isWindows) {
+          await (platform as dynamic).setProperty('cache-secs', '30');
+          await (platform as dynamic).setProperty(
+            'demuxer-readahead-secs',
+            '30',
+          );
+          await (platform as dynamic).setProperty(
+            'demuxer-max-bytes',
+            '33554432',
+          ); // 32 MB
+          await (platform as dynamic).setProperty(
+            'demuxer-max-back-bytes',
+            '16777216',
+          ); // 16 MB
+        } else {
+          await (platform as dynamic).setProperty('cache-secs', '120');
+          await (platform as dynamic).setProperty(
+            'demuxer-readahead-secs',
+            '120',
+          );
+          await (platform as dynamic).setProperty(
+            'demuxer-max-bytes',
+            '67108864',
+          ); // 64 MB
+          await (platform as dynamic).setProperty(
+            'demuxer-max-back-bytes',
+            '33554432',
+          ); // 32 MB
+        }
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');
@@ -411,6 +447,8 @@ class MediaKitAppPlayer implements AppPlayer {
   @override
   void dispose() {
     _disposed = true;
+    _memoryTimer?.cancel();
+    _memoryTimer = null;
     _isPlaying.value = false;
     _isLoading.value = false;
     _positionMs.value = 0;

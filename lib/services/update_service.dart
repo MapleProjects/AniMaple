@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:window_manager/window_manager.dart';
 import '../widgets/tv_focusable.dart';
 import 'app_player.dart';
+import 'desktop_update_installer.dart';
 import '../ui/tokens.dart';
 
 /// Información de una actualización disponible.
@@ -19,13 +20,15 @@ class UpdateInfo {
     required this.releaseUrl,
     this.fileName,
     this.notes,
+    this.checksumsUrl,
   });
 
   final String latestVersion; // ej. "1.2.9"
-  final String downloadUrl; // URL del APK o instalador .exe
+  final String downloadUrl; // URL del APK, ZIP o instalador .exe
   final String releaseUrl;
   final String? fileName;
   final String? notes;
+  final String? checksumsUrl;
 
   /// Alias de compatibilidad.
   String get apkUrl => downloadUrl;
@@ -109,13 +112,23 @@ class UpdateService {
       String? downloadFileName;
 
       if (Platform.isWindows) {
+        // Preferir el ZIP portable: el actualizador reemplaza archivos sin UAC.
         for (final a in assets) {
           final name = (a as Map)['name'] as String? ?? '';
-          if (name.toLowerCase().endsWith('.exe')) {
+          final lower = name.toLowerCase();
+          if (lower.endsWith('.zip') && lower.contains('windows')) {
             downloadUrl = a['browser_download_url'] as String?;
             downloadFileName = name;
-            if (name.toLowerCase().contains('setup') ||
-                name.toLowerCase().contains('animaple')) {
+            break;
+          }
+        }
+        // Respaldo: instalador, para versiones antiguas sin ZIP publicado.
+        if (downloadUrl == null) {
+          for (final a in assets) {
+            final name = (a as Map)['name'] as String? ?? '';
+            if (name.toLowerCase().endsWith('.exe')) {
+              downloadUrl = a['browser_download_url'] as String?;
+              downloadFileName = name;
               break;
             }
           }
@@ -165,6 +178,15 @@ class UpdateService {
         return false;
       }
 
+      String? checksumsUrl;
+      for (final a in assets) {
+        final name = (a as Map)['name'] as String? ?? '';
+        if (name.toLowerCase() == 'sha256sums.txt') {
+          checksumsUrl = a['browser_download_url'] as String?;
+          break;
+        }
+      }
+
       if (_isNewer(latest, currentVersion)) {
         _pending = UpdateInfo(
           latestVersion: latest,
@@ -174,6 +196,7 @@ class UpdateService {
               'https://github.com/$_repoOwner/$_repoName/releases',
           fileName: downloadFileName,
           notes: _extractNotes(data['body'] as String?, latest),
+          checksumsUrl: checksumsUrl,
         );
         hasUpdate.value = true;
         debugPrint(
@@ -779,6 +802,30 @@ class UpdateService {
     );
 
     try {
+      // Windows con ZIP: actualizador independiente con barra de progreso.
+      final isWindowsZip = Platform.isWindows &&
+          (info.fileName?.toLowerCase().endsWith('.zip') ?? false);
+      if (isWindowsZip) {
+        final stage = await DesktopUpdateInstaller.downloadAndStage(
+          url: info.downloadUrl,
+          fileName: info.fileName!,
+          version: info.latestVersion,
+          checksumsUrl: info.checksumsUrl,
+          onProgress: (v) => progress.value = v.clamp(0.0, 1.0),
+        );
+        progress.value = 1.0;
+        done.value = true;
+
+        await DesktopUpdateInstaller.launchUpdater(
+          stage: stage,
+          target: DesktopUpdateInstaller.installDirectory(),
+          executable: Platform.resolvedExecutable,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        exit(0);
+      }
+
       final path = await downloadFile(
         url: info.downloadUrl,
         fileName: info.fileName,

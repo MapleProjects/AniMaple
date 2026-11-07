@@ -80,6 +80,18 @@ if (-not (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\an
 }
 '
 
+# 4b. Compilar el actualizador independiente (WinForms, .NET Framework)
+echo "Compilando actualizador independiente..."
+ssh $SSH_OPTS "$VM_USER@$VM_IP" '
+$ErrorActionPreference = "Stop"
+$csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+& $csc /nologo /target:winexe /optimize+ /out:"C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\animaple_updater.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll "C:\Users\Maple\AniMaple\updater\AniMapleUpdater.cs"
+if ($LASTEXITCODE -ne 0) { Write-Error "csc fallo con codigo $LASTEXITCODE"; exit $LASTEXITCODE }
+if (-not (Test-Path "C:\Users\Maple\AniMaple\build\windows\x64\runner\Release\animaple_updater.exe")) {
+    Write-Error "ERROR: animaple_updater.exe no fue generado"; exit 1
+}
+'
+
 # 5. Generar instalador con NSIS y paquete ZIP portátil
 echo "Generando instalador NSIS y comprimido portátil..."
 ssh $SSH_OPTS "$VM_USER@$VM_IP" '
