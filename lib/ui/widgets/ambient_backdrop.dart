@@ -107,6 +107,22 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
   Widget build(BuildContext context) {
     final a = widget.opacity.clamp(0.0, 1.0);
 
+    // En Windows las manchas de degradado a pantalla completa cuestan cientos
+    // de MB en el rasterizador. Se usa solo el degradado base.
+    if (Platform.isWindows) {
+      return const IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF0D0D24), AppColors.bgDeep],
+            ),
+          ),
+        ),
+      );
+    }
+
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {

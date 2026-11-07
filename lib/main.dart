@@ -229,6 +229,10 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
+  /// Pestañas creadas hasta ahora. `IndexedStack` construye todos sus hijos,
+  /// así que sin esto las cinco páginas cargan datos e imágenes al arrancar.
+  final Set<int> _visitedTabs = <int>{0};
+
   // Keys to access page state for refresh
   final _historyKey = GlobalKey<HistoryPageState>();
   final _followingKey = GlobalKey<FollowingPageState>();
@@ -254,7 +258,10 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _onTabChanged(int index) {
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _visitedTabs.add(index);
+    });
     // Refresh pages that need fresh data when tab becomes active
     if (index == 3) _historyKey.currentState?.refresh();
     if (index == 4) _followingKey.currentState?.refresh();
@@ -389,20 +396,19 @@ class _MainShellState extends State<MainShell> {
   }
 
   /// Páginas del shell. `TickerMode` detiene las animaciones de las pestañas
-  /// ocultas: sin esto, los fondos animados siguen produciendo frames.
+  /// ocultas y las pestañas no visitadas ni siquiera se construyen.
   List<Widget> _pages() => [
-    TickerMode(enabled: _currentIndex == 0, child: const HomePage()),
-    TickerMode(enabled: _currentIndex == 1, child: const SearchPage()),
-    TickerMode(enabled: _currentIndex == 2, child: const CalendarPage()),
-    TickerMode(
-      enabled: _currentIndex == 3,
-      child: HistoryPage(key: _historyKey),
-    ),
-    TickerMode(
-      enabled: _currentIndex == 4,
-      child: FollowingPage(key: _followingKey),
-    ),
+    _tabPage(0, const HomePage()),
+    _tabPage(1, const SearchPage()),
+    _tabPage(2, const CalendarPage()),
+    _tabPage(3, HistoryPage(key: _historyKey)),
+    _tabPage(4, FollowingPage(key: _followingKey)),
   ];
+
+  Widget _tabPage(int index, Widget child) {
+    if (!_visitedTabs.contains(index)) return const SizedBox.shrink();
+    return TickerMode(enabled: _currentIndex == index, child: child);
+  }
 
   Widget _buildRailItem(
     int index,
