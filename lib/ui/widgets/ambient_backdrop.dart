@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,11 @@ class AmbientBackdrop extends StatefulWidget {
 
 class _AmbientBackdropState extends State<AmbientBackdrop>
     with SingleTickerProviderStateMixin {
+  /// En Windows el renderizador rasteriza las capas grandes en cada fotograma
+  /// y el consumo de memoria se dispara. El fondo queda estático ahí; el
+  /// degradado se conserva.
+  static final bool _animated = !Platform.isWindows;
+
   CoverPalette _palette = CoverPalette.fallback;
   late final AnimationController _drift;
 
@@ -50,6 +56,7 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_animated) return;
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (reduceMotion) {
       _drift.stop();
@@ -105,7 +112,7 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
-          final blob = w * 1.15;
+          final blob = w * (_animated ? 1.15 : 0.95);
 
           // Matiz de la portada, siempre dentro de la gama índigo.
           final tint = Color.lerp(
@@ -130,12 +137,28 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
                 AnimatedBuilder(
                   animation: _drift,
                   builder: (context, child) {
-                    final t = _drift.value * 2 * math.pi;
+                    final t = _animated ? _drift.value * 2 * math.pi : 0.9;
+                    final leftA =
+                        (-blob * 0.30 + math.sin(t) * w * 0.10).roundToDouble();
+                    final topA =
+                        (-blob * 0.35 + math.cos(t * 0.9) * h * 0.05)
+                            .roundToDouble();
+                    final rightB =
+                        (-blob * 0.25 - math.sin(t * 0.8) * w * 0.08)
+                            .roundToDouble();
+                    final topB =
+                        (h * 0.30 + math.cos(t) * h * 0.07).roundToDouble();
+                    final leftC =
+                        (w * 0.05 + math.cos(t * 0.6) * w * 0.06)
+                            .roundToDouble();
+                    final bottomC =
+                        (-blob * 0.45 - math.sin(t * 0.7) * h * 0.04)
+                            .roundToDouble();
                     return Stack(
                       children: [
                         Positioned(
-                          left: -blob * 0.30 + math.sin(t) * w * 0.10,
-                          top: -blob * 0.35 + math.cos(t * 0.9) * h * 0.05,
+                          left: leftA,
+                          top: topA,
                           child: _Blob(
                             size: blob,
                             color: AppColors.primary,
@@ -143,8 +166,8 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
                           ),
                         ),
                         Positioned(
-                          right: -blob * 0.25 - math.sin(t * 0.8) * w * 0.08,
-                          top: h * 0.30 + math.cos(t) * h * 0.07,
+                          right: rightB,
+                          top: topB,
                           child: _Blob(
                             size: blob * 1.1,
                             color: tint,
@@ -152,8 +175,8 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
                           ),
                         ),
                         Positioned(
-                          left: w * 0.05 + math.cos(t * 0.6) * w * 0.06,
-                          bottom: -blob * 0.45 - math.sin(t * 0.7) * h * 0.04,
+                          left: leftC,
+                          bottom: bottomC,
                           child: _Blob(
                             size: blob * 0.95,
                             color: AppColors.accent,
