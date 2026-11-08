@@ -1,5 +1,12 @@
 # AniMaple — Registro de cambios
 
+## v2.1.2
+
+### Novedades y mejoras
+• Fondo ambiental con textura de papel: conserva la paleta índigo y deja de animarse.
+• El fondo ya no genera trabajo de renderizado mientras la aplicación está en reposo.
+• Ajustes menores de consumo en las pantallas de inicio y navegación.
+
 ## v2.1.1
 
 ### Novedades y mejoras
