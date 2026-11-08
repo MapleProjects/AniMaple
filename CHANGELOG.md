@@ -7,7 +7,11 @@
 • La actualización ya no requiere permisos de administrador ni cierra la aplicación sin aviso.
 • El actualizador espera el cierre de la aplicación, reemplaza los archivos y la vuelve a abrir por su cuenta.
 • Verificación de integridad del paquete antes de instalar.
-• Consumo de memoria acotado durante la reproducción en Windows, con límites explícitos de caché.
+• Fondo ambiental rediseñado para conservar la apariencia con una fracción del consumo de memoria.
+• Menor uso de CPU en reposo: el fondo se actualiza a un ritmo reducido y se detiene cuando la ventana pierde el foco.
+• Las pestañas se cargan la primera vez que se abren, en lugar de construirse todas al iniciar.
+• Caché de imágenes y de reproducción con límites explícitos en todas las plataformas.
+• Sincronización con la nube cada 30 segundos, con menor tráfico y menos trabajo en segundo plano.
 • Registro de diagnóstico del consumo de memoria en el archivo de registro del reproductor.
 
 ## v2.1.0
