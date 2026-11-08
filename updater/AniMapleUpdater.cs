@@ -238,7 +238,9 @@ namespace AniMapleUpdater
             {
                 Process process = Process.GetProcessById(_options.Pid);
                 _statusText = "Cerrando la aplicación...";
-                if (!process.WaitForExit(60000))
+                // La aplicación debe cerrarse sola en menos de un segundo. Si
+                // no lo hace, se fuerza el cierre sin hacer esperar al usuario.
+                if (!process.WaitForExit(8000))
                 {
                     Log("El proceso no cerró, terminándolo");
                     process.Kill();

@@ -236,7 +236,7 @@ class _AmbientBackdropState extends State<AmbientBackdrop> {
                 ),
                 if (_grain != null)
                   CustomPaint(
-                    painter: _GrainPainter(_grain!, 0.55),
+                    painter: _GrainPainter(_grain!, 0.35),
                     size: Size(w, h),
                   ),
               ],
@@ -266,15 +266,17 @@ abstract final class _GrainTile {
 
     for (var y = 0; y < size; y++) {
       // Fibras horizontales tenues cada 23 px, como el grano del papel.
-      final fiber = (y % 23 == 0) ? 16 : 0;
+      final fiber = (y % 23 == 0) ? 10 : 0;
       for (var x = 0; x < size; x++) {
-        final base = 110 + rng.nextInt(70);
+        // Ruido centrado en gris medio: con BlendMode.overlay no aclara ni
+        // oscurece el fondo, solo aporta textura.
+        final base = 112 + rng.nextInt(32);
         final value = (base + fiber).clamp(0, 255);
         final offset = (y * size + x) * 4;
         pixels[offset] = value;
         pixels[offset + 1] = value;
         pixels[offset + 2] = value;
-        pixels[offset + 3] = 20;
+        pixels[offset + 3] = 26;
       }
     }
 
@@ -310,6 +312,7 @@ class _GrainPainter extends CustomPainter {
       0, 0, 0, 1, //
     ]);
     final paint = Paint()
+      ..blendMode = BlendMode.overlay
       ..shader = ui.ImageShader(
         grain,
         TileMode.repeated,

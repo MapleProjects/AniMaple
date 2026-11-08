@@ -91,9 +91,11 @@ class DesktopUpdateInstaller {
     final logPath = '$logDir${Platform.pathSeparator}AniMaple'
         '${Platform.pathSeparator}update.log';
 
-    // cmd /c start crea un proceso independiente. ProcessStartMode.detached
-    // muere con el padre en Windows.
-    await Process.run('cmd.exe', [
+    // `start` crea un proceso independiente del árbol de la app. Se usa
+    // Process.start y no Process.run: run espera a que cmd cierre sus
+    // tuberías, y como el actualizador las hereda, la espera no termina
+    // nunca y la app no llega a cerrarse.
+    await Process.start('cmd.exe', [
       '/c',
       'start',
       '',

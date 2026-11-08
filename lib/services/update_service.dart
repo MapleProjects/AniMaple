@@ -822,7 +822,8 @@ class UpdateService {
           executable: Platform.resolvedExecutable,
         );
 
-        await Future<void>.delayed(const Duration(milliseconds: 400));
+        // Margen para que cmd lance el actualizador antes de terminar.
+        await Future<void>.delayed(const Duration(milliseconds: 900));
         exit(0);
       }
 
