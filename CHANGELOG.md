@@ -1,5 +1,12 @@
 # AniMaple — Registro de cambios
 
+## v2.1.4
+
+### Novedades y mejoras
+• Fondo con textura de papel más sutil, manteniendo la paleta violeta y azul original.
+• La actualización automática cierra la aplicación de inmediato y continúa sin demoras.
+• Corregido un caso en el que la ventana de actualización podía quedarse esperando el cierre.
+
 ## v2.1.2
 
 ### Novedades y mejoras
