@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -7,13 +8,11 @@ import 'package:flutter/material.dart';
 import '../tokens.dart';
 import 'cover_palette.dart';
 
-/// Fondo ambiental índigo con movimiento lento tipo aurora.
+/// Fondo ambiental índigo, estático, con textura de papel.
 ///
-/// El degradado completo se rasteriza una sola vez a baja resolución y se
-/// dibuja como textura. Una textura de 480x270 ocupa 0,5 MB, frente a los
-/// cientos de MB que costaba pintar las manchas a tamaño completo. El
-/// movimiento se aplica con una transformación de compositor, así que la
-/// apariencia se mantiene sin repintar.
+/// La aurora se rasteriza una sola vez a baja resolución y se dibuja como
+/// textura. Encima se aplica un grano fino repetido, generado por código, que
+/// quita la planitud del degradado sin costo de memoria apreciable.
 class AmbientBackdrop extends StatefulWidget {
   const AmbientBackdrop({
     super.key,
@@ -35,64 +34,21 @@ class AmbientBackdrop extends StatefulWidget {
   State<AmbientBackdrop> createState() => _AmbientBackdropState();
 }
 
-class _AmbientBackdropState extends State<AmbientBackdrop>
-    with WidgetsBindingObserver {
+class _AmbientBackdropState extends State<AmbientBackdrop> {
   static const int _textureWidth = 480;
   static const int _textureHeight = 270;
-
-  /// El desplazamiento es muy lento: dos actualizaciones por segundo bastan y
-  /// evitan pedir frames a 60 fps para un movimiento casi imperceptible.
-  static const Duration _driftStep = Duration(milliseconds: 500);
+  static const int _grainSize = 256;
 
   CoverPalette _palette = CoverPalette.fallback;
-  final ValueNotifier<double> _phase = ValueNotifier<double>(0);
-  Timer? _driftTimer;
-  bool _reduceMotion = false;
   ui.Image? _texture;
+  ui.Image? _grain;
   bool _rendering = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _startDrift();
     _resolve();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Sin foco no se anima: cero frames mientras la ventana está en segundo
-    // plano.
-    if (state == AppLifecycleState.resumed) {
-      _startDrift();
-    } else {
-      _stopDrift();
-    }
-  }
-
-  void _startDrift() {
-    if (_driftTimer != null) return;
-    _driftTimer = Timer.periodic(_driftStep, (_) {
-      if (_reduceMotion) return;
-      // Ciclo completo en 24 s.
-      _phase.value = (_phase.value + _driftStep.inMilliseconds / 24000) % 1.0;
-    });
-  }
-
-  void _stopDrift() {
-    _driftTimer?.cancel();
-    _driftTimer = null;
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    if (_reduceMotion) {
-      _stopDrift();
-    } else {
-      _startDrift();
-    }
+    _loadGrain();
   }
 
   @override
@@ -103,11 +59,14 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _stopDrift();
-    _phase.dispose();
     _texture?.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadGrain() async {
+    final grain = await _GrainTile.of();
+    if (!mounted) return;
+    setState(() => _grain = grain);
   }
 
   Future<void> _resolve() async {
@@ -265,30 +224,103 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
           }
 
           return ClipRect(
-            child: ValueListenableBuilder<double>(
-              valueListenable: _phase,
-              builder: (context, phase, child) {
-                final t = phase * 2 * math.pi;
-                // Traslación de compositor: no vuelve a rasterizar la textura.
-                return Transform.translate(
-                  offset: Offset(
-                    math.sin(t) * w * 0.012,
-                    math.cos(t * 0.9) * h * 0.012,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                RawImage(
+                  image: image,
+                  fit: BoxFit.cover,
+                  width: w,
+                  height: h,
+                  filterQuality: FilterQuality.medium,
+                ),
+                if (_grain != null)
+                  CustomPaint(
+                    painter: _GrainPainter(_grain!, 0.55),
+                    size: Size(w, h),
                   ),
-                  child: child,
-                );
-              },
-              child: RawImage(
-                image: image,
-                fit: BoxFit.cover,
-                width: w,
-                height: h,
-                filterQuality: FilterQuality.medium,
-              ),
+              ],
             ),
           );
         },
       ),
     );
   }
+}
+
+/// Grano de papel generado una sola vez y compartido por todas las instancias.
+abstract final class _GrainTile {
+  static ui.Image? _image;
+  static Future<ui.Image>? _pending;
+
+  static Future<ui.Image> of() {
+    final ready = _image;
+    if (ready != null) return Future.value(ready);
+    return _pending ??= _generate();
+  }
+
+  static Future<ui.Image> _generate() async {
+    const size = _AmbientBackdropState._grainSize;
+    final pixels = Uint8List(size * size * 4);
+    final rng = math.Random(17);
+
+    for (var y = 0; y < size; y++) {
+      // Fibras horizontales tenues cada 23 px, como el grano del papel.
+      final fiber = (y % 23 == 0) ? 16 : 0;
+      for (var x = 0; x < size; x++) {
+        final base = 110 + rng.nextInt(70);
+        final value = (base + fiber).clamp(0, 255);
+        final offset = (y * size + x) * 4;
+        pixels[offset] = value;
+        pixels[offset + 1] = value;
+        pixels[offset + 2] = value;
+        pixels[offset + 3] = 20;
+      }
+    }
+
+    final buffer = await ui.ImmutableBuffer.fromUint8List(pixels);
+    final descriptor = ui.ImageDescriptor.raw(
+      buffer,
+      width: size,
+      height: size,
+      pixelFormat: ui.PixelFormat.rgba8888,
+    );
+    final codec = await descriptor.instantiateCodec();
+    final frame = await codec.getNextFrame();
+    descriptor.dispose();
+    buffer.dispose();
+    _image = frame.image;
+    return frame.image;
+  }
+}
+
+/// Pinta el grano repetido sobre toda la superficie con un shader de imagen.
+class _GrainPainter extends CustomPainter {
+  _GrainPainter(this.grain, this.strength);
+
+  final ui.Image grain;
+  final double strength;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final matrix = Float64List.fromList(<double>[
+      1, 0, 0, 0, //
+      0, 1, 0, 0, //
+      0, 0, 1, 0, //
+      0, 0, 0, 1, //
+    ]);
+    final paint = Paint()
+      ..shader = ui.ImageShader(
+        grain,
+        TileMode.repeated,
+        TileMode.repeated,
+        matrix,
+      )
+      ..color = Color.fromRGBO(255, 255, 255, strength);
+    canvas.drawRect(Offset.zero & size, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GrainPainter oldDelegate) =>
+      oldDelegate.grain != grain || oldDelegate.strength != strength;
 }
