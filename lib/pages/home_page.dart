@@ -548,7 +548,7 @@ class _HeroSlide extends StatelessWidget {
     final width = MediaQuery.sizeOf(context).width;
     final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context))
         .round()
-        .clamp(360, 1280);
+        .clamp(360, 960);
 
     return Stack(
       fit: StackFit.expand,

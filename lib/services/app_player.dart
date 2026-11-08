@@ -116,6 +116,9 @@ class MediaKitAppPlayer implements AppPlayer {
 
   MediaKitAppPlayer._() {
     _log('Initializing MediaKitAppPlayer');
+    // Carga diferida: libmpv se abre la primera vez que se necesita, no en el
+    // arranque de la aplicación.
+    mk.MediaKit.ensureInitialized();
     _player = mk.Player(
       configuration: const mk.PlayerConfiguration(
         title: 'AniMaple',
@@ -331,38 +334,18 @@ class MediaKitAppPlayer implements AppPlayer {
         await (platform as dynamic).setProperty('hr-seek-framedrop', 'yes');
         await (platform as dynamic).setProperty('network-timeout', '30');
 
-        // En Windows el caché de mpv se disparaba con streams de alto bitrate.
-        // Se acota por tiempo y por bytes para que el consumo no crezca sin
-        // límite durante episodios largos.
-        if (Platform.isWindows) {
-          await (platform as dynamic).setProperty('cache-secs', '30');
-          await (platform as dynamic).setProperty(
-            'demuxer-readahead-secs',
-            '30',
-          );
-          await (platform as dynamic).setProperty(
-            'demuxer-max-bytes',
-            '33554432',
-          ); // 32 MB
-          await (platform as dynamic).setProperty(
-            'demuxer-max-back-bytes',
-            '16777216',
-          ); // 16 MB
-        } else {
-          await (platform as dynamic).setProperty('cache-secs', '120');
-          await (platform as dynamic).setProperty(
-            'demuxer-readahead-secs',
-            '120',
-          );
-          await (platform as dynamic).setProperty(
-            'demuxer-max-bytes',
-            '67108864',
-          ); // 64 MB
-          await (platform as dynamic).setProperty(
-            'demuxer-max-back-bytes',
-            '33554432',
-          ); // 32 MB
-        }
+        // Caché acotado en todas las plataformas: 30 s de lectura y 32 MB en
+        // RAM. Evita que un stream de alto bitrate retenga cientos de MB.
+        await (platform as dynamic).setProperty('cache-secs', '30');
+        await (platform as dynamic).setProperty('demuxer-readahead-secs', '30');
+        await (platform as dynamic).setProperty(
+          'demuxer-max-bytes',
+          '33554432',
+        );
+        await (platform as dynamic).setProperty(
+          'demuxer-max-back-bytes',
+          '16777216',
+        );
       }
     } catch (e) {
       debugPrint('Error applying mpv properties: $e');

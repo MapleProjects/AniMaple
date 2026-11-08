@@ -358,10 +358,10 @@ class SyncService {
   }
 
   /// Arranca el polling de cambios remotos (≈ tiempo real, sin resync manual).
-  /// Un GET ligero de `version` cada 10s; descarga solo si el remoto cambió.
+  /// Un GET ligero de `version` cada 30s; descarga solo si el remoto cambió.
   static void startAutoSync() {
     if (_autoSyncTimer != null) return; // ya activo
-    _autoSyncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _pollRemote();
     });
     // Verificación inmediata al arrancar.

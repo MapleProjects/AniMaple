@@ -60,7 +60,7 @@ class PosterCard extends StatelessWidget {
         final cellWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : 180.0;
-        final decodeWidth = (cellWidth * dpr).round().clamp(96, 720);
+        final decodeWidth = (cellWidth * dpr).round().clamp(80, 360);
 
         return TvFocusable(
           onTap: onTap,

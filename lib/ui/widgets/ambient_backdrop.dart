@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -8,10 +9,11 @@ import 'cover_palette.dart';
 
 /// Fondo ambiental índigo con movimiento lento tipo aurora.
 ///
-/// Las manchas son degradados radiales que se desvanecen a transparente en su
-/// borde, así que al desplazarse nunca exponen un corte. Cada mancha se
-/// rasteriza una vez en un `RepaintBoundary` y solo se reposiciona: el
-/// movimiento lo resuelve el compositor, sin repintar la pantalla.
+/// El degradado completo se rasteriza una sola vez a baja resolución y se
+/// dibuja como textura. Una textura de 480x270 ocupa 0,5 MB, frente a los
+/// cientos de MB que costaba pintar las manchas a tamaño completo. El
+/// movimiento se aplica con una transformación de compositor, así que la
+/// apariencia se mantiene sin repintar.
 class AmbientBackdrop extends StatefulWidget {
   const AmbientBackdrop({
     super.key,
@@ -34,34 +36,62 @@ class AmbientBackdrop extends StatefulWidget {
 }
 
 class _AmbientBackdropState extends State<AmbientBackdrop>
-    with SingleTickerProviderStateMixin {
-  /// En Windows el renderizador rasteriza las capas grandes en cada fotograma
-  /// y el consumo de memoria se dispara. El fondo queda estático ahí; el
-  /// degradado se conserva.
-  static final bool _animated = !Platform.isWindows;
+    with WidgetsBindingObserver {
+  static const int _textureWidth = 480;
+  static const int _textureHeight = 270;
+
+  /// El desplazamiento es muy lento: dos actualizaciones por segundo bastan y
+  /// evitan pedir frames a 60 fps para un movimiento casi imperceptible.
+  static const Duration _driftStep = Duration(milliseconds: 500);
 
   CoverPalette _palette = CoverPalette.fallback;
-  late final AnimationController _drift;
+  final ValueNotifier<double> _phase = ValueNotifier<double>(0);
+  Timer? _driftTimer;
+  bool _reduceMotion = false;
+  ui.Image? _texture;
+  bool _rendering = false;
 
   @override
   void initState() {
     super.initState();
-    _drift = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 24),
-    );
+    WidgetsBinding.instance.addObserver(this);
+    _startDrift();
     _resolve();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Sin foco no se anima: cero frames mientras la ventana está en segundo
+    // plano.
+    if (state == AppLifecycleState.resumed) {
+      _startDrift();
+    } else {
+      _stopDrift();
+    }
+  }
+
+  void _startDrift() {
+    if (_driftTimer != null) return;
+    _driftTimer = Timer.periodic(_driftStep, (_) {
+      if (_reduceMotion) return;
+      // Ciclo completo en 24 s.
+      _phase.value = (_phase.value + _driftStep.inMilliseconds / 24000) % 1.0;
+    });
+  }
+
+  void _stopDrift() {
+    _driftTimer?.cancel();
+    _driftTimer = null;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_animated) return;
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    if (reduceMotion) {
-      _drift.stop();
-    } else if (!_drift.isAnimating) {
-      _drift.repeat();
+    _reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (_reduceMotion) {
+      _stopDrift();
+    } else {
+      _startDrift();
     }
   }
 
@@ -73,7 +103,10 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
 
   @override
   void dispose() {
-    _drift.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _stopDrift();
+    _phase.dispose();
+    _texture?.dispose();
     super.dispose();
   }
 
@@ -81,12 +114,14 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
     final url = widget.imageUrl;
     if (url == null || url.isEmpty) {
       if (mounted) setState(() => _palette = CoverPalette.fallback);
+      await _rebuildTexture();
       return;
     }
 
     final cached = CoverPaletteStore.peek(url);
     if (cached != null) {
       setState(() => _palette = cached);
+      await _rebuildTexture();
       return;
     }
 
@@ -98,161 +133,161 @@ class _AmbientBackdropState extends State<AmbientBackdrop>
       final alt = await CoverPaletteStore.of(widget.fallbackUrl);
       if (!mounted) return;
       setState(() => _palette = alt);
+      await _rebuildTexture();
       return;
     }
     setState(() => _palette = palette);
+    await _rebuildTexture();
+  }
+
+  Future<void> _rebuildTexture() async {
+    if (_rendering) return;
+    _rendering = true;
+    try {
+      final image = await _renderAurora(
+        width: _textureWidth,
+        height: _textureHeight,
+        palette: _palette,
+        opacity: widget.opacity.clamp(0.0, 1.0),
+      );
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      final previous = _texture;
+      setState(() => _texture = image);
+      previous?.dispose();
+    } finally {
+      _rendering = false;
+    }
+  }
+
+  /// Dibuja la aurora completa en un lienzo pequeño. Al escalarla se ve igual
+  /// porque son degradados suaves, sin detalle que perder.
+  static Future<ui.Image> _renderAurora({
+    required int width,
+    required int height,
+    required CoverPalette palette,
+    required double opacity,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final w = width.toDouble();
+    final h = height.toDouble();
+    final rect = Rect.fromLTWH(0, 0, w, h);
+
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset.zero,
+          Offset(0, h),
+          const [Color(0xFF0D0D24), AppColors.bgDeep],
+        ),
+    );
+
+    final tint = Color.lerp(AppColors.primaryDeep, palette.accentA, 0.35)!;
+    final blob = w * 1.15;
+
+    void drawBlob(Offset center, double size, Color color, double alpha) {
+      if (alpha <= 0) return;
+      final paint = Paint()
+        ..shader = ui.Gradient.radial(center, size / 2, [
+          color.withValues(alpha: alpha),
+          color.withValues(alpha: alpha * 0.45),
+          color.withValues(alpha: 0.0),
+        ], const [0.0, 0.55, 1.0]);
+      canvas.drawCircle(center, size / 2, paint);
+    }
+
+    drawBlob(
+      Offset(-blob * 0.30 + w * 0.06, -blob * 0.35 + h * 0.03),
+      blob,
+      AppColors.primary,
+      0.42 * opacity,
+    );
+    drawBlob(
+      Offset(w - blob * 0.25 + w * 0.04, h * 0.30 - h * 0.05),
+      blob * 1.1,
+      tint,
+      0.40 * opacity,
+    );
+    drawBlob(
+      Offset(w * 0.05 - w * 0.03, h - blob * 0.45 + h * 0.03),
+      blob * 0.95,
+      AppColors.accent,
+      0.12 * opacity,
+    );
+
+    // Velo vertical de contraste para el contenido.
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset.zero,
+          Offset(0, h),
+          [
+            AppColors.bg.withValues(alpha: 0.05),
+            AppColors.bg.withValues(alpha: 0.30),
+            AppColors.bg.withValues(alpha: 0.80),
+          ],
+          const [0.0, 0.5, 1.0],
+        ),
+    );
+
+    final picture = recorder.endRecording();
+    try {
+      return await picture.toImage(width, height);
+    } finally {
+      picture.dispose();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final a = widget.opacity.clamp(0.0, 1.0);
-
-    // En Windows las manchas de degradado a pantalla completa cuestan cientos
-    // de MB en el rasterizador. Se usa solo el degradado base.
-    if (Platform.isWindows) {
-      return const IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF0D0D24), AppColors.bgDeep],
-            ),
-          ),
-        ),
-      );
-    }
-
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
-          final blob = w * (_animated ? 1.15 : 0.95);
+          final image = _texture;
 
-          // Matiz de la portada, siempre dentro de la gama índigo.
-          final tint = Color.lerp(
-            AppColors.primaryDeep,
-            _palette.accentA,
-            0.35,
-          )!;
+          if (image == null) {
+            return const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF0D0D24), AppColors.bgDeep],
+                ),
+              ),
+            );
+          }
 
           return ClipRect(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xFF0D0D24), AppColors.bgDeep],
-                    ),
+            child: ValueListenableBuilder<double>(
+              valueListenable: _phase,
+              builder: (context, phase, child) {
+                final t = phase * 2 * math.pi;
+                // Traslación de compositor: no vuelve a rasterizar la textura.
+                return Transform.translate(
+                  offset: Offset(
+                    math.sin(t) * w * 0.012,
+                    math.cos(t * 0.9) * h * 0.012,
                   ),
-                ),
-                AnimatedBuilder(
-                  animation: _drift,
-                  builder: (context, child) {
-                    final t = _animated ? _drift.value * 2 * math.pi : 0.9;
-                    final leftA =
-                        (-blob * 0.30 + math.sin(t) * w * 0.10).roundToDouble();
-                    final topA =
-                        (-blob * 0.35 + math.cos(t * 0.9) * h * 0.05)
-                            .roundToDouble();
-                    final rightB =
-                        (-blob * 0.25 - math.sin(t * 0.8) * w * 0.08)
-                            .roundToDouble();
-                    final topB =
-                        (h * 0.30 + math.cos(t) * h * 0.07).roundToDouble();
-                    final leftC =
-                        (w * 0.05 + math.cos(t * 0.6) * w * 0.06)
-                            .roundToDouble();
-                    final bottomC =
-                        (-blob * 0.45 - math.sin(t * 0.7) * h * 0.04)
-                            .roundToDouble();
-                    return Stack(
-                      children: [
-                        Positioned(
-                          left: leftA,
-                          top: topA,
-                          child: _Blob(
-                            size: blob,
-                            color: AppColors.primary,
-                            alpha: 0.42 * a,
-                          ),
-                        ),
-                        Positioned(
-                          right: rightB,
-                          top: topB,
-                          child: _Blob(
-                            size: blob * 1.1,
-                            color: tint,
-                            alpha: 0.40 * a,
-                          ),
-                        ),
-                        Positioned(
-                          left: leftC,
-                          bottom: bottomC,
-                          child: _Blob(
-                            size: blob * 0.95,
-                            color: AppColors.accent,
-                            alpha: 0.12 * a,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-                // Velo vertical de contraste para el contenido.
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        AppColors.bg.withValues(alpha: 0.05),
-                        AppColors.bg.withValues(alpha: 0.30),
-                        AppColors.bg.withValues(alpha: 0.80),
-                      ],
-                      stops: const [0.0, 0.5, 1.0],
-                    ),
-                  ),
-                ),
-              ],
+                  child: child,
+                );
+              },
+              child: RawImage(
+                image: image,
+                fit: BoxFit.cover,
+                width: w,
+                height: h,
+                filterQuality: FilterQuality.medium,
+              ),
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-/// Mancha circular que se desvanece a transparente en el borde.
-class _Blob extends StatelessWidget {
-  const _Blob({required this.size, required this.color, required this.alpha});
-
-  final double size;
-  final Color color;
-  final double alpha;
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              colors: [
-                color.withValues(alpha: alpha),
-                color.withValues(alpha: alpha * 0.45),
-                color.withValues(alpha: 0.0),
-              ],
-              stops: const [0.0, 0.55, 1.0],
-            ),
-          ),
-        ),
       ),
     );
   }

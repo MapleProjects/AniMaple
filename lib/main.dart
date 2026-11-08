@@ -22,7 +22,6 @@ import 'pages/following_page.dart';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:path_provider/path_provider.dart';
 import 'widgets/downloads_fab.dart';
-import 'package:media_kit/media_kit.dart';
 import 'widgets/error_dialog.dart';
 import 'ui/theme.dart';
 import 'ui/tokens.dart';
@@ -78,10 +77,23 @@ void main() async {
   _setupCrashLogger();
   _setupFileLogger();
   WidgetsFlutterBinding.ensureInitialized();
+  // Presupuesto explícito de imágenes en memoria. Sin límite, Flutter puede
+  // retener cientos de MB de portadas decodificadas.
+  PaintingBinding.instance.imageCache
+    ..maximumSize = 60
+    ..maximumSizeBytes = 32 << 20;
+
+  // Modo de medición: permite conocer el consumo base del motor Flutter sin
+  // la interfaz de la aplicación. No se usa en compilaciones normales.
+  if (const bool.fromEnvironment('MAPLE_MINIMAL')) {
+    runApp(const MaterialApp(home: Scaffold(backgroundColor: Colors.black)));
+    return;
+  }
   await TvService.init();
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     await windowManager.ensureInitialized();
-    MediaKit.ensureInitialized();
+    // MediaKit se inicializa la primera vez que se abre un reproductor, no al
+    // arrancar: cargar libmpv en el menú cuesta memoria sin usarse.
   }
   ApiService.init();
   unawaited(HlsProxy.instance.start());
